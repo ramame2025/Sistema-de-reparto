@@ -1,0 +1,22 @@
+node_modules/
+.pnpm-store/
+.turbo/
+
+# Next.js
+apps/dashboard/.next/
+
+# Expo
+apps/driver-app/.expo/
+apps/driver-app/dist/
+
+# NestJS
+apps/api/dist/
+apps/api/coverage/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log

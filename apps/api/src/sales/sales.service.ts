@@ -1,0 +1,233 @@
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  DEFAULT_PRICE_TABLE,
+  calculateSaleTotal,
+  type CancelSaleInput,
+  type CreateSaleInput,
+  type SaleAuditRecord,
+  type SaleRecord,
+  type UpdateSaleInput,
+} from '@distribuidor/shared';
+import {
+  CustomerType as PrismaCustomerType,
+  PaymentMethod as PrismaPaymentMethod,
+  ProductCode as PrismaProductCode,
+  SaleAuditAction as PrismaSaleAuditAction,
+  type SaleAudit,
+  type Sale,
+  type SaleItem,
+} from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+
+@Injectable()
+export class SalesService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async listSales(): Promise<SaleRecord[]> {
+    const sales = await this.prisma.sale.findMany({
+      include: { items: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return sales.map((sale) => this.toSaleRecord(sale));
+  }
+
+  async createSale(input: CreateSaleInput): Promise<SaleRecord> {
+    if (input.clientGeneratedId) {
+      const existing = await this.prisma.sale.findUnique({
+        where: { clientGeneratedId: input.clientGeneratedId },
+        include: { items: true },
+      });
+
+      if (existing) {
+        return this.toSaleRecord(existing);
+      }
+    }
+
+    const total = calculateSaleTotal(input.customerType, input.items, DEFAULT_PRICE_TABLE);
+
+    const sale = await this.prisma.sale.create({
+      data: {
+        clientGeneratedId: input.clientGeneratedId ?? null,
+        customerName: input.customerName.trim(),
+        customerType: input.customerType as PrismaCustomerType,
+        paymentMethod: input.paymentMethod as PrismaPaymentMethod,
+        note: input.note?.trim() || null,
+        total,
+        items: {
+          create: input.items.map((item) => ({
+            productCode: item.productCode as PrismaProductCode,
+            quantity: item.quantity,
+          })),
+        },
+        audits: {
+          create: {
+            action: PrismaSaleAuditAction.created,
+            reason: 'Venta creada',
+          },
+        },
+      },
+      include: { items: true },
+    });
+
+    return this.toSaleRecord(sale);
+  }
+
+  async updateSale(id: string, input: UpdateSaleInput): Promise<SaleRecord> {
+    const existing = await this.prisma.sale.findUnique({
+      where: { id },
+      include: { items: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Sale not found');
+    }
+
+    if (existing.status === 'canceled') {
+      throw new ConflictException('Canceled sales cannot be edited');
+    }
+
+    const total = calculateSaleTotal(input.customerType, input.items, DEFAULT_PRICE_TABLE);
+
+    const beforeSnapshot = {
+      customerName: existing.customerName,
+      customerType: existing.customerType,
+      paymentMethod: existing.paymentMethod,
+      total: existing.total,
+      note: existing.note,
+      items: existing.items.map((item) => ({
+        productCode: item.productCode,
+        quantity: item.quantity,
+      })),
+    };
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.saleItem.deleteMany({ where: { saleId: id } });
+
+      const sale = await tx.sale.update({
+        where: { id },
+        data: {
+          customerName: input.customerName.trim(),
+          customerType: input.customerType as PrismaCustomerType,
+          paymentMethod: input.paymentMethod as PrismaPaymentMethod,
+          note: input.note?.trim() || null,
+          total,
+          items: {
+            create: input.items.map((item) => ({
+              productCode: item.productCode as PrismaProductCode,
+              quantity: item.quantity,
+            })),
+          },
+        },
+        include: { items: true },
+      });
+
+      await tx.saleAudit.create({
+        data: {
+          saleId: id,
+          action: PrismaSaleAuditAction.edited,
+          reason: input.reason.trim(),
+          before: beforeSnapshot,
+          after: {
+            customerName: sale.customerName,
+            customerType: sale.customerType,
+            paymentMethod: sale.paymentMethod,
+            total: sale.total,
+            note: sale.note,
+            items: sale.items.map((item) => ({
+              productCode: item.productCode,
+              quantity: item.quantity,
+            })),
+          },
+        },
+      });
+
+      return sale;
+    });
+
+    return this.toSaleRecord(updated);
+  }
+
+  async cancelSale(id: string, input: CancelSaleInput): Promise<SaleRecord> {
+    const existing = await this.prisma.sale.findUnique({
+      where: { id },
+      include: { items: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Sale not found');
+    }
+
+    if (existing.status === 'canceled') {
+      throw new ConflictException('Sale is already canceled');
+    }
+
+    const sale = await this.prisma.sale.update({
+      where: { id },
+      data: {
+        status: 'canceled',
+        canceledAt: new Date(),
+        cancelReason: input.reason.trim(),
+        audits: {
+          create: {
+            action: PrismaSaleAuditAction.canceled,
+            reason: input.reason.trim(),
+            before: {
+              status: existing.status,
+            },
+            after: {
+              status: 'canceled',
+            },
+          },
+        },
+      },
+      include: { items: true },
+    });
+
+    return this.toSaleRecord(sale);
+  }
+
+  async listSaleAudits(saleId: string): Promise<SaleAuditRecord[]> {
+    const sale = await this.prisma.sale.findUnique({ where: { id: saleId } });
+
+    if (!sale) {
+      throw new NotFoundException('Sale not found');
+    }
+
+    const audits = await this.prisma.saleAudit.findMany({
+      where: { saleId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return audits.map((audit) => this.toAuditRecord(audit));
+  }
+
+  private toSaleRecord(sale: Sale & { items: SaleItem[] }): SaleRecord {
+    return {
+      id: sale.id,
+      createdAt: sale.createdAt.toISOString(),
+      status: sale.status,
+      canceledAt: sale.canceledAt?.toISOString(),
+      cancelReason: sale.cancelReason ?? undefined,
+      total: sale.total,
+      customerName: sale.customerName,
+      customerType: sale.customerType,
+      paymentMethod: sale.paymentMethod,
+      note: sale.note ?? undefined,
+      items: sale.items.map((item) => ({
+        productCode: item.productCode,
+        quantity: item.quantity,
+      })),
+    };
+  }
+
+  private toAuditRecord(audit: SaleAudit): SaleAuditRecord {
+    return {
+      id: audit.id,
+      saleId: audit.saleId,
+      action: audit.action,
+      reason: audit.reason,
+      createdAt: audit.createdAt.toISOString(),
+    };
+  }
+}

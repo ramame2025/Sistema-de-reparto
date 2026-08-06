@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CustomerType {
+  final
+  comercio
+  distribuidor
+}
+
+enum PaymentMethod {
+  efectivo
+  transferencia
+  qr
+  tarjeta
+}
+
+enum SaleStatus {
+  active
+  canceled
+}
+
+enum SaleAuditAction {
+  created
+  edited
+  canceled
+}
+
+enum ProductCode {
+  G10
+  G15
+  G45
+  G15_AUTO
+}
+
+enum ExpenseCategory {
+  combustible
+  peaje
+  comida
+  mantenimiento
+  varios
+}
+
+model Sale {
+  id            String       @id @default(cuid())
+  clientGeneratedId String?   @unique
+  createdAt     DateTime     @default(now())
+  status        SaleStatus   @default(active)
+  canceledAt    DateTime?
+  cancelReason  String?
+  total         Int
+  customerName  String
+  customerType  CustomerType
+  paymentMethod PaymentMethod
+  note          String?
+  items         SaleItem[]
+  audits        SaleAudit[]
+
+  @@index([createdAt])
+}
+
+model SaleItem {
+  id          String      @id @default(cuid())
+  saleId       String
+  productCode ProductCode
+  quantity    Int
+  sale        Sale        @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([saleId])
+}
+
+model SaleAudit {
+  id        String          @id @default(cuid())
+  saleId    String
+  action    SaleAuditAction
+  reason    String
+  before    Json?
+  after     Json?
+  createdAt DateTime        @default(now())
+  sale      Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([saleId, createdAt])
+}
+
+model DriverExpense {
+  id         String          @id @default(cuid())
+  createdAt  DateTime        @default(now())
+  driverName String
+  category   ExpenseCategory
+  amount     Int
+  note       String?
+  receiptRef String?
+
+  @@index([createdAt])
+}
