@@ -1,48 +1,38 @@
 import {
   Injectable,
+  OnModuleInit,
   UnauthorizedException,
 } from '@nestjs/common';
 import {
   type AuthLoginResponse,
   type LoginInput,
-  type UserRole,
 } from '@distribuidor/shared';
 import { JwtService } from '@nestjs/jwt';
-
-type AuthUser = {
-  id: string;
-  username: string;
-  password: string;
-  role: UserRole;
-};
+import type { UserRole as PrismaUserRole } from '@prisma/client';
+import { compare, hash } from 'bcryptjs';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
-export class AuthService {
-  private readonly users: AuthUser[] = [
-    {
-      id: 'admin-1',
-      username: process.env.ADMIN_USERNAME ?? 'admin',
-      password: process.env.ADMIN_PASSWORD ?? 'admin123',
-      role: 'admin',
-    },
-    {
-      id: 'chofer-1',
-      username: process.env.DRIVER_USERNAME ?? 'chofer',
-      password: process.env.DRIVER_PASSWORD ?? 'chofer123',
-      role: 'chofer',
-    },
-  ];
+export class AuthService implements OnModuleInit {
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
 
-  constructor(private readonly jwtService: JwtService) {}
+  async onModuleInit() {
+    await this.ensureDefaultUsers();
+  }
 
-  login(input: LoginInput): AuthLoginResponse {
+  async login(input: LoginInput): Promise<AuthLoginResponse> {
     const username = input.username.trim();
-    const user = this.users.find(
-      (candidate) =>
-        candidate.username === username && candidate.password === input.password,
-    );
+    const user = await this.prisma.userAccount.findUnique({ where: { username } });
 
     if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const passwordMatches = await compare(input.password, user.passwordHash);
+    if (!passwordMatches) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -62,5 +52,40 @@ export class AuthService {
       role: user.role,
       expiresInSeconds,
     };
+  }
+
+  private async ensureDefaultUsers() {
+    await this.upsertUserFromEnv(
+      process.env.ADMIN_USERNAME ?? 'admin',
+      process.env.ADMIN_PASSWORD ?? 'admin123',
+      'admin',
+    );
+
+    await this.upsertUserFromEnv(
+      process.env.DRIVER_USERNAME ?? 'chofer',
+      process.env.DRIVER_PASSWORD ?? 'chofer123',
+      'chofer',
+    );
+  }
+
+  private async upsertUserFromEnv(username: string, password: string, role: PrismaUserRole) {
+    const normalizedUsername = username.trim();
+    const existing = await this.prisma.userAccount.findUnique({
+      where: { username: normalizedUsername },
+    });
+
+    if (existing) {
+      return;
+    }
+
+    const passwordHash = await hash(password, 10);
+
+    await this.prisma.userAccount.create({
+      data: {
+        username: normalizedUsername,
+        passwordHash,
+        role,
+      },
+    });
   }
 }

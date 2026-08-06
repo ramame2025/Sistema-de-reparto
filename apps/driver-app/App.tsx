@@ -46,6 +46,16 @@ type PendingSale = {
   lastError?: string;
 };
 
+const normalizePendingSalePayload = (
+  payload: CreateSaleInput,
+  fallbackDriverName: string,
+  fallbackTruckCode: string,
+): CreateSaleInput => ({
+  ...payload,
+  driverName: payload.driverName?.trim() || fallbackDriverName,
+  truckCode: payload.truckCode?.trim() || fallbackTruckCode || undefined,
+});
+
 type DaySummary = {
   activeCount: number;
   canceledCount: number;
@@ -57,6 +67,7 @@ export default function App() {
   const [authUsername, setAuthUsername] = useState('chofer');
   const [authPassword, setAuthPassword] = useState('chofer123');
   const [authLoading, setAuthLoading] = useState(false);
+  const [truckCode, setTruckCode] = useState('CAMION-01');
   const [customerType, setCustomerType] = useState<CustomerType>('final');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [customerName, setCustomerName] = useState('Cliente de prueba');
@@ -183,9 +194,14 @@ export default function App() {
     try {
       const raw = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
       const parsed: PendingSale[] = raw ? JSON.parse(raw) : [];
-      setPendingSales(parsed);
-      if (parsed.length > 0) {
-        setMessage(`Hay ${parsed.length} ventas pendientes por sincronizar.`);
+      const normalized = parsed.map((entry) => ({
+        ...entry,
+        payload: normalizePendingSalePayload(entry.payload, authUsername, truckCode.trim()),
+      }));
+      setPendingSales(normalized);
+      await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(normalized));
+      if (normalized.length > 0) {
+        setMessage(`Hay ${normalized.length} ventas pendientes por sincronizar.`);
       }
     } catch {
       setMessage('No se pudo leer la cola offline local.');
@@ -346,6 +362,8 @@ export default function App() {
 
     const payload: CreateSaleInput = {
       clientGeneratedId: buildClientGeneratedId(),
+      driverName: authUsername,
+      truckCode: truckCode.trim() || undefined,
       customerName,
       customerType,
       paymentMethod,
@@ -433,6 +451,8 @@ export default function App() {
     }
 
     const payload: UpdateSaleInput = {
+      driverName: authUsername,
+      truckCode: truckCode.trim() || undefined,
       customerName,
       customerType,
       paymentMethod,
@@ -685,6 +705,13 @@ export default function App() {
 
         <View style={styles.card}>
           <Text style={styles.fieldLabel}>Cliente</Text>
+          <Text style={styles.apiHint}>Chofer: {authUsername}</Text>
+          <TextInput
+            style={styles.input}
+            value={truckCode}
+            onChangeText={setTruckCode}
+            placeholder="Camion / unidad"
+          />
           <TextInput
             style={styles.input}
             value={customerName}

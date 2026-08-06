@@ -41,6 +41,8 @@ export type SaleItemInput = {
 
 export type CreateSaleInput = {
   clientGeneratedId?: string;
+  driverName: string;
+  truckCode?: string;
   customerName: string;
   customerType: CustomerType;
   paymentMethod: PaymentMethod;
@@ -58,6 +60,8 @@ export type SaleRecord = {
   status: "active" | "canceled";
   canceledAt?: string;
   cancelReason?: string;
+  driverName: string;
+  truckCode?: string;
   total: number;
   customerName: string;
   customerType: CustomerType;
@@ -110,6 +114,24 @@ export type AuthLoginResponse = {
   expiresInSeconds: number;
 };
 
+export type UserSummary = {
+  id: string;
+  username: string;
+  role: UserRole;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateUserInput = {
+  username: string;
+  password: string;
+  role: UserRole;
+};
+
+export type ChangePasswordInput = {
+  password: string;
+};
+
 export const DEFAULT_PRICE_TABLE: PriceTable = {
   final: { G10: 8500, G15: 13000, G45: 39000, G15_AUTO: 14500 },
   comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },
@@ -139,6 +161,14 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
 
   if (!input.customerName || input.customerName.trim().length < 2) {
     errors.push("customerName must have at least 2 characters");
+  }
+
+  if (!input.driverName || input.driverName.trim().length < 2) {
+    errors.push('driverName must have at least 2 characters');
+  }
+
+  if (input.truckCode && input.truckCode.trim().length < 2) {
+    errors.push('truckCode must have at least 2 characters when provided');
   }
 
   if (!CUSTOMER_TYPES.includes(input.customerType)) {
@@ -219,6 +249,34 @@ export function validateLoginInput(input: LoginInput): string[] {
 
   if (!input.password || input.password.length < 4) {
     errors.push('password must have at least 4 characters');
+  }
+
+  return errors;
+}
+
+export function validateCreateUserInput(input: CreateUserInput): string[] {
+  const errors: string[] = [];
+
+  if (!input.username || input.username.trim().length < 3) {
+    errors.push('username must have at least 3 characters');
+  }
+
+  if (!input.password || input.password.length < 6) {
+    errors.push('password must have at least 6 characters');
+  }
+
+  if (!USER_ROLES.includes(input.role)) {
+    errors.push('role is invalid');
+  }
+
+  return errors;
+}
+
+export function validateChangePasswordInput(input: ChangePasswordInput): string[] {
+  const errors: string[] = [];
+
+  if (!input.password || input.password.length < 6) {
+    errors.push('password must have at least 6 characters');
   }
 
   return errors;

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   type AuthLoginResponse,
+  type CreateUserInput,
   EXPENSE_CATEGORIES,
   PAYMENT_METHODS,
   PRODUCT_CODES,
@@ -12,6 +13,8 @@ import {
   type ProductCode,
   type SaleAuditRecord,
   type SaleRecord,
+  type UserRole,
+  type UserSummary,
 } from "@distribuidor/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -21,6 +24,39 @@ type SaleStatusFilter = "all" | "active" | "canceled";
 type PaymentFilter = "all" | PaymentMethod;
 type ProductFilter = "all" | ProductCode;
 type ExpenseCategoryFilter = "all" | ExpenseCategory;
+
+const formatDateForFilename = (value: string) => value.replaceAll("-", "");
+
+const buildDateRangeLabel = (from: string, to: string) => {
+  if (from && to) {
+    return from === to ? from : `${from}_to_${to}`;
+  }
+
+  if (from) {
+    return `${from}_onward`;
+  }
+
+  if (to) {
+    return `until_${to}`;
+  }
+
+  return new Date().toISOString().slice(0, 10);
+};
+
+const escapeCsvCell = (value: string | number | null | undefined) => {
+  const raw = String(value ?? "");
+  if (/[",\n\r]/.test(raw)) {
+    return `"${raw.replaceAll("\"", "\"\"")}"`;
+  }
+
+  return raw;
+};
+
+const toCsv = (headers: string[], rows: Array<Array<string | number | null | undefined>>) => {
+  const headerLine = headers.map((cell) => escapeCsvCell(cell)).join(",");
+  const lines = rows.map((row) => row.map((cell) => escapeCsvCell(cell)).join(","));
+  return [headerLine, ...lines].join("\n");
+};
 
 export default function Home() {
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -41,6 +77,8 @@ export default function Home() {
   const [saleStatusFilter, setSaleStatusFilter] = useState<SaleStatusFilter>("all");
   const [salePaymentFilter, setSalePaymentFilter] = useState<PaymentFilter>("all");
   const [saleProductFilter, setSaleProductFilter] = useState<ProductFilter>("all");
+  const [saleDriverFilter, setSaleDriverFilter] = useState("");
+  const [saleTruckFilter, setSaleTruckFilter] = useState("");
   const [saleSearch, setSaleSearch] = useState("");
   const [expenseDateFrom, setExpenseDateFrom] = useState("");
   const [expenseDateTo, setExpenseDateTo] = useState("");
@@ -49,6 +87,14 @@ export default function Home() {
   const [selectedSaleForAudit, setSelectedSaleForAudit] = useState<SaleRecord | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [audits, setAudits] = useState<SaleAuditRecord[]>([]);
+  const [users, setUsers] = useState<UserSummary[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userError, setUserError] = useState<string | null>(null);
+  const [userNotice, setUserNotice] = useState<string | null>(null);
+  const [newUserUsername, setNewUserUsername] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserRole, setNewUserRole] = useState<UserRole>("chofer");
+  const [creatingUser, setCreatingUser] = useState(false);
 
   const loadSales = async () => {
     if (!authToken) {
@@ -92,6 +138,26 @@ export default function Home() {
 
       const expenseData: ExpenseRecord[] = await expensesResponse.json();
       setExpenses(expenseData);
+
+      try {
+        const usersResponse = await fetch(`${API_URL}/users`, {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+        });
+
+        if (!usersResponse.ok) {
+          throw new Error(`API ${usersResponse.status}`);
+        }
+
+        const usersData: UserSummary[] = await usersResponse.json();
+        setUsers(usersData);
+        setUserError(null);
+      } catch {
+        setUserError("No se pudo cargar usuarios.");
+      }
     } catch {
       setError("No se pudo cargar la lista de ventas.");
     } finally {
@@ -208,6 +274,143 @@ export default function Home() {
     setAuditLoading(false);
   };
 
+  const refreshUsers = async () => {
+    if (!authToken) {
+      return;
+    }
+
+    try {
+      setUsersLoading(true);
+      setUserError(null);
+
+      const response = await fetch(`${API_URL}/users`, {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`API ${response.status}`);
+      }
+
+      const payload: UserSummary[] = await response.json();
+      setUsers(payload);
+    } catch {
+      setUserError("No se pudo cargar usuarios.");
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const createUser = async () => {
+    if (!authToken) {
+      return;
+    }
+
+    const payload: CreateUserInput = {
+      username: newUserUsername,
+      password: newUserPassword,
+      role: newUserRole,
+    };
+
+    try {
+      setCreatingUser(true);
+      setUserError(null);
+      setUserNotice(null);
+
+      const response = await fetch(`${API_URL}/users`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API ${response.status}`);
+      }
+
+      setNewUserUsername("");
+      setNewUserPassword("");
+      setNewUserRole("chofer");
+      setUserNotice("Usuario creado correctamente.");
+      await refreshUsers();
+    } catch {
+      setUserError("No se pudo crear el usuario.");
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  const resetUserPassword = async (user: UserSummary) => {
+    if (!authToken) {
+      return;
+    }
+
+    const nextPassword = window.prompt(`Nueva password para ${user.username}`);
+    if (!nextPassword) {
+      return;
+    }
+
+    try {
+      setUserError(null);
+      setUserNotice(null);
+
+      const response = await fetch(`${API_URL}/users/${user.id}/password`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ password: nextPassword }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API ${response.status}`);
+      }
+
+      setUserNotice(`Password actualizada para ${user.username}.`);
+      await refreshUsers();
+    } catch {
+      setUserError("No se pudo actualizar la password.");
+    }
+  };
+
+  const deleteUser = async (user: UserSummary) => {
+    if (!authToken) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Eliminar usuario ${user.username}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setUserError(null);
+      setUserNotice(null);
+
+      const response = await fetch(`${API_URL}/users/${user.id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`API ${response.status}`);
+      }
+
+      setUserNotice(`Usuario ${user.username} eliminado.`);
+      await refreshUsers();
+    } catch {
+      setUserError("No se pudo eliminar el usuario.");
+    }
+  };
+
   const filteredSales = useMemo(() => {
     return sales.filter((sale) => {
       const createdAtDate = new Date(sale.createdAt);
@@ -249,6 +452,21 @@ export default function Home() {
         }
       }
 
+      if (saleDriverFilter.trim().length > 0) {
+        const needle = saleDriverFilter.toLowerCase();
+        if (!sale.driverName.toLowerCase().includes(needle)) {
+          return false;
+        }
+      }
+
+      if (saleTruckFilter.trim().length > 0) {
+        const needle = saleTruckFilter.toLowerCase();
+        const truck = sale.truckCode?.toLowerCase() ?? "";
+        if (!truck.includes(needle)) {
+          return false;
+        }
+      }
+
       return true;
     });
   }, [
@@ -258,6 +476,8 @@ export default function Home() {
     saleStatusFilter,
     salePaymentFilter,
     saleProductFilter,
+    saleDriverFilter,
+    saleTruckFilter,
     saleSearch,
   ]);
 
@@ -321,6 +541,92 @@ export default function Home() {
     }
 
     return null;
+  };
+
+  const triggerCsvDownload = (filename: string, csvContent: string) => {
+    const blob = new Blob([`\uFEFF${csvContent}`], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSalesCsv = () => {
+    if (filteredSales.length === 0) {
+      return;
+    }
+
+    const csv = toCsv(
+      [
+        "fecha",
+        "id",
+        "chofer",
+        "camion",
+        "cliente",
+        "tipo_cliente",
+        "medio_pago",
+        "estado",
+        "total",
+        "motivo_anulacion",
+        "items",
+      ],
+      filteredSales.map((sale) => [
+        new Date(sale.createdAt).toISOString(),
+        sale.id,
+        sale.driverName,
+        sale.truckCode ?? "",
+        sale.customerName,
+        sale.customerType,
+        sale.paymentMethod,
+        sale.status,
+        sale.total,
+        sale.cancelReason ?? "",
+        sale.items.map((item) => `${item.productCode}x${item.quantity}`).join(" | "),
+      ]),
+    );
+
+    const label = buildDateRangeLabel(saleDateFrom, saleDateTo);
+    triggerCsvDownload(
+      `cierre_ventas_${formatDateForFilename(label)}.csv`,
+      csv,
+    );
+  };
+
+  const exportExpensesCsv = () => {
+    if (filteredExpenses.length === 0) {
+      return;
+    }
+
+    const csv = toCsv(
+      [
+        "fecha",
+        "id",
+        "chofer",
+        "categoria",
+        "monto",
+        "descripcion",
+        "comprobante",
+      ],
+      filteredExpenses.map((expense) => [
+        new Date(expense.createdAt).toISOString(),
+        expense.id,
+        expense.driverName,
+        expense.category,
+        expense.amount,
+        expense.note ?? "",
+        expense.receiptRef ?? "",
+      ]),
+    );
+
+    const label = buildDateRangeLabel(expenseDateFrom, expenseDateTo);
+    triggerCsvDownload(
+      `cierre_gastos_${formatDateForFilename(label)}.csv`,
+      csv,
+    );
   };
 
   return (
@@ -494,6 +800,37 @@ export default function Home() {
                 className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
               />
             </label>
+            <label className="text-sm text-slate-600">
+              Chofer
+              <input
+                type="text"
+                value={saleDriverFilter}
+                onChange={(event) => setSaleDriverFilter(event.target.value)}
+                placeholder="Ej: chofer"
+                className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="text-sm text-slate-600">
+              Camion
+              <input
+                type="text"
+                value={saleTruckFilter}
+                onChange={(event) => setSaleTruckFilter(event.target.value)}
+                placeholder="Ej: CAMION-01"
+                className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+              />
+            </label>
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={exportSalesCsv}
+              disabled={loading || filteredSales.length === 0}
+              className="rounded bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              Exportar CSV de ventas filtradas
+            </button>
           </div>
 
           {authToken && loading && <p className="mt-4 text-slate-600">Cargando ventas...</p>}
@@ -508,6 +845,8 @@ export default function Home() {
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500">
                     <th className="py-2 pr-4">Fecha</th>
+                    <th className="py-2 pr-4">Chofer</th>
+                    <th className="py-2 pr-4">Camion</th>
                     <th className="py-2 pr-4">Cliente</th>
                     <th className="py-2 pr-4">Tipo</th>
                     <th className="py-2 pr-4">Pago</th>
@@ -523,6 +862,8 @@ export default function Home() {
                       <td className="py-2 pr-4">
                         {new Date(sale.createdAt).toLocaleString("es-AR")}
                       </td>
+                      <td className="py-2 pr-4">{sale.driverName}</td>
+                      <td className="py-2 pr-4">{sale.truckCode ?? "-"}</td>
                       <td className="py-2 pr-4">{sale.customerName}</td>
                       <td className="py-2 pr-4">{sale.customerType}</td>
                       <td className="py-2 pr-4">{sale.paymentMethod}</td>
@@ -614,6 +955,17 @@ export default function Home() {
             </label>
           </div>
 
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={exportExpensesCsv}
+              disabled={loading || filteredExpenses.length === 0}
+              className="rounded bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              Exportar CSV de gastos filtrados
+            </button>
+          </div>
+
           {!loading && !error && filteredExpenses.length === 0 && authToken && (
             <p className="mt-4 text-slate-600">Todavia no hay gastos cargados.</p>
           )}
@@ -668,6 +1020,115 @@ export default function Home() {
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-6">
+          <h2 className="text-xl font-semibold">Usuarios</h2>
+          <p className="mt-2 text-sm text-slate-600">
+            Gestion de cuentas para roles admin y chofer.
+          </p>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <label className="text-sm text-slate-600">
+              Usuario
+              <input
+                type="text"
+                value={newUserUsername}
+                onChange={(event) => setNewUserUsername(event.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="text-sm text-slate-600">
+              Password
+              <input
+                type="password"
+                value={newUserPassword}
+                onChange={(event) => setNewUserPassword(event.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="text-sm text-slate-600">
+              Rol
+              <select
+                value={newUserRole}
+                onChange={(event) => setNewUserRole(event.target.value as UserRole)}
+                className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+              >
+                <option value="chofer">chofer</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void createUser()}
+              disabled={creatingUser}
+              className="rounded bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              {creatingUser ? "Creando..." : "Crear usuario"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void refreshUsers()}
+              disabled={usersLoading}
+              className="rounded bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              {usersLoading ? "Actualizando..." : "Actualizar lista"}
+            </button>
+          </div>
+
+          {userError && <p className="mt-3 text-sm text-rose-700">{userError}</p>}
+          {userNotice && <p className="mt-3 text-sm text-emerald-700">{userNotice}</p>}
+
+          {!loading && users.length === 0 && (
+            <p className="mt-4 text-sm text-slate-600">No hay usuarios cargados.</p>
+          )}
+
+          {users.length > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500">
+                    <th className="py-2 pr-4">Usuario</th>
+                    <th className="py-2 pr-4">Rol</th>
+                    <th className="py-2 pr-4">Creado</th>
+                    <th className="py-2 pr-4">Actualizado</th>
+                    <th className="py-2 pr-4">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((user) => (
+                    <tr key={user.id} className="border-b border-slate-100">
+                      <td className="py-2 pr-4">{user.username}</td>
+                      <td className="py-2 pr-4">{user.role}</td>
+                      <td className="py-2 pr-4">{new Date(user.createdAt).toLocaleString("es-AR")}</td>
+                      <td className="py-2 pr-4">{new Date(user.updatedAt).toLocaleString("es-AR")}</td>
+                      <td className="py-2 pr-4">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void resetUserPassword(user)}
+                            className="rounded bg-amber-600 px-3 py-1 text-white hover:bg-amber-700"
+                          >
+                            Reset password
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void deleteUser(user)}
+                            className="rounded bg-rose-600 px-3 py-1 text-white hover:bg-rose-700"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

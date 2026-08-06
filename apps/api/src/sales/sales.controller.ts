@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
 } from '@nestjs/common';
 import {
   type CancelSaleInput,
@@ -17,6 +18,13 @@ import {
 } from '@distribuidor/shared';
 import { SalesService } from './sales.service';
 import { Roles } from '../auth/roles.decorator';
+import type { Request } from 'express';
+
+type AuthRequest = Request & {
+  user?: {
+    username?: string;
+  };
+};
 
 @Controller('sales')
 export class SalesController {
@@ -30,26 +38,26 @@ export class SalesController {
 
   @Roles('admin', 'chofer')
   @Post()
-  async createSale(@Body() input: CreateSaleInput) {
+  async createSale(@Body() input: CreateSaleInput, @Req() req: AuthRequest) {
     const errors = validateCreateSaleInput(input);
 
     if (errors.length > 0) {
       throw new BadRequestException({ message: 'Invalid sale payload', errors });
     }
 
-    return this.salesService.createSale(input);
+    return this.salesService.createSale(input, req.user?.username);
   }
 
   @Roles('admin', 'chofer')
   @Patch(':id')
-  async updateSale(@Param('id') id: string, @Body() input: UpdateSaleInput) {
+  async updateSale(@Param('id') id: string, @Body() input: UpdateSaleInput, @Req() req: AuthRequest) {
     const errors = validateUpdateSaleInput(input);
 
     if (errors.length > 0) {
       throw new BadRequestException({ message: 'Invalid update payload', errors });
     }
 
-    return this.salesService.updateSale(id, input);
+    return this.salesService.updateSale(id, input, req.user?.username);
   }
 
   @Roles('admin')

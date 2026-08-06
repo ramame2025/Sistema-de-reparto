@@ -46,6 +46,11 @@ enum ExpenseCategory {
   varios
 }
 
+enum UserRole {
+  admin
+  chofer
+}
+
 model Sale {
   id            String       @id @default(cuid())
   clientGeneratedId String?   @unique
@@ -53,6 +58,8 @@ model Sale {
   status        SaleStatus   @default(active)
   canceledAt    DateTime?
   cancelReason  String?
+  driverName    String       @default("sin-chofer")
+  truckCode     String?
   total         Int
   customerName  String
   customerType  CustomerType
@@ -62,6 +69,7 @@ model Sale {
   audits        SaleAudit[]
 
   @@index([createdAt])
+  @@index([driverName, createdAt])
 }
 
 model SaleItem {
@@ -97,4 +105,13 @@ model DriverExpense {
   receiptRef String?
 
   @@index([createdAt])
+}
+
+model UserAccount {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         UserRole
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }

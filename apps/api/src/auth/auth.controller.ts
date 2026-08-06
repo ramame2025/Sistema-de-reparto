@@ -12,7 +12,7 @@ export class AuthController {
 
   @Public()
   @Post('login')
-  login(@Body() input: LoginInput) {
+  async login(@Body() input: LoginInput) {
     const errors = validateLoginInput(input);
     if (errors.length > 0) {
       throw new BadRequestException({ message: 'Invalid login payload', errors });

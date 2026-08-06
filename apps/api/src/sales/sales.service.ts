@@ -32,7 +32,7 @@ export class SalesService {
     return sales.map((sale) => this.toSaleRecord(sale));
   }
 
-  async createSale(input: CreateSaleInput): Promise<SaleRecord> {
+  async createSale(input: CreateSaleInput, actorUsername?: string): Promise<SaleRecord> {
     if (input.clientGeneratedId) {
       const existing = await this.prisma.sale.findUnique({
         where: { clientGeneratedId: input.clientGeneratedId },
@@ -45,10 +45,14 @@ export class SalesService {
     }
 
     const total = calculateSaleTotal(input.customerType, input.items, DEFAULT_PRICE_TABLE);
+    const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
+    const resolvedTruckCode = input.truckCode?.trim() || null;
 
     const sale = await this.prisma.sale.create({
       data: {
         clientGeneratedId: input.clientGeneratedId ?? null,
+        driverName: resolvedDriverName,
+        truckCode: resolvedTruckCode,
         customerName: input.customerName.trim(),
         customerType: input.customerType as PrismaCustomerType,
         paymentMethod: input.paymentMethod as PrismaPaymentMethod,
@@ -73,7 +77,7 @@ export class SalesService {
     return this.toSaleRecord(sale);
   }
 
-  async updateSale(id: string, input: UpdateSaleInput): Promise<SaleRecord> {
+  async updateSale(id: string, input: UpdateSaleInput, actorUsername?: string): Promise<SaleRecord> {
     const existing = await this.prisma.sale.findUnique({
       where: { id },
       include: { items: true },
@@ -88,8 +92,12 @@ export class SalesService {
     }
 
     const total = calculateSaleTotal(input.customerType, input.items, DEFAULT_PRICE_TABLE);
+    const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
+    const resolvedTruckCode = input.truckCode?.trim() || null;
 
     const beforeSnapshot = {
+      driverName: existing.driverName,
+      truckCode: existing.truckCode,
       customerName: existing.customerName,
       customerType: existing.customerType,
       paymentMethod: existing.paymentMethod,
@@ -107,6 +115,8 @@ export class SalesService {
       const sale = await tx.sale.update({
         where: { id },
         data: {
+          driverName: resolvedDriverName,
+          truckCode: resolvedTruckCode,
           customerName: input.customerName.trim(),
           customerType: input.customerType as PrismaCustomerType,
           paymentMethod: input.paymentMethod as PrismaPaymentMethod,
@@ -129,6 +139,8 @@ export class SalesService {
           reason: input.reason.trim(),
           before: beforeSnapshot,
           after: {
+            driverName: sale.driverName,
+            truckCode: sale.truckCode,
             customerName: sale.customerName,
             customerType: sale.customerType,
             paymentMethod: sale.paymentMethod,
@@ -209,6 +221,8 @@ export class SalesService {
       status: sale.status,
       canceledAt: sale.canceledAt?.toISOString(),
       cancelReason: sale.cancelReason ?? undefined,
+      driverName: sale.driverName,
+      truckCode: sale.truckCode ?? undefined,
       total: sale.total,
       customerName: sale.customerName,
       customerType: sale.customerType,

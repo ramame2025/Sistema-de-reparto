@@ -63,6 +63,7 @@ Variables utiles:
 ## Autenticacion y roles
 
 - `POST /auth/login` devuelve token JWT.
+- Login validado contra usuarios persistidos en PostgreSQL (`UserAccount`) con password hasheada.
 - Roles disponibles:
   - `admin`: dashboard y operaciones de supervisión.
   - `chofer`: carga operativa desde app movil.
@@ -77,6 +78,10 @@ Permisos principales:
 - `GET /expenses`: `admin`
 - `POST /expenses`: `admin`, `chofer`
 - `POST /uploads/receipt`: `admin`, `chofer`
+- `GET /users`: `admin`
+- `POST /users`: `admin`
+- `PATCH /users/:id/password`: `admin`
+- `DELETE /users/:id`: `admin`
 
 ## Validacion de tipos
 
@@ -97,6 +102,7 @@ pnpm typecheck
 - API NestJS con endpoint `GET /health`.
 - Modulo de ventas inicial end-to-end:
   - `POST /sales` valida y guarda ventas en PostgreSQL (idempotente con `clientGeneratedId`).
+  - Ventas guardan `driverName` y `truckCode` para trazabilidad operativa.
   - `PATCH /sales/:id` edita venta con motivo obligatorio.
   - `GET /sales` lista ventas.
   - `PATCH /sales/:id/cancel` anula venta con motivo.
@@ -112,10 +118,12 @@ pnpm typecheck
   - App chofer incluye login y envia token JWT en requests protegidos.
   - Dashboard lista ventas, muestra estado y permite anular.
   - Dashboard permite consultar auditoria por venta en modal con tabla de eventos.
-  - Dashboard incluye filtros operativos iniciales en ventas (fecha, estado, medio de pago, producto, texto) y gastos (fecha, categoria).
+  - Dashboard incluye filtros operativos iniciales en ventas (fecha, estado, medio de pago, producto, texto, chofer y camion) y gastos (fecha, categoria).
   - Dashboard lista gastos y total de gastos registrados.
   - Dashboard muestra miniatura del comprobante y enlace para abrir imagen.
   - Dashboard incluye login admin con sesion local y headers `Authorization`.
+  - Dashboard permite exportar CSV de ventas y gastos filtrados para cierres diarios.
+  - Dashboard incluye gestion de usuarios (alta, baja y reset de password) para administradores.
   - API expone `POST /uploads/receipt` y sirve archivos en `GET /uploads/:filename`.
 
 Si se actualiza el esquema Prisma (por ejemplo, anulacion de ventas), correr una nueva migracion:
@@ -142,8 +150,18 @@ Para el modulo de gastos:
 pnpm --filter api prisma:migrate --name add-driver-expenses
 ```
 
+Para metadatos operativos en ventas (chofer/camion):
+
+```bash
+pnpm --filter api prisma:migrate --name add-sale-driver-truck
+```
+
+Para usuarios persistidos de autenticacion:
+
+```bash
+pnpm --filter api prisma:migrate --name add-user-accounts
+```
+
 ## Siguiente paso sugerido
 
-1. Agregar filtros faltantes de negocio (camion y chofer en ventas, cuando esos datos existan en el modelo).
-2. Agregar autenticacion y roles (`admin` y `chofer`) con login real.
-3. Incorporar exportacion CSV para cierres diarios de ventas y gastos.
+1. Agregar auditoria de seguridad para gestion de usuarios (quien crea, elimina o resetea passwords).
