@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Pressable,
   SafeAreaView,
@@ -14,6 +15,7 @@ import {
 } from 'react-native';
 import {
   type AuthLoginResponse,
+  type AuthSessionResponse,
   type CancelSaleInput,
   CUSTOMER_TYPES,
   PAYMENT_METHODS,
@@ -56,6 +58,8 @@ const normalizePendingSalePayload = (
   truckCode: payload.truckCode?.trim() || fallbackTruckCode || undefined,
 });
 
+type AuthStatus = 'checking' | 'anonymous' | 'authenticated';
+
 type DaySummary = {
   activeCount: number;
   canceledCount: number;
@@ -64,8 +68,9 @@ type DaySummary = {
 
 export default function App() {
   const [authToken, setAuthToken] = useState<string | null>(null);
-  const [authUsername, setAuthUsername] = useState('chofer');
-  const [authPassword, setAuthPassword] = useState('chofer123');
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('checking');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [truckCode, setTruckCode] = useState('CAMION-01');
   const [customerType, setCustomerType] = useState<CustomerType>('final');
@@ -136,10 +141,37 @@ export default function App() {
   const buildClientGeneratedId = () =>
     `m_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
+  // Validamos el token guardado contra la API antes de mostrar la app,
+  // asi un token vencido vuelve al login en vez de entrar y fallar despues.
   const loadAuthToken = async () => {
     const savedToken = await AsyncStorage.getItem(DRIVER_AUTH_TOKEN_KEY);
-    if (savedToken) {
+    if (!savedToken) {
+      setAuthStatus('anonymous');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/auth/me`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${savedToken}` },
+      });
+
+      if (!response.ok) {
+        throw new Error(`API ${response.status}`);
+      }
+
+      const session: AuthSessionResponse = await response.json();
+      if (session.role !== 'chofer' && session.role !== 'admin') {
+        throw new Error('role');
+      }
+
+      setAuthUsername(session.username);
       setAuthToken(savedToken);
+      setAuthStatus('authenticated');
+    } catch {
+      await AsyncStorage.removeItem(DRIVER_AUTH_TOKEN_KEY);
+      setAuthToken(null);
+      setAuthStatus('anonymous');
     }
   };
 
@@ -169,12 +201,17 @@ export default function App() {
 
       const payload: AuthLoginResponse = await response.json();
       if (payload.role !== 'chofer' && payload.role !== 'admin') {
+        setAuthToken(null);
+        setAuthStatus('anonymous');
+        await AsyncStorage.removeItem(DRIVER_AUTH_TOKEN_KEY);
         setMessage('Usuario sin permisos de chofer.');
         return;
       }
 
       setAuthUsername(payload.username);
+      setAuthPassword('');
       setAuthToken(payload.accessToken);
+      setAuthStatus('authenticated');
       await AsyncStorage.setItem(DRIVER_AUTH_TOKEN_KEY, payload.accessToken);
       setMessage(`Sesion iniciada como ${payload.username}.`);
     } catch {
@@ -186,6 +223,8 @@ export default function App() {
 
   const logout = async () => {
     setAuthToken(null);
+    setAuthStatus('anonymous');
+    setAuthPassword('');
     await AsyncStorage.removeItem(DRIVER_AUTH_TOKEN_KEY);
     setMessage('Sesion cerrada.');
   };
@@ -630,14 +669,23 @@ export default function App() {
     }
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.tag}>Distribuidor · App chofer</Text>
-        <Text style={styles.title}>Carga rapida de venta</Text>
-        <Text style={styles.subtitle}>Version inicial conectada a API.</Text>
+  if (authStatus === 'checking') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#0369a1" />
+          <Text style={styles.apiHint}>Verificando sesion...</Text>
+        </View>
+        <StatusBar style="auto" />
+      </SafeAreaView>
+    );
+  }
 
-        {!authToken && (
+  if (authStatus !== 'authenticated') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={styles.tag}>Distribuidor · App chofer</Text>
           <View style={styles.card}>
             <Text style={styles.fieldLabel}>Login chofer</Text>
             <TextInput
@@ -653,6 +701,7 @@ export default function App() {
               onChangeText={setAuthPassword}
               placeholder="Password"
               secureTextEntry
+              onSubmitEditing={() => void login()}
             />
             <Pressable style={styles.saveButton} onPress={() => void login()} disabled={authLoading}>
               <Text style={styles.saveButtonText}>
@@ -660,16 +709,26 @@ export default function App() {
               </Text>
             </Pressable>
           </View>
-        )}
+          {message && <Text style={styles.apiHint}>{message}</Text>}
+        </View>
+        <StatusBar style="auto" />
+      </SafeAreaView>
+    );
+  }
 
-        {authToken && (
-          <View style={styles.card}>
-            <Text style={styles.apiHint}>Sesion activa como: {authUsername}</Text>
-            <Pressable style={[styles.saveButton, styles.logoutButton]} onPress={() => void logout()}>
-              <Text style={styles.saveButtonText}>Cerrar sesion</Text>
-            </Pressable>
-          </View>
-        )}
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.tag}>Distribuidor · App chofer</Text>
+        <Text style={styles.title}>Carga rapida de venta</Text>
+        <Text style={styles.subtitle}>Version inicial conectada a API.</Text>
+
+        <View style={styles.card}>
+          <Text style={styles.apiHint}>Sesion activa como: {authUsername}</Text>
+          <Pressable style={[styles.saveButton, styles.logoutButton]} onPress={() => void logout()}>
+            <Text style={styles.saveButtonText}>Cerrar sesion</Text>
+          </Pressable>
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.fieldLabel}>Estado de sincronizacion</Text>
@@ -939,6 +998,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 20,
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    gap: 8,
   },
   tag: {
     color: '#0369a1',

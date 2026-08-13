@@ -15,6 +15,8 @@ export type SaleItemInput = {
 };
 export type CreateSaleInput = {
     clientGeneratedId?: string;
+    driverName: string;
+    truckCode?: string;
     customerName: string;
     customerType: CustomerType;
     paymentMethod: PaymentMethod;
@@ -30,6 +32,8 @@ export type SaleRecord = {
     status: "active" | "canceled";
     canceledAt?: string;
     cancelReason?: string;
+    driverName: string;
+    truckCode?: string;
     total: number;
     customerName: string;
     customerType: CustomerType;
@@ -74,6 +78,25 @@ export type AuthLoginResponse = {
     role: UserRole;
     expiresInSeconds: number;
 };
+export type AuthSessionResponse = {
+    username: string;
+    role: UserRole;
+};
+export type UserSummary = {
+    id: string;
+    username: string;
+    role: UserRole;
+    createdAt: string;
+    updatedAt: string;
+};
+export type CreateUserInput = {
+    username: string;
+    password: string;
+    role: UserRole;
+};
+export type ChangePasswordInput = {
+    password: string;
+};
 export declare const DEFAULT_PRICE_TABLE: PriceTable;
 export declare function calculateSaleTotal(customerType: CustomerType, items: SaleItemInput[], prices: PriceTable): number;
 export declare function validateCreateSaleInput(input: CreateSaleInput): string[];
@@ -81,3 +104,5 @@ export declare function validateUpdateSaleInput(input: UpdateSaleInput): string[
 export declare function validateCancelSaleInput(input: CancelSaleInput): string[];
 export declare function validateCreateExpenseInput(input: CreateExpenseInput): string[];
 export declare function validateLoginInput(input: LoginInput): string[];
+export declare function validateCreateUserInput(input: CreateUserInput): string[];
+export declare function validateChangePasswordInput(input: ChangePasswordInput): string[];

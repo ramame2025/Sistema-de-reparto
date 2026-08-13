@@ -114,6 +114,11 @@ export type AuthLoginResponse = {
   expiresInSeconds: number;
 };
 
+export type AuthSessionResponse = {
+  username: string;
+  role: UserRole;
+};
+
 export type UserSummary = {
   id: string;
   username: string;

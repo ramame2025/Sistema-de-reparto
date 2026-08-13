@@ -1,6 +1,8 @@
-import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Req } from '@nestjs/common';
 import {
+  type AuthSessionResponse,
   type LoginInput,
+  type UserRole,
   validateLoginInput,
 } from '@distribuidor/shared';
 import { AuthService } from './auth.service';
@@ -19,5 +21,10 @@ export class AuthController {
     }
 
     return this.authService.login(input);
+  }
+
+  @Get('me')
+  me(@Req() request: { user: { username: string; role: UserRole } }): AuthSessionResponse {
+    return { username: request.user.username, role: request.user.role };
   }
 }

@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import LoginScreen from "../components/LoginScreen";
 import {
   type AuthLoginResponse,
+  type AuthSessionResponse,
   type CreateUserInput,
   EXPENSE_CATEGORIES,
   PAYMENT_METHODS,
@@ -20,6 +22,7 @@ import {
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const DASHBOARD_AUTH_TOKEN_KEY = "dashboard_auth_token_v1";
 
+type AuthStatus = "checking" | "anonymous" | "authenticated";
 type SaleStatusFilter = "all" | "active" | "canceled";
 type PaymentFilter = "all" | PaymentMethod;
 type ProductFilter = "all" | ProductCode;
@@ -60,16 +63,13 @@ const toCsv = (headers: string[], rows: Array<Array<string | number | null | und
 
 export default function Home() {
   const [authToken, setAuthToken] = useState<string | null>(null);
-  const [authUsername, setAuthUsername] = useState(
-    process.env.NEXT_PUBLIC_ADMIN_USERNAME ?? "admin",
-  );
-  const [authPassword, setAuthPassword] = useState(
-    process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? "admin123",
-  );
+  const [authStatus, setAuthStatus] = useState<AuthStatus>("checking");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [sales, setSales] = useState<SaleRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [saleDateFrom, setSaleDateFrom] = useState("");
@@ -96,6 +96,19 @@ export default function Home() {
   const [newUserRole, setNewUserRole] = useState<UserRole>("chofer");
   const [creatingUser, setCreatingUser] = useState(false);
 
+  const clearSession = () => {
+    setAuthToken(null);
+    setAuthStatus("anonymous");
+    localStorage.removeItem(DASHBOARD_AUTH_TOKEN_KEY);
+  };
+
+  // Ante un 401/403 la sesion dejo de ser valida: volvemos al login.
+  const handleAuthFailure = (response: Response) => {
+    if (response.status === 401 || response.status === 403) {
+      clearSession();
+    }
+  };
+
   const loadSales = async () => {
     if (!authToken) {
       return;
@@ -114,10 +127,7 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          setAuthToken(null);
-          localStorage.removeItem(DASHBOARD_AUTH_TOKEN_KEY);
-        }
+        handleAuthFailure(response);
         throw new Error(`API ${response.status}`);
       }
 
@@ -133,6 +143,7 @@ export default function Home() {
       });
 
       if (!expensesResponse.ok) {
+        handleAuthFailure(expensesResponse);
         throw new Error(`API ${expensesResponse.status}`);
       }
 
@@ -149,6 +160,7 @@ export default function Home() {
         });
 
         if (!usersResponse.ok) {
+          handleAuthFailure(usersResponse);
           throw new Error(`API ${usersResponse.status}`);
         }
 
@@ -165,11 +177,59 @@ export default function Home() {
     }
   };
 
+  // Validamos el token guardado contra la API antes de mostrar el dashboard,
+  // asi un token vencido o manipulado vuelve al login en vez de entrar.
   useEffect(() => {
     const savedToken = localStorage.getItem(DASHBOARD_AUTH_TOKEN_KEY);
-    if (savedToken) {
-      setAuthToken(savedToken);
+    if (!savedToken) {
+      setAuthStatus("anonymous");
+      return;
     }
+
+    let active = true;
+
+    const verifySession = async () => {
+      try {
+        const response = await fetch(`${API_URL}/auth/me`, {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${savedToken}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`API ${response.status}`);
+        }
+
+        const session: AuthSessionResponse = await response.json();
+        if (!active) {
+          return;
+        }
+
+        if (session.role !== "admin") {
+          throw new Error("role");
+        }
+
+        setAuthUsername(session.username);
+        setAuthToken(savedToken);
+        setAuthStatus("authenticated");
+      } catch {
+        if (!active) {
+          return;
+        }
+
+        localStorage.removeItem(DASHBOARD_AUTH_TOKEN_KEY);
+        setAuthToken(null);
+        setAuthStatus("anonymous");
+      }
+    };
+
+    void verifySession();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -202,6 +262,8 @@ export default function Home() {
       }
 
       setAuthToken(payload.accessToken);
+      setAuthStatus("authenticated");
+      setAuthPassword("");
       localStorage.setItem(DASHBOARD_AUTH_TOKEN_KEY, payload.accessToken);
     } catch {
       setAuthError("Credenciales invalidas o API no disponible.");
@@ -211,8 +273,11 @@ export default function Home() {
   };
 
   const logout = () => {
-    setAuthToken(null);
-    localStorage.removeItem(DASHBOARD_AUTH_TOKEN_KEY);
+    clearSession();
+    setAuthPassword("");
+    setSales([]);
+    setExpenses([]);
+    setUsers([]);
   };
 
   const cancelSale = async (sale: SaleRecord) => {
@@ -232,6 +297,7 @@ export default function Home() {
       });
 
       if (!response.ok) {
+        handleAuthFailure(response);
         throw new Error(`API ${response.status}`);
       }
 
@@ -255,6 +321,7 @@ export default function Home() {
       });
 
       if (!response.ok) {
+        handleAuthFailure(response);
         throw new Error(`API ${response.status}`);
       }
 
@@ -292,6 +359,7 @@ export default function Home() {
       });
 
       if (!response.ok) {
+        handleAuthFailure(response);
         throw new Error(`API ${response.status}`);
       }
 
@@ -330,6 +398,7 @@ export default function Home() {
       });
 
       if (!response.ok) {
+        handleAuthFailure(response);
         throw new Error(`API ${response.status}`);
       }
 
@@ -369,6 +438,7 @@ export default function Home() {
       });
 
       if (!response.ok) {
+        handleAuthFailure(response);
         throw new Error(`API ${response.status}`);
       }
 
@@ -401,6 +471,7 @@ export default function Home() {
       });
 
       if (!response.ok) {
+        handleAuthFailure(response);
         throw new Error(`API ${response.status}`);
       }
 
@@ -629,49 +700,39 @@ export default function Home() {
     );
   };
 
+  if (authStatus === "checking") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 text-slate-900">
+        <p className="text-sm text-slate-600">Verificando sesion...</p>
+      </div>
+    );
+  }
+
+  if (authStatus !== "authenticated") {
+    return (
+      <LoginScreen
+        username={authUsername}
+        password={authPassword}
+        onUsernameChange={setAuthUsername}
+        onPasswordChange={setAuthPassword}
+        onSubmit={() => void login()}
+        loading={authLoading}
+        error={authError}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 p-6 text-slate-900">
       <main className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-        {!authToken && (
-          <section className="rounded-xl border border-slate-200 bg-white p-6">
-            <h2 className="text-xl font-semibold">Login admin</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Inicia sesion para acceder a ventas, auditoria y gastos.
-            </p>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <label className="text-sm text-slate-600">
-                Usuario
-                <input
-                  type="text"
-                  value={authUsername}
-                  onChange={(event) => setAuthUsername(event.target.value)}
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-                />
-              </label>
-              <label className="text-sm text-slate-600">
-                Password
-                <input
-                  type="password"
-                  value={authPassword}
-                  onChange={(event) => setAuthPassword(event.target.value)}
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-                />
-              </label>
+        <header className="rounded-xl border border-slate-200 bg-white p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-sky-700">
+                Distribuidor · Dashboard Admin
+              </p>
+              <h1 className="mt-2 text-3xl font-bold">Sistema de Gestion de Reparto</h1>
             </div>
-            <button
-              type="button"
-              onClick={() => void login()}
-              disabled={authLoading}
-              className="mt-4 rounded bg-sky-700 px-4 py-2 font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-            >
-              {authLoading ? "Ingresando..." : "Ingresar"}
-            </button>
-            {authError && <p className="mt-3 text-sm text-rose-700">{authError}</p>}
-          </section>
-        )}
-
-        {authToken && (
-          <div className="flex justify-end">
             <button
               type="button"
               onClick={logout}
@@ -680,13 +741,6 @@ export default function Home() {
               Cerrar sesion
             </button>
           </div>
-        )}
-
-        <header className="rounded-xl border border-slate-200 bg-white p-6">
-          <p className="text-sm font-semibold uppercase tracking-wide text-sky-700">
-            Distribuidor · Dashboard Admin
-          </p>
-          <h1 className="mt-2 text-3xl font-bold">Sistema de Gestion de Reparto</h1>
           <p className="mt-3 text-slate-600">
             Vista inicial de ventas registradas desde la app del chofer.
           </p>
