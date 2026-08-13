@@ -13,6 +13,9 @@ apps/driver-app/dist/
 apps/api/dist/
 apps/api/coverage/
 
+# Shared
+packages/shared/dist/
+
 # Env
 .env
 .env.*

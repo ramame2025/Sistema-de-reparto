@@ -58,11 +58,11 @@ Variables utiles:
 - `NEXT_PUBLIC_API_URL` para dashboard (default `http://localhost:4000`).
 - `EXPO_PUBLIC_API_URL` para app chofer (default `http://localhost:4000`).
 - `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `DRIVER_USERNAME`, `DRIVER_PASSWORD` para autenticacion API.
-- `NEXT_PUBLIC_ADMIN_USERNAME`, `NEXT_PUBLIC_ADMIN_PASSWORD` para prellenado del login admin en dashboard.
 
 ## Autenticacion y roles
 
 - `POST /auth/login` devuelve token JWT.
+- `GET /auth/me` valida el token guardado y devuelve `{ username, role }`; dashboard y app chofer lo llaman al arrancar para no mostrar la aplicacion con una sesion vencida.
 - Login validado contra usuarios persistidos en PostgreSQL (`UserAccount`) con password hasheada.
 - Roles disponibles:
   - `admin`: dashboard y operaciones de supervisión.

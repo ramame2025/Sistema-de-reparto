@@ -39,6 +39,12 @@ export function validateCreateSaleInput(input) {
     if (!input.customerName || input.customerName.trim().length < 2) {
         errors.push("customerName must have at least 2 characters");
     }
+    if (!input.driverName || input.driverName.trim().length < 2) {
+        errors.push('driverName must have at least 2 characters');
+    }
+    if (input.truckCode && input.truckCode.trim().length < 2) {
+        errors.push('truckCode must have at least 2 characters when provided');
+    }
     if (!CUSTOMER_TYPES.includes(input.customerType)) {
         errors.push("customerType is invalid");
     }
@@ -97,6 +103,26 @@ export function validateLoginInput(input) {
     }
     if (!input.password || input.password.length < 4) {
         errors.push('password must have at least 4 characters');
+    }
+    return errors;
+}
+export function validateCreateUserInput(input) {
+    const errors = [];
+    if (!input.username || input.username.trim().length < 3) {
+        errors.push('username must have at least 3 characters');
+    }
+    if (!input.password || input.password.length < 6) {
+        errors.push('password must have at least 6 characters');
+    }
+    if (!USER_ROLES.includes(input.role)) {
+        errors.push('role is invalid');
+    }
+    return errors;
+}
+export function validateChangePasswordInput(input) {
+    const errors = [];
+    if (!input.password || input.password.length < 6) {
+        errors.push('password must have at least 6 characters');
     }
     return errors;
 }
