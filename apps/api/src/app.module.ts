@@ -11,6 +11,7 @@ import { CustomersModule } from './customers/customers.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SalesModule } from './sales/sales.module';
+import { TrucksModule } from './trucks/trucks.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
 
@@ -27,6 +28,7 @@ import { UsersModule } from './users/users.module';
     UploadsModule,
     UsersModule,
     CustomersModule,
+    TrucksModule,
   ],
   controllers: [AppController],
   providers: [
