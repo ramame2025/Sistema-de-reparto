@@ -73,7 +73,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const refreshDaySummary = useCallback(async () => {
     setSummaryLoading(true);
     try {
-      const sales = await api.get<SaleRecord[]>('/sales', { cache: 'no-store' });
+      const sales = await api.get<SaleRecord[]>('/sales/mine', { cache: 'no-store' });
       const today = new Date().toISOString().slice(0, 10);
       const todaySales = sales.filter((sale) => sale.createdAt.slice(0, 10) === today);
       const active = todaySales.filter((sale) => sale.status === 'active');
