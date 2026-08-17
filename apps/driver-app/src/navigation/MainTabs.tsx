@@ -3,6 +3,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StyleSheet, Text, View } from 'react-native';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { HomeScreen } from '../screens/HomeScreen';
+import { NewSaleScreen } from '../screens/NewSaleScreen';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
 
@@ -18,7 +19,8 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 /**
  * Temporary placeholder for a tab whose real screen has not been extracted
  * from App.tsx yet. Each of these is replaced one at a time in PR6–PR9
- * (HomeScreen — done in PR6 — then NewSaleScreen, ExpensesScreen, SyncScreen).
+ * (HomeScreen — PR6 — and NewSaleScreen — PR7 — are done; ExpensesScreen and
+ * SyncScreen remain).
  */
 function ComingSoonScreen({ label }: { label: string }) {
   return (
@@ -30,7 +32,6 @@ function ComingSoonScreen({ label }: { label: string }) {
   );
 }
 
-const NewSaleStub = () => <ComingSoonScreen label="Nueva Venta" />;
 const ExpensesStub = () => <ComingSoonScreen label="Gastos" />;
 const SyncStub = () => <ComingSoonScreen label="Sincronización" />;
 
@@ -67,7 +68,7 @@ export function MainTabs() {
       />
       <Tab.Screen
         name="Nueva Venta"
-        component={NewSaleStub}
+        component={NewSaleScreen}
         options={{
           tabBarIcon: makeTabIcon('add-circle-outline', 'tab-icon-nueva-venta'),
           tabBarActiveTintColor: colors.primary,
