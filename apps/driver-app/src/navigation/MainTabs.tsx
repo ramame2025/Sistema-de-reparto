@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StyleSheet, Text, View } from 'react-native';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { HomeScreen } from '../screens/HomeScreen';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
 
@@ -17,7 +18,7 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 /**
  * Temporary placeholder for a tab whose real screen has not been extracted
  * from App.tsx yet. Each of these is replaced one at a time in PR6–PR9
- * (HomeScreen, NewSaleScreen, ExpensesScreen, SyncScreen).
+ * (HomeScreen — done in PR6 — then NewSaleScreen, ExpensesScreen, SyncScreen).
  */
 function ComingSoonScreen({ label }: { label: string }) {
   return (
@@ -29,7 +30,6 @@ function ComingSoonScreen({ label }: { label: string }) {
   );
 }
 
-const HomeStub = () => <ComingSoonScreen label="Inicio" />;
 const NewSaleStub = () => <ComingSoonScreen label="Nueva Venta" />;
 const ExpensesStub = () => <ComingSoonScreen label="Gastos" />;
 const SyncStub = () => <ComingSoonScreen label="Sincronización" />;
@@ -60,7 +60,7 @@ export function MainTabs() {
     >
       <Tab.Screen
         name="Inicio"
-        component={HomeStub}
+        component={HomeScreen}
         options={{
           tabBarIcon: makeTabIcon('home-outline', 'tab-icon-inicio'),
         }}
