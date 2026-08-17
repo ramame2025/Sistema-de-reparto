@@ -1,10 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { StyleSheet, Text, View } from 'react-native';
-import { ScreenContainer } from '../components/ScreenContainer';
 import { ExpensesScreen } from '../screens/ExpensesScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { NewSaleScreen } from '../screens/NewSaleScreen';
+import { SyncScreen } from '../screens/SyncScreen';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
 
@@ -16,24 +15,6 @@ export type MainTabParamList = {
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
-
-/**
- * Temporary placeholder for a tab whose real screen has not been extracted
- * from App.tsx yet. Each of these is replaced one at a time in PR6–PR9
- * (HomeScreen — PR6 —, NewSaleScreen — PR7 —, and ExpensesScreen — PR8 — are
- * done; SyncScreen remains).
- */
-function ComingSoonScreen({ label }: { label: string }) {
-  return (
-    <ScreenContainer>
-      <View style={styles.stub}>
-        <Text style={styles.stubText}>{label} — Próximamente</Text>
-      </View>
-    </ScreenContainer>
-  );
-}
-
-const SyncStub = () => <ComingSoonScreen label="Sincronización" />;
 
 type TabIconProps = { color: string; size: number };
 
@@ -87,7 +68,7 @@ export function MainTabs() {
       />
       <Tab.Screen
         name="Sincronización"
-        component={SyncStub}
+        component={SyncScreen}
         options={{
           tabBarIcon: makeTabIcon('sync-outline', 'tab-icon-sincronizacion'),
         }}
@@ -95,16 +76,3 @@ export function MainTabs() {
     </Tab.Navigator>
   );
 }
-
-const styles = StyleSheet.create({
-  stub: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stubText: {
-    fontSize: typography.sizes.md,
-    color: colors.textSecondary,
-    fontWeight: typography.weights.medium,
-  },
-});
