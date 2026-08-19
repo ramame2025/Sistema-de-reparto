@@ -22,6 +22,8 @@ export type CreateSaleInput = {
     paymentMethod: PaymentMethod;
     items: SaleItemInput[];
     note?: string;
+    customerId?: string;
+    truckId?: string;
 };
 export type UpdateSaleInput = CreateSaleInput & {
     reason: string;
@@ -97,6 +99,27 @@ export type CreateUserInput = {
 export type ChangePasswordInput = {
     password: string;
 };
+export type CreateCustomerInput = {
+    name: string;
+    customerType: CustomerType;
+    zone?: string;
+    latitude?: number;
+    longitude?: number;
+};
+export type CreateTruckInput = {
+    code: string;
+    plate: string;
+    capacity: number;
+};
+export type CreateAssignmentInput = {
+    driverId: string;
+    truckId: string;
+    startDate: string;
+    endDate?: string;
+};
+export type UpdatePriceInput = {
+    amount: number;
+};
 export declare const DEFAULT_PRICE_TABLE: PriceTable;
 export declare function calculateSaleTotal(customerType: CustomerType, items: SaleItemInput[], prices: PriceTable): number;
 export declare function validateCreateSaleInput(input: CreateSaleInput): string[];
@@ -106,3 +129,7 @@ export declare function validateCreateExpenseInput(input: CreateExpenseInput): s
 export declare function validateLoginInput(input: LoginInput): string[];
 export declare function validateCreateUserInput(input: CreateUserInput): string[];
 export declare function validateChangePasswordInput(input: ChangePasswordInput): string[];
+export declare function validateCreateCustomerInput(input: CreateCustomerInput): string[];
+export declare function validateCreateTruckInput(input: CreateTruckInput): string[];
+export declare function validateCreateAssignmentInput(input: CreateAssignmentInput): string[];
+export declare function validateUpdatePriceInput(input: UpdatePriceInput): string[];
