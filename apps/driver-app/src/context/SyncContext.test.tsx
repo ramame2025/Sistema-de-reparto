@@ -24,9 +24,10 @@ const jsonResponse = (body: unknown, status = 200) =>
 const emptySalesResponse = () => jsonResponse([] as SaleRecord[]);
 
 /**
- * Routes fetch calls by endpoint so `/auth/me` (restore-on-mount), `GET /sales`
- * (refreshDaySummary), and `POST /sales` (trySendSale) can each be controlled
- * independently within a single test, matching real traffic shape.
+ * Routes fetch calls by endpoint so `/auth/me` (restore-on-mount),
+ * `GET /sales/mine` (refreshDaySummary — driver-scoped, PR10), and
+ * `POST /sales` (trySendSale) can each be controlled independently within a
+ * single test, matching real traffic shape.
  */
 const makeFetchRouter = (
   overrides: {
@@ -47,7 +48,7 @@ const makeFetchRouter = (
         ? overrides.postSale()
         : Promise.resolve(jsonResponse({ id: 'sale-default' }));
     }
-    if (url.endsWith('/sales')) {
+    if (url.endsWith('/sales/mine')) {
       return overrides.getSales ? overrides.getSales() : Promise.resolve(emptySalesResponse());
     }
     return Promise.resolve(emptySalesResponse());
@@ -476,5 +477,27 @@ describe('SyncContext/4.4 refreshDaySummary chaining + visible summaryError', ()
     });
 
     expect(result.current.sync.summaryError).toBeNull();
+  });
+});
+
+describe('SyncContext/10.3 driver-scoped sales endpoint (PR10)', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  it('refreshDaySummary fetches the driver-scoped /sales/mine endpoint, never the admin-only /sales list', async () => {
+    globalThis.fetch = makeFetchRouter({
+      getSales: () => Promise.resolve(emptySalesResponse()),
+    });
+    await renderAuthenticated();
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:4000/sales/mine',
+      expect.objectContaining({ cache: 'no-store' }),
+    );
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      'http://localhost:4000/sales',
+      expect.objectContaining({ cache: 'no-store' }),
+    );
   });
 });

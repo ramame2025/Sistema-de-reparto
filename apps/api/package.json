@@ -57,6 +57,7 @@
     "eslint-plugin-prettier": "^5.2.2",
     "globals": "^17.0.0",
     "jest": "^30.0.0",
+    "jest-environment-node": "^30.0.0",
     "prettier": "^3.4.2",
     "prisma": "^6.14.0",
     "source-map-support": "^0.5.21",
@@ -80,11 +81,7 @@
       "^.+\\.(t|j)s$": [
         "ts-jest",
         {
-          "tsconfig": {
-            "module": "commonjs",
-            "moduleResolution": "node",
-            "resolvePackageJsonExports": false
-          }
+          "tsconfig": "<rootDir>/../tsconfig.jest.json"
         }
       ]
     },

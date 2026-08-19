@@ -87,6 +87,16 @@ export class SalesService {
     return sales.map((sale) => this.toSaleRecord(sale));
   }
 
+  async listSalesByDriver(driverName: string): Promise<SaleRecord[]> {
+    const sales = await this.prisma.sale.findMany({
+      where: { driverName },
+      include: { items: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return sales.map((sale) => this.toSaleRecord(sale));
+  }
+
   async createSale(input: CreateSaleInput, actorUsername?: string): Promise<SaleRecord> {
     if (input.clientGeneratedId) {
       const existing = await this.prisma.sale.findUnique({
