@@ -65,11 +65,16 @@ model Sale {
   customerType  CustomerType
   paymentMethod PaymentMethod
   note          String?
+  customerId    String?
+  truckId       String?
+  customer      Customer?    @relation(fields: [customerId], references: [id])
+  truck         Truck?       @relation(fields: [truckId], references: [id])
   items         SaleItem[]
   audits        SaleAudit[]
 
   @@index([createdAt])
   @@index([driverName, createdAt])
+  @@index([customerId])
 }
 
 model SaleItem {
@@ -114,4 +119,58 @@ model UserAccount {
   role         UserRole
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  assignments  DriverTruckAssignment[]
+}
+
+model Customer {
+  id           String       @id @default(cuid())
+  name         String
+  customerType CustomerType
+  zone         String?
+  latitude     Float?
+  longitude    Float?
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  sales        Sale[]
+
+  @@index([isActive, name])
+}
+
+model Truck {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  plate       String   @unique
+  capacity    Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  sales       Sale[]
+  assignments DriverTruckAssignment[]
+
+  @@index([isActive, code])
+}
+
+model DriverTruckAssignment {
+  id        String      @id @default(cuid())
+  driverId  String
+  truckId   String
+  startDate DateTime
+  endDate   DateTime?
+  createdAt DateTime    @default(now())
+  driver    UserAccount @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  truck     Truck       @relation(fields: [truckId], references: [id], onDelete: Restrict)
+
+  @@index([truckId, startDate])
+  @@index([driverId, startDate])
+}
+
+model ProductPrice {
+  id           String       @id @default(cuid())
+  productCode  ProductCode
+  customerType CustomerType
+  amount       Int
+  updatedAt    DateTime     @updatedAt
+
+  @@unique([productCode, customerType])
 }

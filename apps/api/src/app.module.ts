@@ -8,9 +8,13 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
+import { CustomersModule } from './customers/customers.module';
+import { DriverTruckAssignmentsModule } from './driver-truck-assignments/driver-truck-assignments.module';
 import { ExpensesModule } from './expenses/expenses.module';
+import { PricesModule } from './prices/prices.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SalesModule } from './sales/sales.module';
+import { TrucksModule } from './trucks/trucks.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
 
@@ -33,6 +37,10 @@ import { UsersModule } from './users/users.module';
     ExpensesModule,
     UploadsModule,
     UsersModule,
+    CustomersModule,
+    TrucksModule,
+    DriverTruckAssignmentsModule,
+    PricesModule,
   ],
   controllers: [AppController],
   providers: [
