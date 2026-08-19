@@ -7,6 +7,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
+import { CustomersModule } from './customers/customers.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SalesModule } from './sales/sales.module';
@@ -25,6 +26,7 @@ import { UsersModule } from './users/users.module';
     ExpensesModule,
     UploadsModule,
     UsersModule,
+    CustomersModule,
   ],
   controllers: [AppController],
   providers: [
