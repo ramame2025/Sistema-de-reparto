@@ -63,5 +63,5 @@ What's missing, grouped by theme:
 
 | Phase | Change name | Status |
 |---|---|---|
-| 1. Domain foundations | `customer-truck-pricing-foundations` | Planned (proposal, spec, design, tasks complete — see linked doc) |
+| 1. Domain foundations | `customer-truck-pricing-foundations` | Implemented — 6 stacked PRs open (#3–#8), pending review/merge. See linked doc for the full SDD chain and per-PR breakdown. |
 | 2–9 | — | Not started |
