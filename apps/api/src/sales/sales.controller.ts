@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Req,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   type CancelSaleInput,
@@ -34,6 +35,18 @@ export class SalesController {
   @Get()
   async listSales() {
     return this.salesService.listSales();
+  }
+
+  @Roles('admin', 'chofer')
+  @Get('mine')
+  async listMySales(@Req() req: AuthRequest) {
+    const username = req.user?.username?.trim();
+
+    if (!username) {
+      throw new UnauthorizedException();
+    }
+
+    return this.salesService.listSalesByDriver(username);
   }
 
   @Roles('admin', 'chofer')

@@ -2,7 +2,7 @@
 
 **Phase**: 1 of 9 ([roadmap](./README.md))
 **SDD artifact store**: Engram (project `sistema-de-reparto`, topic keys `sdd/customer-truck-pricing-foundations/*`)
-**Status**: Planned — proposal, spec, design and tasks are complete and approved; implementation (`sdd-apply`) not yet started.
+**Status**: Implemented — all 8 phases done across 6 stacked PRs (#3–#8), pending review/merge. 61/61 tests passing, `sales.service.ts` went from 0 to 13 tests.
 
 ## Session Preflight (applies to this change)
 
@@ -134,12 +134,12 @@ All changes are additive. Roll back by: (1) reverting the API commit — free-te
 
 ### Success Criteria
 
-- [ ] Admin can create/list/update/delete customers, trucks, assignments and prices; non-admin gets 403.
-- [ ] Assignment queries answer "who drove truck X on date Y"; overlapping open assignments are rejected.
-- [ ] `POST /sales` with no `customerId`/`truckId` behaves exactly as today (driver-app unchanged).
-- [ ] `POST /sales` with `customerId` derives `customerType` from the customer, ignoring any client-supplied type.
-- [ ] Sale totals are computed from `ProductPrice`; editing a price changes new sales only, never historical `Sale.total`.
-- [ ] Jest suite in `apps/api` covers all four new services and the changed sale pricing/linking paths, and passes.
+- [x] Admin can create/list/update/delete customers, trucks, assignments and prices; non-admin gets 403.
+- [x] Assignment queries answer "who drove truck X on date Y"; overlapping open assignments are rejected.
+- [x] `POST /sales` with no `customerId`/`truckId` behaves exactly as today (driver-app unchanged).
+- [x] `POST /sales` with `customerId` derives `customerType` from the customer, ignoring any client-supplied type.
+- [x] Sale totals are computed from `ProductPrice`; editing a price changes new sales only, never historical `Sale.total`.
+- [x] Jest suite in `apps/api` covers all four new services and the changed sale pricing/linking paths, and passes.
 
 ---
 
@@ -387,43 +387,43 @@ Single additive migration. Order: create tables, alter `Sale`, seed the 12 `Prod
 Units 2–5 depend only on Unit 1 (schema) and may be reordered/parallelized; Unit 6 requires 2, 3, 5 merged (not 4).
 
 ### Phase 1: Schema & Migration (Foundation)
-- [ ] 1.1 `apps/api/prisma/schema.prisma`: add `Customer`, `Truck`, `DriverTruckAssignment`, `ProductPrice` models; nullable `customerId`/`truckId` + relations on `Sale`; `assignments` back-relation on `UserAccount`; indexes per design.
-- [ ] 1.2 `apps/api/prisma/migrations/<ts>_add_customer_truck_pricing/migration.sql`: 4 `CREATE TABLE`, `ALTER TABLE "Sale"`, 12 seed `INSERT INTO "ProductPrice"` mirroring `DEFAULT_PRICE_TABLE`.
-- [ ] 1.3 Run `prisma migrate dev` + `prisma generate`; confirm client types compile.
+- [x] 1.1 `apps/api/prisma/schema.prisma`: add `Customer`, `Truck`, `DriverTruckAssignment`, `ProductPrice` models; nullable `customerId`/`truckId` + relations on `Sale`; `assignments` back-relation on `UserAccount`; indexes per design.
+- [x] 1.2 `apps/api/prisma/migrations/<ts>_add_customer_truck_pricing/migration.sql`: 4 `CREATE TABLE`, `ALTER TABLE "Sale"`, 12 seed `INSERT INTO "ProductPrice"` mirroring `DEFAULT_PRICE_TABLE`.
+- [x] 1.3 Run `prisma migrate dev` + `prisma generate`; confirm client types compile.
 
 ### Phase 2: Shared Types & Validators
-- [ ] 2.1 `packages/shared/src/domain.ts`: add `CreateCustomerInput`, `CreateTruckInput`, `CreateAssignmentInput`, `UpdatePriceInput`; widen `CreateSaleInput` with optional `customerId`/`truckId`.
-- [ ] 2.2 RED: validator specs (in `apps/api`) for the 4 new `validate*Input` fns + widened `validateCreateSaleInput`.
-- [ ] 2.3 GREEN: implement `validateCreateCustomerInput`/`validateCreateTruckInput`/`validateCreateAssignmentInput`/`validateUpdatePriceInput` to pass 2.2.
+- [x] 2.1 `packages/shared/src/domain.ts`: add `CreateCustomerInput`, `CreateTruckInput`, `CreateAssignmentInput`, `UpdatePriceInput`; widen `CreateSaleInput` with optional `customerId`/`truckId`.
+- [x] 2.2 RED: validator specs (in `apps/api`) for the 4 new `validate*Input` fns + widened `validateCreateSaleInput`.
+- [x] 2.3 GREEN: implement `validateCreateCustomerInput`/`validateCreateTruckInput`/`validateCreateAssignmentInput`/`validateUpdatePriceInput` to pass 2.2.
 
 ### Phase 3: Customers Module
-- [ ] 3.1 RED: `apps/api/src/customers/customers.service.spec.ts` — create sets `isActive=true`; dup name diff zone both created; list excludes inactive; deactivate flips `isActive` without deleting, existing `Sale` FK unaffected.
-- [ ] 3.2 GREEN: `apps/api/src/customers/customers.service.ts` (clone `users.service.ts` triad, `PrismaService` injected).
-- [ ] 3.3 `apps/api/src/customers/customers.controller.ts` (`@Roles('admin')`, `validateCreateCustomerInput`) + `customers.module.ts`; register in `apps/api/src/app.module.ts`.
+- [x] 3.1 RED: `apps/api/src/customers/customers.service.spec.ts` — create sets `isActive=true`; dup name diff zone both created; list excludes inactive; deactivate flips `isActive` without deleting, existing `Sale` FK unaffected.
+- [x] 3.2 GREEN: `apps/api/src/customers/customers.service.ts` (clone `users.service.ts` triad, `PrismaService` injected).
+- [x] 3.3 `apps/api/src/customers/customers.controller.ts` (`@Roles('admin')`, `validateCreateCustomerInput`) + `customers.module.ts`; register in `apps/api/src/app.module.ts`.
 
 ### Phase 4: Trucks Module
-- [ ] 4.1 RED: `apps/api/src/trucks/trucks.service.spec.ts` — capacity stored as one non-negative int; deactivate referenced truck leaves `DriverTruckAssignment` unaffected; list excludes inactive.
-- [ ] 4.2 GREEN: `apps/api/src/trucks/trucks.service.ts`.
-- [ ] 4.3 `apps/api/src/trucks/trucks.controller.ts` + `trucks.module.ts`; register in `app.module.ts`.
+- [x] 4.1 RED: `apps/api/src/trucks/trucks.service.spec.ts` — capacity stored as one non-negative int; deactivate referenced truck leaves `DriverTruckAssignment` unaffected; list excludes inactive.
+- [x] 4.2 GREEN: `apps/api/src/trucks/trucks.service.ts`.
+- [x] 4.3 `apps/api/src/trucks/trucks.controller.ts` + `trucks.module.ts`; register in `app.module.ts`.
 
 ### Phase 5: Driver-Truck-Assignment Module
-- [ ] 5.1 RED: `apps/api/src/driver-truck-assignments/driver-truck-assignments.service.spec.ts` — reject overlapping open assignment per driver (`ConflictException`, nothing created); reject overlapping open assignment per truck; historical lookup by truck+date returns correct driver.
-- [ ] 5.2 GREEN: `.../driver-truck-assignments.service.ts` — range-overlap check, create/list/close(endDate) (admin closes explicitly — new assignment does NOT auto-close prior).
-- [ ] 5.3 `.../driver-truck-assignments.controller.ts` + `.module.ts`; register in `app.module.ts`.
+- [x] 5.1 RED: `apps/api/src/driver-truck-assignments/driver-truck-assignments.service.spec.ts` — reject overlapping open assignment per driver (`ConflictException`, nothing created); reject overlapping open assignment per truck; historical lookup by truck+date returns correct driver.
+- [x] 5.2 GREEN: `.../driver-truck-assignments.service.ts` — range-overlap check, create/list/close(endDate) (admin closes explicitly — new assignment does NOT auto-close prior).
+- [x] 5.3 `.../driver-truck-assignments.controller.ts` + `.module.ts`; register in `app.module.ts`.
 
 ### Phase 6: Prices Module
-- [ ] 6.1 RED: `apps/api/src/prices/prices.service.spec.ts` — `getPriceTable()` throws on any missing pair; maps 12 rows to `PriceTable`; `updatePrice` mutates single row, no versioning; editing a price leaves prior `Sale.total` untouched.
-- [ ] 6.2 GREEN: `apps/api/src/prices/prices.service.ts` — `getPriceTable`/`listPrices`/`updatePrice`.
-- [ ] 6.3 `apps/api/src/prices/prices.controller.ts` + `prices.module.ts`; register in `app.module.ts`.
+- [x] 6.1 RED: `apps/api/src/prices/prices.service.spec.ts` — `getPriceTable()` throws on any missing pair; maps 12 rows to `PriceTable`; `updatePrice` mutates single row, no versioning; editing a price leaves prior `Sale.total` untouched.
+- [x] 6.2 GREEN: `apps/api/src/prices/prices.service.ts` — `getPriceTable`/`listPrices`/`updatePrice`.
+- [x] 6.3 `apps/api/src/prices/prices.controller.ts` + `prices.module.ts`; register in `app.module.ts`.
 
 ### Phase 7: Sales Integration
-- [ ] 7.1 RED: `apps/api/src/sales/sales.service.spec.ts` (new) — no-FK sale unchanged; `customerId` present overrides client `customerType` + denormalizes `customerName`; unknown/inactive `customerId`/`truckId` rejected (404/409); total sourced from `PricesService.getPriceTable()`.
-- [ ] 7.2 GREEN: `apps/api/src/sales/sales.service.ts` — inject `PricesService`; resolve optional FKs; replace `DEFAULT_PRICE_TABLE` in `createSale`/`updateSale`.
-- [ ] 7.3 `apps/api/src/sales/sales.module.ts`: import `PricesModule`.
+- [x] 7.1 RED: `apps/api/src/sales/sales.service.spec.ts` (new) — no-FK sale unchanged; `customerId` present overrides client `customerType` + denormalizes `customerName`; unknown/inactive `customerId`/`truckId` rejected (404/409); total sourced from `PricesService.getPriceTable()`.
+- [x] 7.2 GREEN: `apps/api/src/sales/sales.service.ts` — inject `PricesService`; resolve optional FKs; replace `DEFAULT_PRICE_TABLE` in `createSale`/`updateSale`.
+- [x] 7.3 `apps/api/src/sales/sales.module.ts`: import `PricesModule`.
 
 ### Phase 8: Verification
-- [ ] 8.1 Run `pnpm --filter api test` (all suites green).
-- [ ] 8.2 Run `pnpm --filter api test:cov`; confirm coverage on 4 new services + changed `sales.service.ts` paths.
+- [x] 8.1 Run `pnpm --filter api test` (all suites green).
+- [x] 8.2 Run `pnpm --filter api test:cov`; confirm coverage on 4 new services + changed `sales.service.ts` paths.
 
 ### Notes
 - No threat-matrix rows apply (design: N/A — no routing/shell/subprocess/VCS boundary).

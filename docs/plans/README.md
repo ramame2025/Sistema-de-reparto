@@ -63,6 +63,6 @@ What's missing, grouped by theme:
 
 | Phase | Change name | Status |
 |---|---|---|
-| 1. Domain foundations | `customer-truck-pricing-foundations` | Planned (proposal, spec, design, tasks complete — see linked doc) |
-| 2. Driver-app refactor | `driver-app-navigation` | Implemented and verified locally (10/10 chained PRs, 131/131 tests, `sdd-verify` passed — see linked doc); not yet pushed/opened as PRs |
+| 1. Domain foundations | `customer-truck-pricing-foundations` | Merged into `main` (PRs #3–#8, consolidated by #22) |
+| 2. Driver-app refactor | `driver-app-navigation` | Merged into `main` (PRs #11–#20) |
 | 3–9 | — | Not started |

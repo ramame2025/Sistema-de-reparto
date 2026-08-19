@@ -48,6 +48,8 @@ export type CreateSaleInput = {
   paymentMethod: PaymentMethod;
   items: SaleItemInput[];
   note?: string;
+  customerId?: string;
+  truckId?: string;
 };
 
 export type UpdateSaleInput = CreateSaleInput & {
@@ -137,6 +139,31 @@ export type ChangePasswordInput = {
   password: string;
 };
 
+export type CreateCustomerInput = {
+  name: string;
+  customerType: CustomerType;
+  zone?: string;
+  latitude?: number;
+  longitude?: number;
+};
+
+export type CreateTruckInput = {
+  code: string;
+  plate: string;
+  capacity: number;
+};
+
+export type CreateAssignmentInput = {
+  driverId: string;
+  truckId: string;
+  startDate: string;
+  endDate?: string;
+};
+
+export type UpdatePriceInput = {
+  amount: number;
+};
+
 export const DEFAULT_PRICE_TABLE: PriceTable = {
   final: { G10: 8500, G15: 13000, G45: 39000, G15_AUTO: 14500 },
   comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },
@@ -174,6 +201,14 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
 
   if (input.truckCode && input.truckCode.trim().length < 2) {
     errors.push('truckCode must have at least 2 characters when provided');
+  }
+
+  if (input.customerId !== undefined && input.customerId.trim().length === 0) {
+    errors.push('customerId must not be empty when provided');
+  }
+
+  if (input.truckId !== undefined && input.truckId.trim().length === 0) {
+    errors.push('truckId must not be empty when provided');
   }
 
   if (!CUSTOMER_TYPES.includes(input.customerType)) {
@@ -282,6 +317,98 @@ export function validateChangePasswordInput(input: ChangePasswordInput): string[
 
   if (!input.password || input.password.length < 6) {
     errors.push('password must have at least 6 characters');
+  }
+
+  return errors;
+}
+
+export function validateCreateCustomerInput(input: CreateCustomerInput): string[] {
+  const errors: string[] = [];
+
+  if (!input.name || input.name.trim().length < 2) {
+    errors.push('name must have at least 2 characters');
+  }
+
+  if (!CUSTOMER_TYPES.includes(input.customerType)) {
+    errors.push('customerType is invalid');
+  }
+
+  if (input.zone !== undefined && input.zone.trim().length === 0) {
+    errors.push('zone must not be empty when provided');
+  }
+
+  if (
+    input.latitude !== undefined &&
+    (!Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90)
+  ) {
+    errors.push('latitude must be between -90 and 90');
+  }
+
+  if (
+    input.longitude !== undefined &&
+    (!Number.isFinite(input.longitude) || input.longitude < -180 || input.longitude > 180)
+  ) {
+    errors.push('longitude must be between -180 and 180');
+  }
+
+  return errors;
+}
+
+export function validateCreateTruckInput(input: CreateTruckInput): string[] {
+  const errors: string[] = [];
+
+  if (!input.code || input.code.trim().length < 1) {
+    errors.push('code must have at least 1 character');
+  }
+
+  if (!input.plate || input.plate.trim().length < 1) {
+    errors.push('plate must have at least 1 character');
+  }
+
+  if (!Number.isInteger(input.capacity) || input.capacity < 0) {
+    errors.push('capacity must be a non-negative integer');
+  }
+
+  return errors;
+}
+
+export function validateCreateAssignmentInput(input: CreateAssignmentInput): string[] {
+  const errors: string[] = [];
+
+  if (!input.driverId || input.driverId.trim().length === 0) {
+    errors.push('driverId is required');
+  }
+
+  if (!input.truckId || input.truckId.trim().length === 0) {
+    errors.push('truckId is required');
+  }
+
+  const startDate = new Date(input.startDate);
+  const startDateValid = !Number.isNaN(startDate.getTime());
+
+  if (!input.startDate || !startDateValid) {
+    errors.push('startDate must be a valid date');
+  }
+
+  if (input.endDate !== undefined) {
+    const endDate = new Date(input.endDate);
+    const endDateValid = !Number.isNaN(endDate.getTime());
+
+    if (!endDateValid) {
+      errors.push('endDate must be a valid date');
+    } else if (startDateValid && endDate.getTime() < startDate.getTime()) {
+      errors.push('endDate must not be before startDate');
+    }
+  }
+
+  return errors;
+}
+
+export function validateUpdatePriceInput(input: UpdatePriceInput): string[] {
+  const errors: string[] = [];
+
+  if (!Number.isInteger(input.amount) || input.amount <= 0) {
+    errors.push('amount must be a positive integer');
   }
 
   return errors;
