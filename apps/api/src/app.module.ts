@@ -10,6 +10,7 @@ import { RolesGuard } from './auth/roles.guard';
 import { CustomersModule } from './customers/customers.module';
 import { DriverTruckAssignmentsModule } from './driver-truck-assignments/driver-truck-assignments.module';
 import { ExpensesModule } from './expenses/expenses.module';
+import { PricesModule } from './prices/prices.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SalesModule } from './sales/sales.module';
 import { TrucksModule } from './trucks/trucks.module';
@@ -31,6 +32,7 @@ import { UsersModule } from './users/users.module';
     CustomersModule,
     TrucksModule,
     DriverTruckAssignmentsModule,
+    PricesModule,
   ],
   controllers: [AppController],
   providers: [
