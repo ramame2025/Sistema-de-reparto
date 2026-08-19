@@ -1,9 +1,9 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  DEFAULT_PRICE_TABLE,
   calculateSaleTotal,
   type CancelSaleInput,
   type CreateSaleInput,
+  type CustomerType,
   type SaleAuditRecord,
   type SaleRecord,
   type UpdateSaleInput,
@@ -18,10 +18,65 @@ import {
   type SaleItem,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PricesService } from '../prices/prices.service';
+
+type ResolvedSaleLinks = {
+  customerType: CustomerType;
+  customerName: string;
+  customerId: string | null;
+  truckId: string | null;
+};
 
 @Injectable()
 export class SalesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pricesService: PricesService,
+  ) {}
+
+  private async resolveCustomerAndTruck(
+    input: CreateSaleInput,
+  ): Promise<ResolvedSaleLinks> {
+    let customerType = input.customerType;
+    let customerName = input.customerName.trim();
+    let customerId: string | null = null;
+
+    if (input.customerId) {
+      const customer = await this.prisma.customer.findUnique({
+        where: { id: input.customerId },
+      });
+
+      if (!customer) {
+        throw new NotFoundException('Customer not found');
+      }
+      if (!customer.isActive) {
+        throw new ConflictException('Customer is inactive');
+      }
+
+      customerType = customer.customerType as CustomerType;
+      customerName = customer.name;
+      customerId = customer.id;
+    }
+
+    let truckId: string | null = null;
+
+    if (input.truckId) {
+      const truck = await this.prisma.truck.findUnique({
+        where: { id: input.truckId },
+      });
+
+      if (!truck) {
+        throw new NotFoundException('Truck not found');
+      }
+      if (!truck.isActive) {
+        throw new ConflictException('Truck is inactive');
+      }
+
+      truckId = truck.id;
+    }
+
+    return { customerType, customerName, customerId, truckId };
+  }
 
   async listSales(): Promise<SaleRecord[]> {
     const sales = await this.prisma.sale.findMany({
@@ -44,7 +99,10 @@ export class SalesService {
       }
     }
 
-    const total = calculateSaleTotal(input.customerType, input.items, DEFAULT_PRICE_TABLE);
+    const priceTable = await this.pricesService.getPriceTable();
+    const { customerType, customerName, customerId, truckId } =
+      await this.resolveCustomerAndTruck(input);
+    const total = calculateSaleTotal(customerType, input.items, priceTable);
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
 
@@ -53,11 +111,13 @@ export class SalesService {
         clientGeneratedId: input.clientGeneratedId ?? null,
         driverName: resolvedDriverName,
         truckCode: resolvedTruckCode,
-        customerName: input.customerName.trim(),
-        customerType: input.customerType as PrismaCustomerType,
+        customerName,
+        customerType: customerType as PrismaCustomerType,
         paymentMethod: input.paymentMethod as PrismaPaymentMethod,
         note: input.note?.trim() || null,
         total,
+        customerId,
+        truckId,
         items: {
           create: input.items.map((item) => ({
             productCode: item.productCode as PrismaProductCode,
@@ -91,7 +151,10 @@ export class SalesService {
       throw new ConflictException('Canceled sales cannot be edited');
     }
 
-    const total = calculateSaleTotal(input.customerType, input.items, DEFAULT_PRICE_TABLE);
+    const priceTable = await this.pricesService.getPriceTable();
+    const { customerType, customerName, customerId, truckId } =
+      await this.resolveCustomerAndTruck(input);
+    const total = calculateSaleTotal(customerType, input.items, priceTable);
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
 
@@ -117,11 +180,13 @@ export class SalesService {
         data: {
           driverName: resolvedDriverName,
           truckCode: resolvedTruckCode,
-          customerName: input.customerName.trim(),
-          customerType: input.customerType as PrismaCustomerType,
+          customerName,
+          customerType: customerType as PrismaCustomerType,
           paymentMethod: input.paymentMethod as PrismaPaymentMethod,
           note: input.note?.trim() || null,
           total,
+          customerId,
+          truckId,
           items: {
             create: input.items.map((item) => ({
               productCode: item.productCode as PrismaProductCode,
