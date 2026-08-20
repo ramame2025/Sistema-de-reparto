@@ -28,6 +28,27 @@ export type EffectiveDay = {
   kind: AssignmentKind | null;
 };
 
+/** Las dos capas que necesita el calendario: filas para editar, dias para pintar. */
+export type TruckCalendar = {
+  truckId: string;
+  from: string;
+  to: string;
+  assignments: AssignmentRecord[];
+  days: EffectiveDay[];
+};
+
+/** Lo que la app del chofer necesita saber al abrir: que camion maneja hoy. */
+export type DriverTruckToday = {
+  assignmentId: string;
+  kind: AssignmentKind;
+  truckId: string;
+  code: string;
+  plate: string;
+  capacity: number;
+  startDate: string;
+  endDate: string | null;
+};
+
 export type AssignmentWarning = {
   code: 'driver_leaves_own_truck';
   message: string;
@@ -47,6 +68,12 @@ type AssignmentRow = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * La proyeccion recorre dia por dia, asi que la ventana tiene que estar
+ * acotada: sin tope, un from/to de un siglo arma decenas de miles de entradas.
+ */
+const MAX_CALENDAR_DAYS = 366;
 
 /** Las asignaciones se razonan por dia entero, no por instante. */
 const toUtcDay = (value: Date | string): number => {
@@ -172,38 +199,32 @@ export class DriverTruckAssignmentsService {
     from: string,
     to: string,
   ): Promise<EffectiveDay[]> {
-    const fromDay = toUtcDay(from);
-    const toDay = toUtcDay(to);
+    const { fromDay, toDay } = this.assertWindow(from, to);
+    const assignments = await this.findInWindow(truckId, fromDay, toDay);
 
-    if (toDay < fromDay) {
-      throw new BadRequestException('to must not be before from');
-    }
+    return this.projectDays(assignments, fromDay, toDay);
+  }
 
-    const assignments = (await this.prisma.driverTruckAssignment.findMany({
-      where: {
-        truckId,
-        startDate: { lte: new Date(toDay) },
-        OR: [{ endDate: null }, { endDate: { gte: new Date(fromDay) } }],
-      },
-      orderBy: { startDate: 'asc' },
-    })) as AssignmentRow[];
+  /**
+   * Calendario de un camion. Devuelve las filas crudas Y la proyeccion por dia
+   * con UNA sola consulta: quien maneja cada dia sale de la regla de
+   * especificidad, no de la fila, y esa regla vive aca y en ningun otro lado.
+   */
+  async getTruckCalendar(
+    truckId: string,
+    from: string,
+    to: string,
+  ): Promise<TruckCalendar> {
+    const { fromDay, toDay } = this.assertWindow(from, to);
+    const assignments = await this.findInWindow(truckId, fromDay, toDay);
 
-    const days: EffectiveDay[] = [];
-
-    for (let dayMs = fromDay; dayMs <= toDay; dayMs += DAY_MS) {
-      const winner = this.pickMostSpecific(
-        assignments.filter((assignment) => coversDay(assignment, dayMs)),
-      );
-
-      days.push({
-        date: formatDay(dayMs),
-        driverId: winner?.driverId ?? null,
-        assignmentId: winner?.id ?? null,
-        kind: winner?.kind ?? null,
-      });
-    }
-
-    return days;
+    return {
+      truckId,
+      from: formatDay(fromDay),
+      to: formatDay(toDay),
+      assignments: assignments.map((assignment) => this.toRecord(assignment)),
+      days: this.projectDays(assignments, fromDay, toDay),
+    };
   }
 
   /** Que camion maneja un chofer en una fecha. Es lo que consume la app movil. */
@@ -226,6 +247,40 @@ export class DriverTruckAssignmentsService {
     );
 
     return winner ? this.toRecord(winner) : null;
+  }
+
+  /**
+   * Resuelve el camion de un chofer en una fecha y lo devuelve ya resuelto con
+   * los datos del camion, para que la app no tenga que encadenar dos llamadas.
+   */
+  async resolveMyTruckForDate(
+    driverId: string,
+    date: string,
+  ): Promise<DriverTruckToday | null> {
+    const assignment = await this.resolveAssignmentForDriverOnDate(driverId, date);
+    if (!assignment) {
+      return null;
+    }
+
+    const truck = await this.prisma.truck.findUnique({
+      where: { id: assignment.truckId },
+    });
+
+    // Un camion dado de baja no habilita ventas, aunque la asignacion siga viva.
+    if (!truck || !truck.isActive) {
+      return null;
+    }
+
+    return {
+      assignmentId: assignment.id,
+      kind: assignment.kind,
+      truckId: truck.id,
+      code: truck.code,
+      plate: truck.plate,
+      capacity: truck.capacity,
+      startDate: assignment.startDate,
+      endDate: assignment.endDate,
+    };
   }
 
   async closeAssignment(
@@ -304,6 +359,65 @@ export class DriverTruckAssignmentsService {
     });
 
     return assignment ? this.toRecord(assignment) : null;
+  }
+
+  private assertWindow(from: string, to: string): { fromDay: number; toDay: number } {
+    const fromDay = toUtcDay(from);
+    const toDay = toUtcDay(to);
+
+    if (Number.isNaN(fromDay) || Number.isNaN(toDay)) {
+      throw new BadRequestException('from and to must be valid dates');
+    }
+
+    if (toDay < fromDay) {
+      throw new BadRequestException('to must not be before from');
+    }
+
+    if (toDay - fromDay > (MAX_CALENDAR_DAYS - 1) * DAY_MS) {
+      throw new BadRequestException(
+        `the window must not exceed ${MAX_CALENDAR_DAYS} days`,
+      );
+    }
+
+    return { fromDay, toDay };
+  }
+
+  private async findInWindow(
+    truckId: string,
+    fromDay: number,
+    toDay: number,
+  ): Promise<AssignmentRow[]> {
+    return (await this.prisma.driverTruckAssignment.findMany({
+      where: {
+        truckId,
+        startDate: { lte: new Date(toDay) },
+        OR: [{ endDate: null }, { endDate: { gte: new Date(fromDay) } }],
+      },
+      orderBy: { startDate: 'asc' },
+    })) as AssignmentRow[];
+  }
+
+  private projectDays(
+    assignments: AssignmentRow[],
+    fromDay: number,
+    toDay: number,
+  ): EffectiveDay[] {
+    const days: EffectiveDay[] = [];
+
+    for (let dayMs = fromDay; dayMs <= toDay; dayMs += DAY_MS) {
+      const winner = this.pickMostSpecific(
+        assignments.filter((assignment) => coversDay(assignment, dayMs)),
+      );
+
+      days.push({
+        date: formatDay(dayMs),
+        driverId: winner?.driverId ?? null,
+        assignmentId: winner?.id ?? null,
+        kind: winner?.kind ?? null,
+      });
+    }
+
+    return days;
   }
 
   private async assertDriverIsChofer(driverId: string): Promise<void> {

@@ -159,4 +159,21 @@ describe('TrucksService', () => {
       expect(prisma.truck.update).not.toHaveBeenCalled();
     });
   });
+  describe('getTruck', () => {
+    it('returns the truck when it exists', async () => {
+      prisma.truck.findUnique.mockResolvedValue(buildTruckRow());
+
+      const result = await service.getTruck('truck-1');
+
+      expect(prisma.truck.findUnique).toHaveBeenCalledWith({ where: { id: 'truck-1' } });
+      expect(result.code).toBe('T-01');
+      expect(result.capacity).toBe(40);
+    });
+
+    it('throws NotFoundException when the truck does not exist', async () => {
+      prisma.truck.findUnique.mockResolvedValue(null);
+
+      await expect(service.getTruck('ghost')).rejects.toThrow(NotFoundException);
+    });
+  });
 });

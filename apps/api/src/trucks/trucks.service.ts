@@ -25,6 +25,15 @@ export class TrucksService {
     return trucks.map((truck) => this.toRecord(truck));
   }
 
+  async getTruck(id: string): Promise<TruckRecord> {
+    const truck = await this.prisma.truck.findUnique({ where: { id } });
+    if (!truck) {
+      throw new NotFoundException('Truck not found');
+    }
+
+    return this.toRecord(truck);
+  }
+
   async createTruck(input: CreateTruckInput): Promise<TruckRecord> {
     const truck = await this.prisma.truck.create({
       data: {

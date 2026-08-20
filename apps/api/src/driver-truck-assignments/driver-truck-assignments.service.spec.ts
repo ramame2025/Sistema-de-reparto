@@ -43,6 +43,7 @@ describe('DriverTruckAssignmentsService', () => {
       findUnique: jest.Mock;
       update: jest.Mock;
     };
+    truck: { findUnique: jest.Mock };
     userAccount: { findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -56,6 +57,7 @@ describe('DriverTruckAssignmentsService', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
+      truck: { findUnique: jest.fn() },
       userAccount: { findUnique: jest.fn() },
       $transaction: jest.fn(),
     };
@@ -616,6 +618,130 @@ describe('DriverTruckAssignmentsService', () => {
       });
 
       expect(warnings).toEqual([]);
+    });
+  });
+  describe('getTruckCalendar', () => {
+    it('returns both layers: the raw rows to edit and the day-by-day projection to paint', async () => {
+      // Dos filas, cuatro dias. Pintar el calendario NO es listar las filas.
+      prisma.driverTruckAssignment.findMany.mockResolvedValue([
+        buildAssignmentRow({
+          id: 'tit-1',
+          driverId: 'juan',
+          kind: 'titular',
+          startDate: new Date('2026-02-01T00:00:00.000Z'),
+          endDate: null,
+        }),
+        buildAssignmentRow({
+          id: 'cov-1',
+          driverId: 'pedro',
+          kind: 'cobertura',
+          startDate: new Date('2026-02-03T00:00:00.000Z'),
+          endDate: new Date('2026-02-03T00:00:00.000Z'),
+        }),
+      ]);
+
+      const calendar = await service.getTruckCalendar('truck-1', '2026-02-02', '2026-02-04');
+
+      expect(calendar.truckId).toBe('truck-1');
+      expect(calendar.from).toBe('2026-02-02');
+      expect(calendar.to).toBe('2026-02-04');
+      expect(calendar.assignments.map((a) => a.id)).toEqual(['tit-1', 'cov-1']);
+      expect(calendar.days).toEqual([
+        { date: '2026-02-02', driverId: 'juan', assignmentId: 'tit-1', kind: 'titular' },
+        { date: '2026-02-03', driverId: 'pedro', assignmentId: 'cov-1', kind: 'cobertura' },
+        { date: '2026-02-04', driverId: 'juan', assignmentId: 'tit-1', kind: 'titular' },
+      ]);
+    });
+
+    it('hits the database once, not once per day', async () => {
+      prisma.driverTruckAssignment.findMany.mockResolvedValue([]);
+
+      await service.getTruckCalendar('truck-1', '2026-02-01', '2026-02-28');
+
+      expect(prisma.driverTruckAssignment.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a window longer than a year instead of building a huge array', async () => {
+      // La proyeccion recorre dia por dia: sin tope, from=1900&to=2100 arma
+      // 73.000 entradas en memoria.
+      await expect(
+        service.getTruckCalendar('truck-1', '2026-01-01', '2027-06-01'),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.driverTruckAssignment.findMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a window where `to` is before `from`', async () => {
+      await expect(
+        service.getTruckCalendar('truck-1', '2026-02-10', '2026-02-01'),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.driverTruckAssignment.findMany).not.toHaveBeenCalled();
+    });
+  });
+  describe('resolveMyTruckForDate', () => {
+    it('returns the truck the driver actually drives that day, with its capacity', async () => {
+      prisma.driverTruckAssignment.findMany.mockResolvedValue([
+        buildAssignmentRow({
+          id: 'tit-1',
+          driverId: 'pedro',
+          truckId: 'truck-2',
+          kind: 'titular',
+          startDate: new Date('2026-01-01T00:00:00.000Z'),
+          endDate: null,
+        }),
+        buildAssignmentRow({
+          id: 'cov-1',
+          driverId: 'pedro',
+          truckId: 'truck-1',
+          kind: 'cobertura',
+          startDate: new Date('2026-02-10T00:00:00.000Z'),
+          endDate: new Date('2026-02-12T00:00:00.000Z'),
+        }),
+      ]);
+      prisma.truck.findUnique.mockResolvedValue({
+        id: 'truck-1',
+        code: 'T-01',
+        plate: 'AB123CD',
+        capacity: 40,
+        isActive: true,
+      });
+
+      const result = await service.resolveMyTruckForDate('pedro', '2026-02-11');
+
+      // Ese dia Pedro cubre el truck-1, no maneja su titular truck-2.
+      expect(prisma.truck.findUnique).toHaveBeenCalledWith({ where: { id: 'truck-1' } });
+      expect(result).toMatchObject({
+        truckId: 'truck-1',
+        code: 'T-01',
+        capacity: 40,
+        kind: 'cobertura',
+      });
+    });
+
+    it('returns null when the driver has no truck that day', async () => {
+      prisma.driverTruckAssignment.findMany.mockResolvedValue([]);
+
+      const result = await service.resolveMyTruckForDate('pedro', '2026-02-11');
+
+      expect(result).toBeNull();
+      expect(prisma.truck.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('returns null when the assigned truck was deactivated', async () => {
+      // Un camion dado de baja no puede seguir habilitando ventas.
+      prisma.driverTruckAssignment.findMany.mockResolvedValue([
+        buildAssignmentRow({ driverId: 'pedro', truckId: 'truck-1', kind: 'titular' }),
+      ]);
+      prisma.truck.findUnique.mockResolvedValue({
+        id: 'truck-1',
+        code: 'T-01',
+        plate: 'AB123CD',
+        capacity: 40,
+        isActive: false,
+      });
+
+      const result = await service.resolveMyTruckForDate('pedro', '2026-02-11');
+
+      expect(result).toBeNull();
     });
   });
 });
