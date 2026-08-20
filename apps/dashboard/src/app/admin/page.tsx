@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useAuth } from "../../context/AuthContext";
-import { API_URL } from "../../lib/config";
+import { useMemo, useState } from "react";
+import useSWR from "swr";
+import { useApiClient, useAuth } from "../../context/AuthContext";
+import { resolveReceiptUrl } from "../../lib/api-client";
+import { downloadCsvReport } from "../../lib/csv";
 import {
   type CreateUserInput,
   EXPENSE_CATEGORIES,
@@ -23,45 +25,30 @@ type PaymentFilter = "all" | PaymentMethod;
 type ProductFilter = "all" | ProductCode;
 type ExpenseCategoryFilter = "all" | ExpenseCategory;
 
-const formatDateForFilename = (value: string) => value.replaceAll("-", "");
-
-const buildDateRangeLabel = (from: string, to: string) => {
-  if (from && to) {
-    return from === to ? from : `${from}_to_${to}`;
-  }
-
-  if (from) {
-    return `${from}_onward`;
-  }
-
-  if (to) {
-    return `until_${to}`;
-  }
-
-  return new Date().toISOString().slice(0, 10);
-};
-
-const escapeCsvCell = (value: string | number | null | undefined) => {
-  const raw = String(value ?? "");
-  if (/[",\n\r]/.test(raw)) {
-    return `"${raw.replaceAll("\"", "\"\"")}"`;
-  }
-
-  return raw;
-};
-
-const toCsv = (headers: string[], rows: Array<Array<string | number | null | undefined>>) => {
-  const headerLine = headers.map((cell) => escapeCsvCell(cell)).join(",");
-  const lines = rows.map((row) => row.map((cell) => escapeCsvCell(cell)).join(","));
-  return [headerLine, ...lines].join("\n");
-};
-
 export default function Home() {
-  const { token: authToken, handleAuthFailure } = useAuth();
-  const [sales, setSales] = useState<SaleRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const { token: authToken } = useAuth();
+  const api = useApiClient();
+
+  // Los datos del servidor los pide SWR (fetcher configurado en el layout);
+  // en useState queda solo lo que es realmente estado local de la pantalla.
+  const {
+    data: sales = [],
+    isLoading: salesLoading,
+    error: salesLoadError,
+    mutate: reloadSales,
+  } = useSWR<SaleRecord[]>("/sales");
+  const {
+    data: expenses = [],
+    isLoading: expensesLoading,
+    error: expensesLoadError,
+  } = useSWR<ExpenseRecord[]>("/expenses");
+  const {
+    data: users = [],
+    isValidating: usersLoading,
+    error: usersLoadError,
+    mutate: reloadUsers,
+  } = useSWR<UserSummary[]>("/users");
+
   const [saleDateFrom, setSaleDateFrom] = useState("");
   const [saleDateTo, setSaleDateTo] = useState("");
   const [saleStatusFilter, setSaleStatusFilter] = useState<SaleStatusFilter>("all");
@@ -75,92 +62,26 @@ export default function Home() {
   const [expenseCategoryFilter, setExpenseCategoryFilter] =
     useState<ExpenseCategoryFilter>("all");
   const [selectedSaleForAudit, setSelectedSaleForAudit] = useState<SaleRecord | null>(null);
-  const [auditLoading, setAuditLoading] = useState(false);
-  const [audits, setAudits] = useState<SaleAuditRecord[]>([]);
-  const [users, setUsers] = useState<UserSummary[]>([]);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [userError, setUserError] = useState<string | null>(null);
+  const [saleActionError, setSaleActionError] = useState<string | null>(null);
+  const [userActionError, setUserActionError] = useState<string | null>(null);
   const [userNotice, setUserNotice] = useState<string | null>(null);
   const [newUserUsername, setNewUserUsername] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState<UserRole>("chofer");
   const [creatingUser, setCreatingUser] = useState(false);
 
-  const loadSales = async () => {
-    if (!authToken) {
-      return;
-    }
+  // La auditoria se pide sola al elegir una venta: con la clave en null,
+  // SWR simplemente no dispara la request.
+  const { data: audits = [], isLoading: auditLoading } = useSWR<SaleAuditRecord[]>(
+    selectedSaleForAudit ? `/sales/${selectedSaleForAudit.id}/audits` : null,
+  );
 
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await fetch(`${API_URL}/sales`, {
-        method: "GET",
-        cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        handleAuthFailure(response);
-        throw new Error(`API ${response.status}`);
-      }
-
-      const data: SaleRecord[] = await response.json();
-      setSales(data);
-
-      const expensesResponse = await fetch(`${API_URL}/expenses`, {
-        method: "GET",
-        cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-
-      if (!expensesResponse.ok) {
-        handleAuthFailure(expensesResponse);
-        throw new Error(`API ${expensesResponse.status}`);
-      }
-
-      const expenseData: ExpenseRecord[] = await expensesResponse.json();
-      setExpenses(expenseData);
-
-      try {
-        const usersResponse = await fetch(`${API_URL}/users`, {
-          method: "GET",
-          cache: "no-store",
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
-        });
-
-        if (!usersResponse.ok) {
-          handleAuthFailure(usersResponse);
-          throw new Error(`API ${usersResponse.status}`);
-        }
-
-        const usersData: UserSummary[] = await usersResponse.json();
-        setUsers(usersData);
-        setUserError(null);
-      } catch {
-        setUserError("No se pudo cargar usuarios.");
-      }
-    } catch {
-      setError("No se pudo cargar la lista de ventas.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!authToken) {
-      return;
-    }
-
-    void loadSales();
-  }, [authToken]);
+  const loading = salesLoading || expensesLoading;
+  const error =
+    saleActionError ??
+    (salesLoadError || expensesLoadError ? "No se pudo cargar la lista de ventas." : null);
+  const userError =
+    userActionError ?? (usersLoadError ? "No se pudo cargar usuarios." : null);
 
   const cancelSale = async (sale: SaleRecord) => {
     const reason = window.prompt("Motivo de anulacion", "Error de carga");
@@ -169,96 +90,15 @@ export default function Home() {
     }
 
     try {
-      const response = await fetch(`${API_URL}/sales/${sale.id}/cancel`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({ reason }),
-      });
-
-      if (!response.ok) {
-        handleAuthFailure(response);
-        throw new Error(`API ${response.status}`);
-      }
-
-      await loadSales();
+      setSaleActionError(null);
+      await api.patch(`/sales/${sale.id}/cancel`, { reason });
+      await reloadSales();
     } catch {
-      setError("No se pudo anular la venta.");
-    }
-  };
-
-  const showAudits = async (sale: SaleRecord) => {
-    try {
-      setSelectedSaleForAudit(sale);
-      setAuditLoading(true);
-      setAudits([]);
-      const response = await fetch(`${API_URL}/sales/${sale.id}/audits`, {
-        method: "GET",
-        cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        handleAuthFailure(response);
-        throw new Error(`API ${response.status}`);
-      }
-
-      const data: SaleAuditRecord[] = await response.json();
-      setAudits(data);
-    } catch {
-      setError("No se pudo cargar la auditoria de la venta.");
-      setSelectedSaleForAudit(null);
-    } finally {
-      setAuditLoading(false);
-    }
-  };
-
-  const closeAuditModal = () => {
-    setSelectedSaleForAudit(null);
-    setAudits([]);
-    setAuditLoading(false);
-  };
-
-  const refreshUsers = async () => {
-    if (!authToken) {
-      return;
-    }
-
-    try {
-      setUsersLoading(true);
-      setUserError(null);
-
-      const response = await fetch(`${API_URL}/users`, {
-        method: "GET",
-        cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        handleAuthFailure(response);
-        throw new Error(`API ${response.status}`);
-      }
-
-      const payload: UserSummary[] = await response.json();
-      setUsers(payload);
-    } catch {
-      setUserError("No se pudo cargar usuarios.");
-    } finally {
-      setUsersLoading(false);
+      setSaleActionError("No se pudo anular la venta.");
     }
   };
 
   const createUser = async () => {
-    if (!authToken) {
-      return;
-    }
-
     const payload: CreateUserInput = {
       username: newUserUsername,
       password: newUserPassword,
@@ -267,100 +107,58 @@ export default function Home() {
 
     try {
       setCreatingUser(true);
-      setUserError(null);
+      setUserActionError(null);
       setUserNotice(null);
 
-      const response = await fetch(`${API_URL}/users`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        handleAuthFailure(response);
-        throw new Error(`API ${response.status}`);
-      }
+      await api.post("/users", payload);
 
       setNewUserUsername("");
       setNewUserPassword("");
       setNewUserRole("chofer");
       setUserNotice("Usuario creado correctamente.");
-      await refreshUsers();
+      await reloadUsers();
     } catch {
-      setUserError("No se pudo crear el usuario.");
+      setUserActionError("No se pudo crear el usuario.");
     } finally {
       setCreatingUser(false);
     }
   };
 
   const resetUserPassword = async (user: UserSummary) => {
-    if (!authToken) {
-      return;
-    }
-
     const nextPassword = window.prompt(`Nueva password para ${user.username}`);
     if (!nextPassword) {
       return;
     }
 
     try {
-      setUserError(null);
+      setUserActionError(null);
       setUserNotice(null);
 
-      const response = await fetch(`${API_URL}/users/${user.id}/password`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({ password: nextPassword }),
-      });
-
-      if (!response.ok) {
-        handleAuthFailure(response);
-        throw new Error(`API ${response.status}`);
-      }
+      await api.patch(`/users/${user.id}/password`, { password: nextPassword });
 
       setUserNotice(`Password actualizada para ${user.username}.`);
-      await refreshUsers();
+      await reloadUsers();
     } catch {
-      setUserError("No se pudo actualizar la password.");
+      setUserActionError("No se pudo actualizar la password.");
     }
   };
 
   const deleteUser = async (user: UserSummary) => {
-    if (!authToken) {
-      return;
-    }
-
     const confirmed = window.confirm(`Eliminar usuario ${user.username}?`);
     if (!confirmed) {
       return;
     }
 
     try {
-      setUserError(null);
+      setUserActionError(null);
       setUserNotice(null);
 
-      const response = await fetch(`${API_URL}/users/${user.id}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        handleAuthFailure(response);
-        throw new Error(`API ${response.status}`);
-      }
+      await api.remove(`/users/${user.id}`);
 
       setUserNotice(`Usuario ${user.username} eliminado.`);
-      await refreshUsers();
+      await reloadUsers();
     } catch {
-      setUserError("No se pudo eliminar el usuario.");
+      setUserActionError("No se pudo eliminar el usuario.");
     }
   };
 
@@ -480,41 +278,16 @@ export default function Home() {
     [filteredExpenses],
   );
 
-  const resolveReceiptUrl = (receiptRef?: string) => {
-    if (!receiptRef) {
-      return null;
-    }
-
-    if (receiptRef.startsWith("http://") || receiptRef.startsWith("https://")) {
-      return receiptRef;
-    }
-
-    if (receiptRef.startsWith("/")) {
-      return `${API_URL}${receiptRef}`;
-    }
-
-    return null;
-  };
-
-  const triggerCsvDownload = (filename: string, csvContent: string) => {
-    const blob = new Blob([`\uFEFF${csvContent}`], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  };
-
   const exportSalesCsv = () => {
     if (filteredSales.length === 0) {
       return;
     }
 
-    const csv = toCsv(
-      [
+    downloadCsvReport({
+      prefix: "cierre_ventas",
+      from: saleDateFrom,
+      to: saleDateTo,
+      headers: [
         "fecha",
         "id",
         "chofer",
@@ -527,7 +300,7 @@ export default function Home() {
         "motivo_anulacion",
         "items",
       ],
-      filteredSales.map((sale) => [
+      rows: filteredSales.map((sale) => [
         new Date(sale.createdAt).toISOString(),
         sale.id,
         sale.driverName,
@@ -540,13 +313,7 @@ export default function Home() {
         sale.cancelReason ?? "",
         sale.items.map((item) => `${item.productCode}x${item.quantity}`).join(" | "),
       ]),
-    );
-
-    const label = buildDateRangeLabel(saleDateFrom, saleDateTo);
-    triggerCsvDownload(
-      `cierre_ventas_${formatDateForFilename(label)}.csv`,
-      csv,
-    );
+    });
   };
 
   const exportExpensesCsv = () => {
@@ -554,8 +321,11 @@ export default function Home() {
       return;
     }
 
-    const csv = toCsv(
-      [
+    downloadCsvReport({
+      prefix: "cierre_gastos",
+      from: expenseDateFrom,
+      to: expenseDateTo,
+      headers: [
         "fecha",
         "id",
         "chofer",
@@ -564,7 +334,7 @@ export default function Home() {
         "descripcion",
         "comprobante",
       ],
-      filteredExpenses.map((expense) => [
+      rows: filteredExpenses.map((expense) => [
         new Date(expense.createdAt).toISOString(),
         expense.id,
         expense.driverName,
@@ -573,13 +343,7 @@ export default function Home() {
         expense.note ?? "",
         expense.receiptRef ?? "",
       ]),
-    );
-
-    const label = buildDateRangeLabel(expenseDateFrom, expenseDateTo);
-    triggerCsvDownload(
-      `cierre_gastos_${formatDateForFilename(label)}.csv`,
-      csv,
-    );
+    });
   };
 
   return (
@@ -793,7 +557,7 @@ export default function Home() {
                     <td className="py-2 pr-4">
                       <button
                         type="button"
-                        onClick={() => showAudits(sale)}
+                        onClick={() => setSelectedSaleForAudit(sale)}
                         className="rounded bg-slate-700 px-3 py-1 text-white hover:bg-slate-800"
                       >
                         Ver
@@ -968,7 +732,7 @@ export default function Home() {
           </button>
           <button
             type="button"
-            onClick={() => void refreshUsers()}
+            onClick={() => void reloadUsers()}
             disabled={usersLoading}
             className="rounded bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
           >
@@ -1040,7 +804,7 @@ export default function Home() {
               </div>
               <button
                 type="button"
-                onClick={closeAuditModal}
+                onClick={() => setSelectedSaleForAudit(null)}
                 className="rounded bg-slate-200 px-3 py-1 text-slate-700 hover:bg-slate-300"
               >
                 Cerrar

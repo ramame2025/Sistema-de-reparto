@@ -13,6 +13,7 @@ import type {
   AuthLoginResponse,
   AuthSessionResponse,
 } from "@distribuidor/shared";
+import { createApiClient } from "../lib/api-client";
 import { API_URL, DASHBOARD_AUTH_TOKEN_KEY } from "../lib/config";
 
 export type AuthStatus = "checking" | "anonymous" | "authenticated";
@@ -60,16 +61,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Validamos el token guardado contra la API antes de mostrar el dashboard,
   // asi un token vencido o manipulado vuelve al login en vez de entrar.
   useEffect(() => {
-    const savedToken = localStorage.getItem(DASHBOARD_AUTH_TOKEN_KEY);
-    if (!savedToken) {
-      setStatus("anonymous");
-      return;
-    }
-
     let active = true;
 
     const verifySession = async () => {
       try {
+        const savedToken = localStorage.getItem(DASHBOARD_AUTH_TOKEN_KEY);
+        if (!savedToken) {
+          throw new Error("no token");
+        }
+
         const response = await fetch(`${API_URL}/auth/me`, {
           method: "GET",
           cache: "no-store",
@@ -189,3 +189,12 @@ export function useAuth() {
   return context;
 }
 
+/** Cliente de API ligado a la sesion actual. Se rehace solo si cambia el token. */
+export function useApiClient() {
+  const { token, handleAuthFailure } = useAuth();
+
+  return useMemo(
+    () => createApiClient(token, handleAuthFailure),
+    [token, handleAuthFailure],
+  );
+}

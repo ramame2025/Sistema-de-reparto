@@ -1,9 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { SWRConfig } from "swr";
 import AdminSidebar from "../../components/AdminSidebar";
 import LoginScreen from "../../components/LoginScreen";
-import { AuthProvider, useAuth } from "../../context/AuthContext";
+import { AuthProvider, useApiClient, useAuth } from "../../context/AuthContext";
 
 /**
  * Puerta de entrada al panel: mientras se verifica el token no se renderiza
@@ -11,6 +12,7 @@ import { AuthProvider, useAuth } from "../../context/AuthContext";
  */
 function AdminGuard({ children }: { children: ReactNode }) {
   const auth = useAuth();
+  const api = useApiClient();
 
   if (auth.status === "checking") {
     return (
@@ -51,7 +53,22 @@ function AdminGuard({ children }: { children: ReactNode }) {
             Cerrar sesion
           </button>
         </header>
-        <main className="p-6">{children}</main>
+        <main className="p-6">
+          {/*
+            Un fetcher unico para todo el panel: las secciones piden datos con
+            useSWR("/ruta") y nada mas. El `key` ata la cache a la sesion, asi
+            un login distinto nunca ve datos cacheados del anterior.
+          */}
+          <SWRConfig
+            key={auth.token}
+            value={{
+              provider: () => new Map(),
+              fetcher: (path: string) => api.get(path),
+            }}
+          >
+            {children}
+          </SWRConfig>
+        </main>
       </div>
     </div>
   );
