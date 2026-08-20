@@ -10,6 +10,14 @@ jest.mock('../context/SyncContext', () => {
   };
 });
 
+jest.mock('../context/TruckContext', () => {
+  const actual = jest.requireActual('../context/TruckContext');
+  return {
+    ...actual,
+    useTruck: jest.fn(),
+  };
+});
+
 jest.mock('../context/AuthContext', () => {
   const actual = jest.requireActual('../context/AuthContext');
   return {
@@ -23,9 +31,30 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react-nativ
 import { NewSaleScreen } from './NewSaleScreen';
 import { useSync } from '../context/SyncContext';
 import { useAuth } from '../context/AuthContext';
+import { useTruck } from '../context/TruckContext';
 
 const mockedUseSync = useSync as jest.Mock;
 const mockedUseAuth = useAuth as jest.Mock;
+const mockedUseTruck = useTruck as jest.Mock;
+
+const assignedTruck = {
+  assignmentId: 'a-1',
+  kind: 'titular' as const,
+  truckId: 'truck-1',
+  code: 'CAMION-07',
+  plate: 'AB123CD',
+  capacity: 40,
+  startDate: '2026-02-01T00:00:00.000Z',
+  endDate: null,
+};
+
+const baseTruckValue = {
+  truck: assignedTruck,
+  date: '2026-02-11',
+  status: 'ready' as const,
+  error: null,
+  reload: jest.fn(),
+};
 
 const baseSyncValue = {
   pendingSales: [],
@@ -33,8 +62,7 @@ const baseSyncValue = {
   daySummary: { activeCount: 0, canceledCount: 0, activeTotal: 0 },
   summaryLoading: false,
   summaryError: null,
-  fallbackTruckCode: 'CAMION-07',
-  setFallbackTruckCode: jest.fn(),
+  assignedTruckCode: 'CAMION-07',
   trySendSale: jest.fn(),
   enqueueSale: jest.fn(),
   syncPendingSales: jest.fn(),
@@ -55,14 +83,12 @@ const baseAuthValue = {
 let mockedTrySendSale: jest.Mock;
 let mockedEnqueueSale: jest.Mock;
 let mockedRefreshDaySummary: jest.Mock;
-let mockedSetFallbackTruckCode: jest.Mock;
 let mockedApiPatch: jest.Mock;
 
 beforeEach(() => {
   mockedTrySendSale = jest.fn();
   mockedEnqueueSale = jest.fn().mockResolvedValue(1);
   mockedRefreshDaySummary = jest.fn().mockResolvedValue(undefined);
-  mockedSetFallbackTruckCode = jest.fn();
   mockedApiPatch = jest.fn();
 
   mockedUseSync.mockReturnValue({
@@ -70,8 +96,8 @@ beforeEach(() => {
     trySendSale: mockedTrySendSale,
     enqueueSale: mockedEnqueueSale,
     refreshDaySummary: mockedRefreshDaySummary,
-    setFallbackTruckCode: mockedSetFallbackTruckCode,
   });
+  mockedUseTruck.mockReturnValue(baseTruckValue);
   mockedUseAuth.mockReturnValue({
     ...baseAuthValue,
     api: { patch: mockedApiPatch },
@@ -134,15 +160,57 @@ describe('NewSaleScreen/product quantities', () => {
   });
 });
 
-describe('NewSaleScreen/fallbackTruckCode binding', () => {
-  it('binds the truck code field to SyncContext.fallbackTruckCode', async () => {
+describe('NewSaleScreen/camion asignado', () => {
+  it('shows the assigned truck read-only, with no free-text input to type it', async () => {
     await render(<NewSaleScreen />);
 
-    expect(screen.getByTestId('new-sale-truck-code').props.value).toBe('CAMION-07');
+    expect(screen.getByTestId('new-sale-assigned-truck')).toBeTruthy();
+    expect(screen.getByText(/CAMION-07/)).toBeTruthy();
+    // El camion ya no se escribe: sale de la asignacion.
+    expect(screen.queryByTestId('new-sale-truck-code')).toBeNull();
+  });
 
-    await fireEvent.changeText(screen.getByTestId('new-sale-truck-code'), 'CAMION-09');
+  it('sends truckId and truckCode from the assignment, not from anything the driver typed', async () => {
+    await render(<NewSaleScreen />);
 
-    expect(mockedSetFallbackTruckCode).toHaveBeenCalledWith('CAMION-09');
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalled());
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
+      truckId: 'truck-1',
+      truckCode: 'CAMION-07',
+    });
+  });
+
+  it('blocks the sale and explains why when the driver has no truck today', async () => {
+    // Sin camion no se puede cargar una venta: quedaria sin unidad asignada.
+    mockedUseTruck.mockReturnValue({ ...baseTruckValue, truck: null });
+
+    await render(<NewSaleScreen />);
+
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    expect(mockedTrySendSale).not.toHaveBeenCalled();
+    expect(mockedEnqueueSale).not.toHaveBeenCalled();
+    expect(screen.getByTestId('new-sale-no-truck')).toBeTruthy();
+  });
+
+  it('distinguishes a connection failure from having no truck assigned', async () => {
+    // Son dos mensajes opuestos: uno se resuelve reintentando, el otro
+    // hablando con el admin.
+    mockedUseTruck.mockReturnValue({
+      ...baseTruckValue,
+      truck: null,
+      status: 'error',
+      error: 'No se pudo consultar tu camion asignado.',
+    });
+
+    await render(<NewSaleScreen />);
+
+    expect(screen.getByTestId('new-sale-truck-error')).toBeTruthy();
+    expect(screen.queryByTestId('new-sale-no-truck')).toBeNull();
   });
 });
 

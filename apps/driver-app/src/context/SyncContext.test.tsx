@@ -7,6 +7,7 @@ import { renderHook, waitFor, act } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthProvider, useAuth } from './AuthContext';
 import { SyncProvider, useSync } from './SyncContext';
+import { TruckProvider, useTruck } from './TruckContext';
 import { computeBackoff, type PendingSale } from '../services/offlineQueue';
 import type { CreateSaleInput, SaleRecord } from '@distribuidor/shared';
 
@@ -32,6 +33,7 @@ const emptySalesResponse = () => jsonResponse([] as SaleRecord[]);
 const makeFetchRouter = (
   overrides: {
     authMe?: () => Promise<Response>;
+    myTruck?: () => Promise<Response>;
     getSales?: () => Promise<Response>;
     postSale?: () => Promise<Response>;
   } = {},
@@ -42,6 +44,25 @@ const makeFetchRouter = (
       return overrides.authMe
         ? overrides.authMe()
         : Promise.resolve(jsonResponse({ username: 'chofer1', role: 'chofer' }));
+    }
+    if (url.includes('/driver-truck-assignments/me')) {
+      return overrides.myTruck
+        ? overrides.myTruck()
+        : Promise.resolve(
+            jsonResponse({
+              date: '2026-02-11',
+              truck: {
+                assignmentId: 'a-1',
+                kind: 'titular',
+                truckId: 'truck-1',
+                code: 'CAMION-01',
+                plate: 'AB123CD',
+                capacity: 40,
+                startDate: '2026-02-01T00:00:00.000Z',
+                endDate: null,
+              },
+            }),
+          );
     }
     if (url.endsWith('/sales') && init?.method === 'POST') {
       return overrides.postSale
@@ -56,11 +77,13 @@ const makeFetchRouter = (
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <AuthProvider>
-    <SyncProvider>{children}</SyncProvider>
+    <TruckProvider>
+      <SyncProvider>{children}</SyncProvider>
+    </TruckProvider>
   </AuthProvider>
 );
 
-const useHarness = () => ({ auth: useAuth(), sync: useSync() });
+const useHarness = () => ({ auth: useAuth(), sync: useSync(), truck: useTruck() });
 
 const buildPayload = (overrides: Partial<CreateSaleInput> = {}): CreateSaleInput => ({
   driverName: 'chofer1',
@@ -192,44 +215,58 @@ describe('SyncContext/4.1 enqueueSale persistence + due filtering', () => {
   });
 });
 
-describe('SyncContext/4.1b fallbackTruckCode contract', () => {
+describe('SyncContext/4.1b codigo de camion tomado de la asignacion', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
   });
 
-  it('defaults fallbackTruckCode to CAMION-01, matching the original App.tsx default state', async () => {
+  it('takes the truck code from the assigned truck instead of a hardcoded default', async () => {
     globalThis.fetch = makeFetchRouter();
     const result = await renderAuthenticated();
 
-    expect(result.current.sync.fallbackTruckCode).toBe('CAMION-01');
+    await waitFor(() => expect(result.current.sync.assignedTruckCode).toBe('CAMION-01'));
   });
 
-  it('setFallbackTruckCode updates the exposed value', async () => {
-    globalThis.fetch = makeFetchRouter();
-    const result = await renderAuthenticated();
-
-    await act(async () => {
-      result.current.sync.setFallbackTruckCode('CAMION-09');
+  it('leaves the truck code empty when the driver has no truck today', async () => {
+    globalThis.fetch = makeFetchRouter({
+      myTruck: () => Promise.resolve(jsonResponse({ date: '2026-01-15', truck: null })),
     });
+    const result = await renderAuthenticated();
 
-    expect(result.current.sync.fallbackTruckCode).toBe('CAMION-09');
+    await waitFor(() => expect(result.current.truck.status).toBe('ready'));
+    expect(result.current.sync.assignedTruckCode).toBe('');
   });
 
-  it('normalizes a restored entry missing truckCode using the current fallbackTruckCode (trimmed), preserving loadPendingSales() behavior', async () => {
+  it('fills a legacy queued entry that has no truckCode with the currently assigned truck', async () => {
     await AsyncStorage.setItem(
       OFFLINE_QUEUE_KEY,
       JSON.stringify([
-        buildEntry({
-          queueId: 'q_no_truck',
-          payload: buildPayload({ truckCode: '' }),
-        }),
+        buildEntry({ queueId: 'q_no_truck', payload: buildPayload({ truckCode: '' }) }),
       ]),
     );
     globalThis.fetch = makeFetchRouter();
     const result = await renderAuthenticated();
 
     await waitFor(() => expect(result.current.sync.pendingSales).toHaveLength(1));
-    expect(result.current.sync.pendingSales[0].payload.truckCode).toBe('CAMION-01');
+    await waitFor(() =>
+      expect(result.current.sync.pendingSales[0].payload.truckCode).toBe('CAMION-01'),
+    );
+  });
+
+  it('NEVER rewrites a queued sale that already carries its own truckCode', async () => {
+    // Una venta encolada ayer con el CAMION-09 se hizo en ESE camion. Si hoy
+    // el chofer maneja otro, reescribirla falsearia el historial de reparto.
+    await AsyncStorage.setItem(
+      OFFLINE_QUEUE_KEY,
+      JSON.stringify([
+        buildEntry({ queueId: 'q_ayer', payload: buildPayload({ truckCode: 'CAMION-09' }) }),
+      ]),
+    );
+    globalThis.fetch = makeFetchRouter();
+    const result = await renderAuthenticated();
+
+    await waitFor(() => expect(result.current.sync.pendingSales).toHaveLength(1));
+    expect(result.current.sync.pendingSales[0].payload.truckCode).toBe('CAMION-09');
   });
 });
 

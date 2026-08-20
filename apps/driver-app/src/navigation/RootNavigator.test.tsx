@@ -12,14 +12,22 @@ jest.mock('../context/SyncContext', () => ({
   useSync: jest.fn(),
 }));
 
+// HomeScreen tambien muestra el camion asignado, asi que necesita TruckContext
+// mockeado por la misma razon: mantener fuera la cadena de imports real.
+jest.mock('../context/TruckContext', () => ({
+  useTruck: jest.fn(),
+}));
+
 import React from 'react';
 import { render, screen } from '@testing-library/react-native';
 import { RootNavigator } from './RootNavigator';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
+import { useTruck } from '../context/TruckContext';
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseSync = useSync as jest.Mock;
+const mockedUseTruck = useTruck as jest.Mock;
 
 const baseAuthValue = {
   token: null,
@@ -37,8 +45,7 @@ const baseSyncValue = {
   daySummary: { activeCount: 0, canceledCount: 0, activeTotal: 0 },
   summaryLoading: false,
   summaryError: null,
-  fallbackTruckCode: 'CAMION-01',
-  setFallbackTruckCode: jest.fn(),
+  assignedTruckCode: 'CAMION-01',
   trySendSale: jest.fn(),
   enqueueSale: jest.fn(),
   syncPendingSales: jest.fn(),
@@ -47,6 +54,22 @@ const baseSyncValue = {
 
 beforeEach(() => {
   mockedUseSync.mockReturnValue(baseSyncValue);
+  mockedUseTruck.mockReturnValue({
+    truck: {
+      assignmentId: 'a-1',
+      kind: 'titular',
+      truckId: 'truck-1',
+      code: 'CAMION-01',
+      plate: 'AB123CD',
+      capacity: 40,
+      startDate: '2026-02-01T00:00:00.000Z',
+      endDate: null,
+    },
+    date: '2026-02-11',
+    status: 'ready',
+    error: null,
+    reload: jest.fn(),
+  });
 });
 
 describe('RootNavigator/checking', () => {
