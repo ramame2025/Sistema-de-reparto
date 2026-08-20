@@ -113,6 +113,15 @@ export type CreateTruckInput = {
     plate: string;
     capacity: number;
 };
+export type TruckRecord = {
+    id: string;
+    code: string;
+    plate: string;
+    capacity: number;
+    isActive: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
 /** Todos los campos son opcionales: se actualiza solo lo que viene. */
 export type UpdateTruckInput = {
     code?: string;

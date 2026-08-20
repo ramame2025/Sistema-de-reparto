@@ -5,19 +5,12 @@ import {
 } from '@nestjs/common';
 import {
   type CreateTruckInput,
+  type TruckRecord,
   type UpdateTruckInput,
 } from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type TruckRecord = {
-  id: string;
-  code: string;
-  plate: string;
-  capacity: number;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
+export type { TruckRecord };
 
 @Injectable()
 export class TrucksService {
