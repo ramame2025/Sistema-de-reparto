@@ -19,6 +19,7 @@ export const EXPENSE_CATEGORIES = [
     'varios',
 ];
 export const USER_ROLES = ['admin', 'chofer'];
+export const ASSIGNMENT_KINDS = ['titular', 'cobertura'];
 export const DEFAULT_PRICE_TABLE = {
     final: { G10: 8500, G15: 13000, G45: 39000, G15_AUTO: 14500 },
     comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },
@@ -170,6 +171,12 @@ export function validateCreateAssignmentInput(input) {
     const errors = [];
     if (!input.driverId || input.driverId.trim().length === 0) {
         errors.push('driverId is required');
+    }
+    if (!ASSIGNMENT_KINDS.includes(input.kind)) {
+        errors.push(`kind must be one of: ${ASSIGNMENT_KINDS.join(', ')}`);
+    }
+    if (input.kind === 'cobertura' && input.endDate === undefined) {
+        errors.push('endDate is required for a cobertura assignment');
     }
     if (!input.truckId || input.truckId.trim().length === 0) {
         errors.push('truckId is required');

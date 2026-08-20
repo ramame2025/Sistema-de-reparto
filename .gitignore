@@ -23,3 +23,7 @@ packages/shared/dist/
 
 # Logs
 *.log
+
+# Herramientas locales de indexado/analisis
+.atl/
+.codegraph/

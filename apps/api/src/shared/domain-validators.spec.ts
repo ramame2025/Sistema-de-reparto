@@ -81,11 +81,42 @@ describe('validateCreateAssignmentInput', () => {
   const base: CreateAssignmentInput = {
     driverId: 'driver-1',
     truckId: 'truck-1',
+    kind: 'titular',
     startDate: '2026-01-01T00:00:00.000Z',
   };
 
   it('accepts a valid payload without endDate', () => {
     expect(validateCreateAssignmentInput(base)).toEqual([]);
+  });
+
+  it('rejects an unknown kind', () => {
+    const errors = validateCreateAssignmentInput({
+      ...base,
+      kind: 'suplente' as CreateAssignmentInput['kind'],
+    });
+    expect(errors).toContain('kind must be one of: titular, cobertura');
+  });
+
+  it('rejects a cobertura without endDate', () => {
+    // Una cobertura sin fin no seria una cobertura: seria un cambio de titular.
+    // El rango es lo que la vuelve una cobertura y lo que hace valida la regla
+    // de override.
+    const errors = validateCreateAssignmentInput({
+      ...base,
+      kind: 'cobertura',
+    });
+    expect(errors).toContain('endDate is required for a cobertura assignment');
+  });
+
+  it('accepts a cobertura with a closed range', () => {
+    expect(
+      validateCreateAssignmentInput({
+        ...base,
+        kind: 'cobertura',
+        startDate: '2026-02-10T00:00:00.000Z',
+        endDate: '2026-02-12T00:00:00.000Z',
+      }),
+    ).toEqual([]);
   });
 
   it('accepts a valid payload with endDate after startDate', () => {
