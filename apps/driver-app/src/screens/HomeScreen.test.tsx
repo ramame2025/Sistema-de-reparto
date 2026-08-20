@@ -2,6 +2,14 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
+jest.mock('../context/TruckContext', () => {
+  const actual = jest.requireActual('../context/TruckContext');
+  return {
+    ...actual,
+    useTruck: jest.fn(),
+  };
+});
+
 jest.mock('../context/SyncContext', () => {
   const actual = jest.requireActual('../context/SyncContext');
   return {
@@ -14,8 +22,31 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import { HomeScreen } from './HomeScreen';
 import { useSync } from '../context/SyncContext';
+import { useTruck } from '../context/TruckContext';
 
 const mockedUseSync = useSync as jest.Mock;
+const mockedUseTruck = useTruck as jest.Mock;
+
+const baseTruckValue = {
+  truck: {
+    assignmentId: 'a-1',
+    kind: 'titular' as const,
+    truckId: 'truck-1',
+    code: 'CAMION-01',
+    plate: 'AB123CD',
+    capacity: 40,
+    startDate: '2026-02-01T00:00:00.000Z',
+    endDate: null,
+  },
+  date: '2026-02-11',
+  status: 'ready' as const,
+  error: null,
+  reload: jest.fn(),
+};
+
+beforeEach(() => {
+  mockedUseTruck.mockReturnValue(baseTruckValue);
+});
 
 const baseSyncValue = {
   pendingSales: [],
@@ -23,8 +54,7 @@ const baseSyncValue = {
   daySummary: { activeCount: 0, canceledCount: 0, activeTotal: 0 },
   summaryLoading: false,
   summaryError: null,
-  fallbackTruckCode: 'CAMION-01',
-  setFallbackTruckCode: jest.fn(),
+  assignedTruckCode: 'CAMION-01',
   trySendSale: jest.fn(),
   enqueueSale: jest.fn(),
   syncPendingSales: jest.fn(),
@@ -101,5 +131,33 @@ describe('HomeScreen/manual refresh', () => {
     await fireEvent.press(screen.getByText('Actualizar resumen'));
 
     await waitFor(() => expect(refreshDaySummary).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('HomeScreen/camion del dia', () => {
+  it('shows the assigned truck as soon as the driver opens the app', async () => {
+    await render(<HomeScreen />);
+
+    expect(screen.getByTestId('home-assigned-truck')).toBeTruthy();
+    expect(screen.getByText(/CAMION-01/)).toBeTruthy();
+  });
+
+  it('marks a cobertura explicitly, so the driver notices it is not his usual truck', async () => {
+    mockedUseTruck.mockReturnValue({
+      ...baseTruckValue,
+      truck: { ...baseTruckValue.truck, kind: 'cobertura' as const, code: 'CAMION-09' },
+    });
+
+    await render(<HomeScreen />);
+
+    expect(screen.getByText(/cobertura/i)).toBeTruthy();
+  });
+
+  it('says plainly when there is no truck for today', async () => {
+    mockedUseTruck.mockReturnValue({ ...baseTruckValue, truck: null });
+
+    await render(<HomeScreen />);
+
+    expect(screen.getByTestId('home-no-truck')).toBeTruthy();
   });
 });

@@ -18,6 +18,7 @@ import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner'
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
+import { useTruck } from '../context/TruckContext';
 import { ApiError } from '../services/apiClient';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
@@ -45,17 +46,17 @@ function SegmentButton<T extends string>({ label, active, onPress }: SegmentButt
 
 /**
  * Relocated verbatim from the pre-PR5 App.tsx "Cliente"/"Productos"/save/
- * "Editar ultima venta"/"Anular ultima venta" cards. `truckCode` moved from
- * local state to `SyncContext.fallbackTruckCode` (design decision #6) — this
- * screen only binds to it, it does not own it. Cancel/edit now go through
+ * "Editar ultima venta"/"Anular ultima venta" cards. El camion ya no se tipea:
+ * sale de `TruckContext`, que resuelve la asignacion vigente del chofer para
+ * hoy, y sin camion la pantalla no deja cargar ventas. Cancel/edit now go through
  * `AuthContext.api` directly (design's NewSaleScreen consumer contract)
  * instead of raw `fetch`. No field/validation/copy redesign — only the
  * transport (context hooks + shared components) changed.
  */
 export function NewSaleScreen() {
-  const { trySendSale, enqueueSale, refreshDaySummary, fallbackTruckCode, setFallbackTruckCode } =
-    useSync();
+  const { trySendSale, enqueueSale, refreshDaySummary } = useSync();
   const { api, username } = useAuth();
+  const { truck, status: truckStatus, error: truckError } = useTruck();
 
   const [customerType, setCustomerType] = useState<CustomerType>('final');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
@@ -102,12 +103,20 @@ export function NewSaleScreen() {
     const payload: CreateSaleInput = {
       clientGeneratedId: buildClientGeneratedId(),
       driverName: username,
-      truckCode: fallbackTruckCode.trim() || undefined,
+      truckId: truck?.truckId,
+      truckCode: truck?.code,
       customerName,
       customerType,
       paymentMethod,
       items: currentItems,
     };
+
+    // Sin camion asignado la venta quedaria sin unidad: se corta antes de
+    // mandarla o encolarla.
+    if (!truck) {
+      showMessage('No podes cargar ventas sin un camion asignado para hoy.', 'error');
+      return;
+    }
 
     if (payload.items.length === 0) {
       showMessage('Agrega al menos un producto antes de guardar.', 'error');
@@ -169,7 +178,8 @@ export function NewSaleScreen() {
 
     const payload = {
       driverName: username,
-      truckCode: fallbackTruckCode.trim() || undefined,
+      truckId: truck?.truckId,
+      truckCode: truck?.code,
       customerName,
       customerType,
       paymentMethod,
@@ -202,13 +212,23 @@ export function NewSaleScreen() {
       <Card style={styles.card}>
         <Text style={styles.fieldLabel}>Cliente</Text>
         <Text style={styles.apiHint}>Chofer: {username}</Text>
-        <TextInput
-          style={styles.input}
-          value={fallbackTruckCode}
-          onChangeText={setFallbackTruckCode}
-          placeholder="Camion / unidad"
-          testID="new-sale-truck-code"
-        />
+        {truck && (
+          <Text style={styles.assignedTruck} testID="new-sale-assigned-truck">
+            Camion: {truck.code} · {truck.plate} · {truck.capacity} u.
+            {truck.kind === 'cobertura' ? ' (cobertura)' : ''}
+          </Text>
+        )}
+        {!truck && truckStatus === 'error' && (
+          <Text style={styles.truckProblem} testID="new-sale-truck-error">
+            {truckError} Revisa la conexion y volve a intentar.
+          </Text>
+        )}
+        {!truck && truckStatus !== 'error' && truckStatus !== 'loading' && (
+          <Text style={styles.truckProblem} testID="new-sale-no-truck">
+            Hoy no tenes un camion asignado. Hablá con el administrador antes de
+            cargar ventas.
+          </Text>
+        )}
         <TextInput
           style={styles.input}
           value={customerName}
@@ -333,6 +353,13 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.bold,
     color: colors.textPrimary,
     marginBottom: spacing.sm,
+  },
+  assignedTruck: {
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  truckProblem: {
+    marginBottom: 8,
   },
   apiHint: {
     fontSize: typography.sizes.xs,

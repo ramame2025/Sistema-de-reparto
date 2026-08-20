@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { CreateSaleInput, SaleRecord } from '@distribuidor/shared';
 import { useAuth } from './AuthContext';
+import { useTruck } from './TruckContext';
 import {
   applySyncFailure,
   isDue,
@@ -21,9 +22,6 @@ export type { PendingSale };
 
 /** Preserved verbatim from the current App.tsx implementation. */
 const AUTO_SYNC_INTERVAL_MS = 15000;
-
-/** Preserved verbatim from the current App.tsx implementation's `truckCode` default state. */
-const DEFAULT_FALLBACK_TRUCK_CODE = 'CAMION-01';
 
 export type DaySummary = {
   activeCount: number;
@@ -39,8 +37,8 @@ export type SyncContextValue = {
   daySummary: DaySummary;
   summaryLoading: boolean;
   summaryError: string | null;
-  fallbackTruckCode: string;
-  setFallbackTruckCode(code: string): void;
+  /** Codigo del camion que el chofer tiene asignado hoy, o '' si no tiene. */
+  assignedTruckCode: string;
   trySendSale(payload: CreateSaleInput): Promise<string>;
   enqueueSale(payload: CreateSaleInput, cause: string): Promise<number>;
   syncPendingSales(manual: boolean): Promise<SyncOutcome>;
@@ -53,6 +51,10 @@ const buildQueueId = () => `q_${Date.now()}_${Math.random().toString(36).slice(2
 
 export function SyncProvider({ children }: { children: ReactNode }) {
   const { token, username, api } = useAuth();
+  const { truck } = useTruck();
+
+  // El camion ya no se escribe a mano: sale de la asignacion vigente.
+  const assignedTruckCode = truck?.code ?? '';
 
   const [pendingSales, setPendingSales] = useState<PendingSale[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -63,7 +65,6 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   });
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [fallbackTruckCode, setFallbackTruckCode] = useState(DEFAULT_FALLBACK_TRUCK_CODE);
 
   const persistPendingSales = useCallback(async (next: PendingSale[]) => {
     setPendingSales(next);
@@ -93,10 +94,32 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     }
   }, [api]);
 
-  // Restore the persisted queue once authenticated, normalizing each entry's
-  // driverName/truckCode the same way the original App.tsx's loadPendingSales()
-  // did — this is decision #6: fallbackTruckCode is now an explicit context
-  // value instead of a closure-captured `truckCode` component state.
+  // La cola se restaura al instante porque tiene que funcionar sin red, pero el
+  // camion asignado llega por HTTP y tarda. En vez de bloquear la restauracion
+  // (lo que dejaria al chofer sin su cola offline), las entradas viejas sin
+  // codigo de camion se rellenan cuando el camion finalmente se conoce.
+  useEffect(() => {
+    if (!assignedTruckCode) {
+      return;
+    }
+
+    const needsBackfill = pendingSales.some((entry) => !entry.payload.truckCode?.trim());
+    if (!needsBackfill) {
+      return;
+    }
+
+    const filled = pendingSales.map((entry) => ({
+      ...entry,
+      payload: normalizePendingSalePayload(entry.payload, username, assignedTruckCode.trim()),
+    }));
+
+    void persistPendingSales(filled);
+  }, [assignedTruckCode, pendingSales, username, persistPendingSales]);
+
+  // Restore the persisted queue once authenticated. `normalizePendingSalePayload`
+  // solo RELLENA lo que falta: una venta encolada que ya trae su truckCode
+  // conserva el suyo, porque se hizo en ESE camion aunque hoy el chofer maneje
+  // otro. El camion asignado solo cubre entradas viejas que quedaron sin codigo.
   useEffect(() => {
     if (!token) {
       return;
@@ -109,7 +132,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         const stored = await loadPendingSalesFromStorage();
         const normalized = stored.map((entry) => ({
           ...entry,
-          payload: normalizePendingSalePayload(entry.payload, username, fallbackTruckCode.trim()),
+          payload: normalizePendingSalePayload(entry.payload, username, assignedTruckCode.trim()),
         }));
 
         if (cancelled) {
@@ -226,8 +249,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       daySummary,
       summaryLoading,
       summaryError,
-      fallbackTruckCode,
-      setFallbackTruckCode,
+      assignedTruckCode,
       trySendSale,
       enqueueSale,
       syncPendingSales,
@@ -239,7 +261,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       daySummary,
       summaryLoading,
       summaryError,
-      fallbackTruckCode,
+      assignedTruckCode,
       trySendSale,
       enqueueSale,
       syncPendingSales,

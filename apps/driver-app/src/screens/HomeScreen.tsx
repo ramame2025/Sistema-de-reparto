@@ -6,6 +6,7 @@ import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useSync } from '../context/SyncContext';
+import { useTruck } from '../context/TruckContext';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
@@ -21,6 +22,7 @@ import { typography } from '../theme/typography';
  */
 export function HomeScreen() {
   const { daySummary, summaryLoading, summaryError, refreshDaySummary, pendingSales } = useSync();
+  const { truck } = useTruck();
 
   useEffect(() => {
     void refreshDaySummary();
@@ -32,6 +34,16 @@ export function HomeScreen() {
   return (
     <ScreenContainer testID="home-screen" scroll>
       <Text style={styles.tag}>Distribuidor · App chofer</Text>
+      {truck ? (
+        <Text style={styles.assignedTruck} testID="home-assigned-truck">
+          Hoy manejas el {truck.code} · {truck.plate}
+          {truck.kind === 'cobertura' ? ' (cobertura)' : ''}
+        </Text>
+      ) : (
+        <Text style={styles.assignedTruck} testID="home-no-truck">
+          Hoy no tenes un camion asignado.
+        </Text>
+      )}
       <Card style={styles.card}>
         <Text style={styles.fieldLabel}>Resumen de jornada</Text>
 
@@ -75,6 +87,10 @@ const styles = StyleSheet.create({
   },
   card: {
     gap: spacing.sm,
+  },
+  assignedTruck: {
+    fontWeight: '600',
+    marginBottom: 8,
   },
   fieldLabel: {
     fontSize: typography.sizes.sm,
