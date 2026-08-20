@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { useApiClient, useAuth } from "../../../context/AuthContext";
-import { resolveReceiptUrl } from "../../../lib/api-client";
-import { downloadCsvReport } from "../../../lib/csv";
+import { useApiClient, useAuth } from "../../context/AuthContext";
+import { resolveReceiptUrl } from "../../lib/api-client";
+import { downloadCsvReport } from "../../lib/csv";
 import {
   type CreateUserInput,
   EXPENSE_CATEGORIES,
