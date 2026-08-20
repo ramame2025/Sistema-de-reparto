@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { CreateTruckInput } from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -174,6 +174,88 @@ describe('TrucksService', () => {
       prisma.truck.findUnique.mockResolvedValue(null);
 
       await expect(service.getTruck('ghost')).rejects.toThrow(NotFoundException);
+    });
+  });
+  describe('updateTruck', () => {
+    it('updates only the fields present in the payload', async () => {
+      prisma.truck.findUnique.mockResolvedValue(buildTruckRow());
+      prisma.truck.update.mockResolvedValue(buildTruckRow({ capacity: 45 }));
+
+      const result = await service.updateTruck('truck-1', { capacity: 45 });
+
+      expect(prisma.truck.update).toHaveBeenCalledWith({
+        where: { id: 'truck-1' },
+        data: { capacity: 45 },
+      });
+      expect(result.capacity).toBe(45);
+    });
+
+    it('can reactivate a truck that was given de baja', async () => {
+      // Sin esto una baja es irreversible: el camion desaparece de la lista
+      // y no hay forma de volver a habilitarlo.
+      prisma.truck.findUnique.mockResolvedValue(buildTruckRow({ isActive: false }));
+      prisma.truck.update.mockResolvedValue(buildTruckRow({ isActive: true }));
+
+      const result = await service.updateTruck('truck-1', { isActive: true });
+
+      expect(prisma.truck.update).toHaveBeenCalledWith({
+        where: { id: 'truck-1' },
+        data: { isActive: true },
+      });
+      expect(result.isActive).toBe(true);
+    });
+
+    it('does not send absent fields, so a partial update never blanks the rest', async () => {
+      prisma.truck.findUnique.mockResolvedValue(buildTruckRow());
+      prisma.truck.update.mockResolvedValue(buildTruckRow());
+
+      await service.updateTruck('truck-1', { plate: ' XY999ZZ ' });
+
+      expect(prisma.truck.update).toHaveBeenCalledWith({
+        where: { id: 'truck-1' },
+        data: { plate: 'XY999ZZ' },
+      });
+    });
+
+    it('throws NotFoundException when the truck does not exist', async () => {
+      prisma.truck.findUnique.mockResolvedValue(null);
+
+      await expect(service.updateTruck('ghost', { capacity: 1 })).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(prisma.truck.update).not.toHaveBeenCalled();
+    });
+
+    it('translates a unique-constraint collision into ConflictException', async () => {
+      prisma.truck.findUnique.mockResolvedValue(buildTruckRow());
+      prisma.truck.update.mockRejectedValue({ code: 'P2002' });
+
+      await expect(service.updateTruck('truck-1', { code: 'T-02' })).rejects.toThrow(
+        ConflictException,
+      );
+    });
+  });
+
+  describe('listTrucks', () => {
+    it('lists only active trucks by default', async () => {
+      prisma.truck.findMany.mockResolvedValue([]);
+
+      await service.listTrucks();
+
+      expect(prisma.truck.findMany).toHaveBeenCalledWith({
+        where: { isActive: true },
+        orderBy: { code: 'asc' },
+      });
+    });
+
+    it('includes de-activated trucks when asked, so they can be reactivated', async () => {
+      prisma.truck.findMany.mockResolvedValue([]);
+
+      await service.listTrucks(true);
+
+      expect(prisma.truck.findMany).toHaveBeenCalledWith({
+        orderBy: { code: 'asc' },
+      });
     });
   });
 });

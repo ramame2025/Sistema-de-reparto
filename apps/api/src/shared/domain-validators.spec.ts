@@ -4,11 +4,13 @@ import {
   type CreateSaleInput,
   type CreateTruckInput,
   type UpdatePriceInput,
+  type UpdateTruckInput,
   validateCreateAssignmentInput,
   validateCreateCustomerInput,
   validateCreateSaleInput,
   validateCreateTruckInput,
   validateUpdatePriceInput,
+  validateUpdateTruckInput,
 } from '@distribuidor/shared';
 
 describe('validateCreateCustomerInput', () => {
@@ -74,6 +76,43 @@ describe('validateCreateTruckInput', () => {
   it('rejects a non-integer capacity', () => {
     const errors = validateCreateTruckInput({ ...base, capacity: 1.5 });
     expect(errors).toContain('capacity must be a non-negative integer');
+  });
+});
+
+describe('validateUpdateTruckInput', () => {
+  it('rejects an empty payload: un PATCH sin campos no es una actualizacion', () => {
+    expect(validateUpdateTruckInput({})).toContain('at least one field must be provided');
+  });
+
+  it('accepts a partial payload with only the capacity', () => {
+    expect(validateUpdateTruckInput({ capacity: 45 })).toEqual([]);
+  });
+
+  it('accepts capacity 0 without confusing it with "campo ausente"', () => {
+    // 0 es falsy: si la validacion usara `if (!input.capacity)` lo rechazaria.
+    expect(validateUpdateTruckInput({ capacity: 0 })).toEqual([]);
+  });
+
+  it('rejects a negative or fractional capacity', () => {
+    expect(validateUpdateTruckInput({ capacity: -1 })).toContain(
+      'capacity must be a non-negative integer',
+    );
+    expect(validateUpdateTruckInput({ capacity: 1.5 })).toContain(
+      'capacity must be a non-negative integer',
+    );
+  });
+
+  it('accepts isActive false without treating it as absent', () => {
+    expect(validateUpdateTruckInput({ isActive: false })).toEqual([]);
+  });
+
+  it('rejects a blank code or plate when explicitly provided', () => {
+    expect(validateUpdateTruckInput({ code: '  ' })).toContain(
+      'code must have at least 1 character',
+    );
+    expect(validateUpdateTruckInput({ plate: '' })).toContain(
+      'plate must have at least 1 character',
+    );
   });
 });
 

@@ -6,12 +6,15 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import {
   type CreateTruckInput,
+  type UpdateTruckInput,
   validateCreateTruckInput,
+  validateUpdateTruckInput,
 } from '@distribuidor/shared';
 import { Roles } from '../auth/roles.decorator';
 import {
@@ -29,8 +32,8 @@ export class TrucksController {
   ) {}
 
   @Get()
-  async listTrucks() {
-    return this.trucksService.listTrucks();
+  async listTrucks(@Query('includeInactive') includeInactive?: string) {
+    return this.trucksService.listTrucks(includeInactive === 'true');
   }
 
   /**
@@ -64,6 +67,16 @@ export class TrucksController {
     }
 
     return this.trucksService.createTruck(input);
+  }
+
+  @Patch(':id')
+  async updateTruck(@Param('id') id: string, @Body() input: UpdateTruckInput) {
+    const errors = validateUpdateTruckInput(input);
+    if (errors.length > 0) {
+      throw new BadRequestException({ message: 'Invalid truck payload', errors });
+    }
+
+    return this.trucksService.updateTruck(id, input);
   }
 
   @Delete(':id')

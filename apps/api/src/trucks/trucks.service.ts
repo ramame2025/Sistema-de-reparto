@@ -1,24 +1,28 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { type CreateTruckInput } from '@distribuidor/shared';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  type CreateTruckInput,
+  type TruckRecord,
+  type UpdateTruckInput,
+} from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type TruckRecord = {
-  id: string;
-  code: string;
-  plate: string;
-  capacity: number;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
+export type { TruckRecord };
 
 @Injectable()
 export class TrucksService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listTrucks(): Promise<TruckRecord[]> {
+  /**
+   * Por defecto solo los activos. `includeInactive` existe para que una baja
+   * no sea irreversible: sin verlos, no hay forma de volver a habilitarlos.
+   */
+  async listTrucks(includeInactive = false): Promise<TruckRecord[]> {
     const trucks = await this.prisma.truck.findMany({
-      where: { isActive: true },
+      ...(includeInactive ? {} : { where: { isActive: true } }),
       orderBy: { code: 'asc' },
     });
 
@@ -45,6 +49,38 @@ export class TrucksService {
     });
 
     return this.toRecord(truck);
+  }
+
+  async updateTruck(id: string, input: UpdateTruckInput): Promise<TruckRecord> {
+    await this.getTruck(id);
+
+    // Solo viajan los campos presentes: un PATCH parcial no puede blanquear
+    // lo que el que llama no menciono.
+    const data: UpdateTruckInput = {};
+    if (input.code !== undefined) {
+      data.code = input.code.trim();
+    }
+    if (input.plate !== undefined) {
+      data.plate = input.plate.trim();
+    }
+    if (input.capacity !== undefined) {
+      data.capacity = input.capacity;
+    }
+    if (input.isActive !== undefined) {
+      data.isActive = input.isActive;
+    }
+
+    try {
+      const truck = await this.prisma.truck.update({ where: { id }, data });
+      return this.toRecord(truck);
+    } catch (error) {
+      // `code` y `plate` son unique en el schema: la colision llega como P2002.
+      if ((error as { code?: string })?.code === 'P2002') {
+        throw new ConflictException('Truck code or plate already exists');
+      }
+
+      throw error;
+    }
   }
 
   async deactivateTruck(id: string): Promise<void> {

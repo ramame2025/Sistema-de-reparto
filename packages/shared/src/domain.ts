@@ -156,6 +156,24 @@ export type CreateTruckInput = {
   capacity: number;
 };
 
+export type TruckRecord = {
+  id: string;
+  code: string;
+  plate: string;
+  capacity: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Todos los campos son opcionales: se actualiza solo lo que viene. */
+export type UpdateTruckInput = {
+  code?: string;
+  plate?: string;
+  capacity?: number;
+  isActive?: boolean;
+};
+
 export type CreateAssignmentInput = {
   driverId: string;
   truckId: string;
@@ -377,6 +395,41 @@ export function validateCreateTruckInput(input: CreateTruckInput): string[] {
 
   if (!Number.isInteger(input.capacity) || input.capacity < 0) {
     errors.push('capacity must be a non-negative integer');
+  }
+
+  return errors;
+}
+
+export function validateUpdateTruckInput(input: UpdateTruckInput): string[] {
+  const errors: string[] = [];
+
+  const touched =
+    input.code !== undefined ||
+    input.plate !== undefined ||
+    input.capacity !== undefined ||
+    input.isActive !== undefined;
+
+  if (!touched) {
+    errors.push('at least one field must be provided');
+  }
+
+  if (input.code !== undefined && input.code.trim().length < 1) {
+    errors.push('code must have at least 1 character');
+  }
+
+  if (input.plate !== undefined && input.plate.trim().length < 1) {
+    errors.push('plate must have at least 1 character');
+  }
+
+  if (
+    input.capacity !== undefined &&
+    (!Number.isInteger(input.capacity) || input.capacity < 0)
+  ) {
+    errors.push('capacity must be a non-negative integer');
+  }
+
+  if (input.isActive !== undefined && typeof input.isActive !== 'boolean') {
+    errors.push('isActive must be a boolean');
   }
 
   return errors;
