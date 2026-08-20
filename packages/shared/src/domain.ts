@@ -124,12 +124,24 @@ export type AuthSessionResponse = {
   role: UserRole;
 };
 
+/** El camion que un chofer maneja HOY, resuelto por la regla de especificidad. */
+export type CurrentTruckSummary = {
+  truckId: string;
+  code: string;
+  kind: AssignmentKind;
+};
+
 export type UserSummary = {
   id: string;
   username: string;
   role: UserRole;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Solo se completa para choferes: los admin no manejan. `null` significa
+   * "no tiene camion hoy", que es distinto de "no aplica".
+   */
+  currentTruck?: CurrentTruckSummary | null;
 };
 
 export type CreateUserInput = {

@@ -283,6 +283,48 @@ export class DriverTruckAssignmentsService {
     };
   }
 
+  /**
+   * Version por lote de `resolveAssignmentForDriverOnDate`, con UNA sola
+   * consulta: la pantalla de usuarios lista N choferes y preguntar de a uno
+   * seria N+1. Los choferes sin asignacion ese dia simplemente no aparecen en
+   * el Map.
+   */
+  async resolveAssignmentsForDriversOnDate(
+    driverIds: string[],
+    date: string,
+  ): Promise<Map<string, AssignmentRecord>> {
+    const resolved = new Map<string, AssignmentRecord>();
+
+    if (driverIds.length === 0) {
+      return resolved;
+    }
+
+    const dayMs = toUtcDay(date);
+
+    const assignments = (await this.prisma.driverTruckAssignment.findMany({
+      where: {
+        driverId: { in: driverIds },
+        startDate: { lte: new Date(dayMs) },
+        OR: [{ endDate: null }, { endDate: { gte: new Date(dayMs) } }],
+      },
+    })) as AssignmentRow[];
+
+    for (const driverId of driverIds) {
+      const winner = this.pickMostSpecific(
+        assignments.filter(
+          (assignment) =>
+            assignment.driverId === driverId && coversDay(assignment, dayMs),
+        ),
+      );
+
+      if (winner) {
+        resolved.set(driverId, this.toRecord(winner));
+      }
+    }
+
+    return resolved;
+  }
+
   async closeAssignment(
     id: string,
     endDate: string,
