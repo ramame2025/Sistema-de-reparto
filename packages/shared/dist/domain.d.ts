@@ -113,6 +113,13 @@ export type CreateTruckInput = {
     plate: string;
     capacity: number;
 };
+/** Todos los campos son opcionales: se actualiza solo lo que viene. */
+export type UpdateTruckInput = {
+    code?: string;
+    plate?: string;
+    capacity?: number;
+    isActive?: boolean;
+};
 export type CreateAssignmentInput = {
     driverId: string;
     truckId: string;
@@ -140,5 +147,6 @@ export declare function validateCreateUserInput(input: CreateUserInput): string[
 export declare function validateChangePasswordInput(input: ChangePasswordInput): string[];
 export declare function validateCreateCustomerInput(input: CreateCustomerInput): string[];
 export declare function validateCreateTruckInput(input: CreateTruckInput): string[];
+export declare function validateUpdateTruckInput(input: UpdateTruckInput): string[];
 export declare function validateCreateAssignmentInput(input: CreateAssignmentInput): string[];
 export declare function validateUpdatePriceInput(input: UpdatePriceInput): string[];

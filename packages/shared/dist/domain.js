@@ -167,6 +167,30 @@ export function validateCreateTruckInput(input) {
     }
     return errors;
 }
+export function validateUpdateTruckInput(input) {
+    const errors = [];
+    const touched = input.code !== undefined ||
+        input.plate !== undefined ||
+        input.capacity !== undefined ||
+        input.isActive !== undefined;
+    if (!touched) {
+        errors.push('at least one field must be provided');
+    }
+    if (input.code !== undefined && input.code.trim().length < 1) {
+        errors.push('code must have at least 1 character');
+    }
+    if (input.plate !== undefined && input.plate.trim().length < 1) {
+        errors.push('plate must have at least 1 character');
+    }
+    if (input.capacity !== undefined &&
+        (!Number.isInteger(input.capacity) || input.capacity < 0)) {
+        errors.push('capacity must be a non-negative integer');
+    }
+    if (input.isActive !== undefined && typeof input.isActive !== 'boolean') {
+        errors.push('isActive must be a boolean');
+    }
+    return errors;
+}
 export function validateCreateAssignmentInput(input) {
     const errors = [];
     if (!input.driverId || input.driverId.trim().length === 0) {
