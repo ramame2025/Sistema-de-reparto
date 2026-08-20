@@ -28,9 +28,12 @@ export const EXPENSE_CATEGORIES = [
 
 export const USER_ROLES = ['admin', 'chofer'] as const;
 
+export const ASSIGNMENT_KINDS = ['titular', 'cobertura'] as const;
+
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export type UserRole = (typeof USER_ROLES)[number];
+export type AssignmentKind = (typeof ASSIGNMENT_KINDS)[number];
 
 export type PriceTable = Record<CustomerType, Record<ProductCode, number>>;
 
@@ -156,6 +159,13 @@ export type CreateTruckInput = {
 export type CreateAssignmentInput = {
   driverId: string;
   truckId: string;
+  /**
+   * `titular`: el camion es de ese chofer. `endDate` opcional (null mientras
+   * siga vigente). `cobertura`: dias puntuales en los que otro chofer maneja
+   * el camion, y por eso `endDate` es obligatorio: una cobertura sin fin no
+   * seria una cobertura, seria un cambio de titular.
+   */
+  kind: AssignmentKind;
   startDate: string;
   endDate?: string;
 };
@@ -377,6 +387,14 @@ export function validateCreateAssignmentInput(input: CreateAssignmentInput): str
 
   if (!input.driverId || input.driverId.trim().length === 0) {
     errors.push('driverId is required');
+  }
+
+  if (!ASSIGNMENT_KINDS.includes(input.kind)) {
+    errors.push(`kind must be one of: ${ASSIGNMENT_KINDS.join(', ')}`);
+  }
+
+  if (input.kind === 'cobertura' && input.endDate === undefined) {
+    errors.push('endDate is required for a cobertura assignment');
   }
 
   if (!input.truckId || input.truckId.trim().length === 0) {

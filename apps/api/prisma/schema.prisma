@@ -51,6 +51,14 @@ enum UserRole {
   chofer
 }
 
+/// titular: el camion es de ese chofer (endDate null mientras siga vigente, o
+/// con fecha cuando dejo de serlo). cobertura: dias puntuales en los que otro
+/// chofer maneja el camion; SIEMPRE acotada, y pisa al titular en esos dias.
+enum AssignmentKind {
+  titular
+  cobertura
+}
+
 model Sale {
   id            String       @id @default(cuid())
   clientGeneratedId String?   @unique
@@ -152,17 +160,19 @@ model Truck {
 }
 
 model DriverTruckAssignment {
-  id        String      @id @default(cuid())
+  id        String         @id @default(cuid())
   driverId  String
   truckId   String
+  kind      AssignmentKind @default(titular)
   startDate DateTime
   endDate   DateTime?
-  createdAt DateTime    @default(now())
-  driver    UserAccount @relation(fields: [driverId], references: [id], onDelete: Restrict)
-  truck     Truck       @relation(fields: [truckId], references: [id], onDelete: Restrict)
+  createdAt DateTime       @default(now())
+  driver    UserAccount    @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  truck     Truck          @relation(fields: [truckId], references: [id], onDelete: Restrict)
 
   @@index([truckId, startDate])
   @@index([driverId, startDate])
+  @@index([truckId, kind, startDate])
 }
 
 model ProductPrice {

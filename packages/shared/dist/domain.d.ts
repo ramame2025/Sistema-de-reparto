@@ -5,9 +5,11 @@ export type CustomerType = (typeof CUSTOMER_TYPES)[number];
 export declare const PAYMENT_METHODS: readonly ["efectivo", "transferencia", "qr", "tarjeta"];
 export declare const EXPENSE_CATEGORIES: readonly ["combustible", "peaje", "comida", "mantenimiento", "varios"];
 export declare const USER_ROLES: readonly ["admin", "chofer"];
+export declare const ASSIGNMENT_KINDS: readonly ["titular", "cobertura"];
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export type UserRole = (typeof USER_ROLES)[number];
+export type AssignmentKind = (typeof ASSIGNMENT_KINDS)[number];
 export type PriceTable = Record<CustomerType, Record<ProductCode, number>>;
 export type SaleItemInput = {
     productCode: ProductCode;
@@ -114,6 +116,13 @@ export type CreateTruckInput = {
 export type CreateAssignmentInput = {
     driverId: string;
     truckId: string;
+    /**
+     * `titular`: el camion es de ese chofer. `endDate` opcional (null mientras
+     * siga vigente). `cobertura`: dias puntuales en los que otro chofer maneja
+     * el camion, y por eso `endDate` es obligatorio: una cobertura sin fin no
+     * seria una cobertura, seria un cambio de titular.
+     */
+    kind: AssignmentKind;
     startDate: string;
     endDate?: string;
 };
