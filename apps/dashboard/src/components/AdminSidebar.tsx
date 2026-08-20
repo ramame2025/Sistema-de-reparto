@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
-  { href: "/admin/dashboard", label: "Dashboard" },
+  { href: "/admin", label: "Dashboard" },
   { href: "/admin/reportes", label: "Reportes" },
   { href: "/admin/usuarios", label: "Usuarios" },
   { href: "/admin/camiones", label: "Camiones" },
@@ -22,7 +22,13 @@ export default function AdminSidebar() {
         Distribuidor
       </p>
       {NAV_ITEMS.map((item) => {
-        const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+        // `/admin` es prefijo de todas las demas secciones, asi que la
+        // portada solo matchea exacto: con startsWith quedaria marcada
+        // siempre, en cualquier pagina del panel.
+        const isActive =
+          item.href === "/admin"
+            ? pathname === "/admin"
+            : pathname === item.href || pathname.startsWith(`${item.href}/`);
 
         return (
           <Link

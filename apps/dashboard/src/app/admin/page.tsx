@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useAuth } from "../../../context/AuthContext";
-import { API_URL } from "../../../lib/config";
+import { useAuth } from "../../context/AuthContext";
+import { API_URL } from "../../lib/config";
 import {
   type CreateUserInput,
   EXPENSE_CATEGORIES,
