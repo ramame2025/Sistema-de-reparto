@@ -31,12 +31,16 @@ describe('LoadManifestsService', () => {
   let service: LoadManifestsService;
   let prisma: {
     loadManifest: { create: jest.Mock; findMany: jest.Mock };
+    loadManifestItem: { findMany: jest.Mock };
+    saleItem: { findMany: jest.Mock };
     truck: { findUnique: jest.Mock };
   };
 
   beforeEach(async () => {
     prisma = {
       loadManifest: { create: jest.fn(), findMany: jest.fn() },
+      loadManifestItem: { findMany: jest.fn() },
+      saleItem: { findMany: jest.fn() },
       truck: { findUnique: jest.fn() },
     };
 
@@ -240,6 +244,99 @@ describe('LoadManifestsService', () => {
       expect(prisma.loadManifest.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { driverName: 'maria.gomez' } }),
       );
+    });
+  });
+
+  describe('getTruckStock', () => {
+    beforeEach(() => {
+      prisma.loadManifestItem.findMany.mockResolvedValue([]);
+      prisma.saleItem.findMany.mockResolvedValue([]);
+    });
+
+    it('computes loaded, sold, and remaining per product from manifests and active sales', async () => {
+      prisma.loadManifestItem.findMany.mockResolvedValue([
+        { productCode: 'G10', quantity: 10 },
+        { productCode: 'G10', quantity: 5 },
+        { productCode: 'G15', quantity: 4 },
+      ]);
+      prisma.saleItem.findMany.mockResolvedValue([
+        { productCode: 'G10', quantity: 3 },
+        { productCode: 'G10', quantity: 2 },
+      ]);
+
+      const result = await service.getTruckStock('truck-1', '2026-01-31');
+
+      expect(result.truckId).toBe('truck-1');
+      expect(result.asOf).toBe('2026-01-31');
+      expect(result.lines).toHaveLength(4);
+      expect(result.lines).toEqual(
+        expect.arrayContaining([
+          { productCode: 'G10', loaded: 15, sold: 5, remaining: 10 },
+          { productCode: 'G15', loaded: 4, sold: 0, remaining: 4 },
+          { productCode: 'G45', loaded: 0, sold: 0, remaining: 0 },
+          { productCode: 'G15_AUTO', loaded: 0, sold: 0, remaining: 0 },
+        ]),
+      );
+    });
+
+    it('does not clamp remaining to zero when sold exceeds loaded', async () => {
+      prisma.loadManifestItem.findMany.mockResolvedValue([{ productCode: 'G10', quantity: 5 }]);
+      prisma.saleItem.findMany.mockResolvedValue([{ productCode: 'G10', quantity: 8 }]);
+
+      const result = await service.getTruckStock('truck-1', '2026-01-31');
+
+      const g10 = result.lines.find((line) => line.productCode === 'G10');
+      expect(g10).toEqual({ productCode: 'G10', loaded: 5, sold: 8, remaining: -3 });
+    });
+
+    it('returns loaded=0 for every product and does not throw when the truck has no manifests', async () => {
+      prisma.saleItem.findMany.mockResolvedValue([{ productCode: 'G10', quantity: 2 }]);
+
+      const result = await service.getTruckStock('truck-1', '2026-01-31');
+
+      expect(result.lines).toHaveLength(4);
+      expect(result.lines.every((line) => line.loaded === 0)).toBe(true);
+      const g10 = result.lines.find((line) => line.productCode === 'G10');
+      expect(g10).toEqual({ productCode: 'G10', loaded: 0, sold: 2, remaining: -2 });
+    });
+
+    it('filters loadManifestItem by manifest.truckId and manifest.createdAt up to the end of asOf in business time (ART, UTC-3)', async () => {
+      await service.getTruckStock('truck-1', '2026-01-31');
+
+      expect(prisma.loadManifestItem.findMany).toHaveBeenCalledWith({
+        where: {
+          manifest: {
+            truckId: 'truck-1',
+            createdAt: { lt: new Date('2026-02-01T03:00:00.000Z') },
+          },
+        },
+      });
+    });
+
+    it('filters saleItem by sale.truckId, active status only, and sale.createdAt up to the end of asOf in business time (ART, UTC-3)', async () => {
+      await service.getTruckStock('truck-1', '2026-01-31');
+
+      expect(prisma.saleItem.findMany).toHaveBeenCalledWith({
+        where: {
+          sale: {
+            truckId: 'truck-1',
+            status: 'active',
+            createdAt: { lt: new Date('2026-02-01T03:00:00.000Z') },
+          },
+        },
+      });
+    });
+
+    it('does not exclude a sale made at 22:00 ART (01:00Z next day) from the same-day asOf window', async () => {
+      prisma.saleItem.findMany.mockResolvedValue([{ productCode: 'G10', quantity: 4 }]);
+
+      await service.getTruckStock('truck-1', '2026-01-31');
+
+      const callArgs = prisma.saleItem.findMany.mock.calls[0][0] as {
+        where: { sale: { createdAt: { lt: Date } } };
+      };
+      const lateEveningSaleUtc = new Date('2026-02-01T01:00:00.000Z');
+      expect(lateEveningSaleUtc.getTime()).toBeLessThan(callArgs.where.sale.createdAt.lt.getTime());
     });
   });
 });
