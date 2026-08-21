@@ -18,14 +18,39 @@ jest.mock('../context/SyncContext', () => {
   };
 });
 
+// PR5: HomeScreen now fetches manifest status via useAuth().api.get, and
+// navigates to LoadManifest via useNavigation() — both mocked the same way
+// TruckContext/SyncContext already are above (fully virtualized, no
+// requireActual, so this file stays independent of the real navigation tree
+// and AsyncStorage/fetch chains).
+jest.mock('../context/AuthContext', () => {
+  const actual = jest.requireActual('../context/AuthContext');
+  return {
+    ...actual,
+    useAuth: jest.fn(),
+  };
+});
+
+const mockedNavigate = jest.fn();
+jest.mock('@react-navigation/native', () => {
+  const actual = jest.requireActual('@react-navigation/native');
+  return {
+    ...actual,
+    useNavigation: () => ({ navigate: mockedNavigate }),
+  };
+});
+
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import { HomeScreen } from './HomeScreen';
+import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
 
+const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseSync = useSync as jest.Mock;
 const mockedUseTruck = useTruck as jest.Mock;
+let mockedApiGet: jest.Mock;
 
 const baseTruckValue = {
   truck: {
@@ -46,6 +71,18 @@ const baseTruckValue = {
 
 beforeEach(() => {
   mockedUseTruck.mockReturnValue(baseTruckValue);
+  mockedNavigate.mockClear();
+  mockedApiGet = jest.fn().mockResolvedValue([]);
+  mockedUseAuth.mockReturnValue({
+    status: 'authenticated' as const,
+    token: 'tok',
+    username: 'chofer1',
+    loading: false,
+    api: { get: mockedApiGet },
+    login: jest.fn(),
+    logout: jest.fn(),
+    requireAuthToken: jest.fn(() => 'tok'),
+  });
 });
 
 const baseSyncValue = {
@@ -159,5 +196,99 @@ describe('HomeScreen/camion del dia', () => {
     await render(<HomeScreen />);
 
     expect(screen.getByTestId('home-no-truck')).toBeTruthy();
+  });
+});
+
+describe('HomeScreen/manifest status banner (PR5)', () => {
+  it('fetches manifest status on mount, alongside refreshDaySummary', async () => {
+    const refreshDaySummary = jest.fn().mockResolvedValue(undefined);
+    mockedUseSync.mockReturnValue({ ...baseSyncValue, refreshDaySummary });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(refreshDaySummary).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockedApiGet).toHaveBeenCalledWith('/load-manifests/mine', { cache: 'no-store' }),
+    );
+  });
+
+  it('shows a passive banner when no manifest was submitted today', async () => {
+    mockedApiGet.mockResolvedValue([]);
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
+    expect(screen.queryByTestId('home-manifest-loaded')).toBeNull();
+    expect(screen.queryByTestId('home-manifest-error')).toBeNull();
+  });
+
+  it('shows a different (positive) state when a manifest was already submitted today', async () => {
+    const today = new Date().toISOString();
+    mockedApiGet.mockResolvedValue([
+      {
+        id: 'm1',
+        createdAt: today,
+        driverName: 'chofer1',
+        truckId: 'truck-1',
+        items: [{ productCode: 'G10', quantity: 5 }],
+      },
+    ]);
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-manifest-loaded')).toBeTruthy());
+    expect(screen.queryByTestId('home-manifest-missing')).toBeNull();
+  });
+
+  it('ignores manifests from days other than today when deciding the banner', async () => {
+    mockedApiGet.mockResolvedValue([
+      {
+        id: 'm0',
+        createdAt: '2020-01-01T09:00:00.000Z',
+        driverName: 'chofer1',
+        truckId: 'truck-1',
+        items: [{ productCode: 'G10', quantity: 5 }],
+      },
+    ]);
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
+  });
+
+  it('shows a visible error when the manifest fetch fails — no silent catch, same posture as summaryError', async () => {
+    mockedApiGet.mockRejectedValue(new Error('No se pudo conectar con el servidor.'));
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-manifest-error')).toBeTruthy());
+    expect(screen.getByText('No se pudo conectar con el servidor.')).toBeTruthy();
+    expect(screen.queryByTestId('home-manifest-missing')).toBeNull();
+    expect(screen.queryByTestId('home-manifest-loaded')).toBeNull();
+  });
+
+  it('does not block the rest of the screen when the manifest fetch fails', async () => {
+    mockedApiGet.mockRejectedValue(new Error('network down'));
+    mockedUseSync.mockReturnValue({
+      ...baseSyncValue,
+      daySummary: { activeCount: 3, canceledCount: 1, activeTotal: 15000 },
+    });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-manifest-error')).toBeTruthy());
+    expect(screen.getByText('Ventas activas hoy: 3')).toBeTruthy();
+  });
+
+  it('navigates to LoadManifest when the CTA is pressed', async () => {
+    mockedApiGet.mockResolvedValue([]);
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('home-manifest-cta'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('LoadManifest');
   });
 });

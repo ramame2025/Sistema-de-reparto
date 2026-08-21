@@ -11,6 +11,7 @@ import { RolesGuard } from './auth/roles.guard';
 import { CustomersModule } from './customers/customers.module';
 import { DriverTruckAssignmentsModule } from './driver-truck-assignments/driver-truck-assignments.module';
 import { ExpensesModule } from './expenses/expenses.module';
+import { LoadManifestsModule } from './load-manifests/load-manifests.module';
 import { PricesModule } from './prices/prices.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SalesModule } from './sales/sales.module';
@@ -35,6 +36,7 @@ import { UsersModule } from './users/users.module';
     PrismaModule,
     SalesModule,
     ExpensesModule,
+    LoadManifestsModule,
     UploadsModule,
     UsersModule,
     CustomersModule,

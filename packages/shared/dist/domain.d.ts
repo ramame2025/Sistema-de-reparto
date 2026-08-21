@@ -72,6 +72,39 @@ export type ExpenseRecord = {
     note?: string;
     receiptRef?: string;
 };
+export type LoadManifestItemInput = {
+    productCode: ProductCode;
+    quantity: number;
+};
+export type CreateLoadManifestInput = {
+    driverName: string;
+    truckId: string;
+    truckCode?: string;
+    items: LoadManifestItemInput[];
+    photoRef?: string;
+    note?: string;
+};
+export type LoadManifestRecord = {
+    id: string;
+    createdAt: string;
+    driverName: string;
+    truckId: string;
+    truckCode?: string;
+    items: LoadManifestItemInput[];
+    photoRef?: string;
+    note?: string;
+};
+export type TruckStockLine = {
+    productCode: ProductCode;
+    loaded: number;
+    sold: number;
+    remaining: number;
+};
+export type TruckStockSummary = {
+    truckId: string;
+    asOf: string;
+    lines: TruckStockLine[];
+};
 export type LoginInput = {
     username: string;
     password: string;
@@ -162,6 +195,7 @@ export declare function validateCreateSaleInput(input: CreateSaleInput): string[
 export declare function validateUpdateSaleInput(input: UpdateSaleInput): string[];
 export declare function validateCancelSaleInput(input: CancelSaleInput): string[];
 export declare function validateCreateExpenseInput(input: CreateExpenseInput): string[];
+export declare function validateCreateLoadManifestInput(input: CreateLoadManifestInput): string[];
 export declare function validateLoginInput(input: LoginInput): string[];
 export declare function validateCreateUserInput(input: CreateUserInput): string[];
 export declare function validateChangePasswordInput(input: ChangePasswordInput): string[];

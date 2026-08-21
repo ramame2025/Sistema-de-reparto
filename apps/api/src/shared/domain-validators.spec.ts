@@ -1,12 +1,14 @@
 import {
   type CreateAssignmentInput,
   type CreateCustomerInput,
+  type CreateLoadManifestInput,
   type CreateSaleInput,
   type CreateTruckInput,
   type UpdatePriceInput,
   type UpdateTruckInput,
   validateCreateAssignmentInput,
   validateCreateCustomerInput,
+  validateCreateLoadManifestInput,
   validateCreateSaleInput,
   validateCreateTruckInput,
   validateUpdatePriceInput,
@@ -230,5 +232,82 @@ describe('validateCreateSaleInput (widened with optional FKs)', () => {
   it('rejects an empty-string customerId when provided', () => {
     const errors = validateCreateSaleInput({ ...base, customerId: '' });
     expect(errors).toContain('customerId must not be empty when provided');
+  });
+});
+
+describe('validateCreateLoadManifestInput', () => {
+  const base: CreateLoadManifestInput = {
+    driverName: 'Juan',
+    truckId: 'truck-1',
+    items: [{ productCode: 'G10', quantity: 10 }],
+  };
+
+  it('accepts a valid payload', () => {
+    expect(validateCreateLoadManifestInput(base)).toEqual([]);
+  });
+
+  it('rejects a missing truckId', () => {
+    const { truckId, ...rest } = base;
+    void truckId;
+    const errors = validateCreateLoadManifestInput(rest as CreateLoadManifestInput);
+    expect(errors).toContain('truckId is required');
+  });
+
+  it('rejects an empty truckId', () => {
+    const errors = validateCreateLoadManifestInput({ ...base, truckId: '' });
+    expect(errors).toContain('truckId is required');
+  });
+
+  it('rejects an empty items array', () => {
+    const errors = validateCreateLoadManifestInput({ ...base, items: [] });
+    expect(errors).toContain('items must include at least one product');
+  });
+
+  it('rejects an item with an invalid productCode', () => {
+    const errors = validateCreateLoadManifestInput({
+      ...base,
+      items: [
+        {
+          productCode: 'G99' as CreateLoadManifestInput['items'][number]['productCode'],
+          quantity: 5,
+        },
+      ],
+    });
+    expect(errors).toContain('items[0].productCode is invalid');
+  });
+
+  it('rejects an item with a non-integer quantity', () => {
+    const errors = validateCreateLoadManifestInput({
+      ...base,
+      items: [{ productCode: 'G10', quantity: 1.5 }],
+    });
+    expect(errors).toContain('items[0].quantity must be an integer greater than 0');
+  });
+
+  it('rejects an item with a zero or negative quantity', () => {
+    const errors = validateCreateLoadManifestInput({
+      ...base,
+      items: [{ productCode: 'G10', quantity: 0 }],
+    });
+    expect(errors).toContain('items[0].quantity must be an integer greater than 0');
+  });
+
+  it('accepts an optional photoRef and note when provided', () => {
+    const input: CreateLoadManifestInput = {
+      ...base,
+      photoRef: 'uploads/photo.jpg',
+      note: 'carga completa',
+    };
+    expect(validateCreateLoadManifestInput(input)).toEqual([]);
+  });
+
+  it('rejects an empty-string photoRef when provided', () => {
+    const errors = validateCreateLoadManifestInput({ ...base, photoRef: '' });
+    expect(errors).toContain('photoRef must not be empty when provided');
+  });
+
+  it('rejects an empty-string note when provided', () => {
+    const errors = validateCreateLoadManifestInput({ ...base, note: '' });
+    expect(errors).toContain('note must not be empty when provided');
   });
 });

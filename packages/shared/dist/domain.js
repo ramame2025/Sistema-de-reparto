@@ -103,6 +103,32 @@ export function validateCreateExpenseInput(input) {
     }
     return errors;
 }
+export function validateCreateLoadManifestInput(input) {
+    const errors = [];
+    if (!input.truckId || input.truckId.trim().length === 0) {
+        errors.push('truckId is required');
+    }
+    if (!Array.isArray(input.items) || input.items.length === 0) {
+        errors.push('items must include at least one product');
+    }
+    if (Array.isArray(input.items)) {
+        input.items.forEach((item, index) => {
+            if (!PRODUCT_CODES.includes(item.productCode)) {
+                errors.push(`items[${index}].productCode is invalid`);
+            }
+            if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+                errors.push(`items[${index}].quantity must be an integer greater than 0`);
+            }
+        });
+    }
+    if (input.photoRef !== undefined && input.photoRef.trim().length === 0) {
+        errors.push('photoRef must not be empty when provided');
+    }
+    if (input.note !== undefined && input.note.trim().length === 0) {
+        errors.push('note must not be empty when provided');
+    }
+    return errors;
+}
 export function validateLoginInput(input) {
     const errors = [];
     if (!input.username || input.username.trim().length < 2) {

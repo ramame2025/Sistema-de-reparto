@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   type CreateTruckInput,
+  type TruckStockSummary,
   type UpdateTruckInput,
   validateCreateTruckInput,
   validateUpdateTruckInput,
@@ -21,7 +22,19 @@ import {
   DriverTruckAssignmentsService,
   type TruckCalendar,
 } from '../driver-truck-assignments/driver-truck-assignments.service';
+import { LoadManifestsService } from '../load-manifests/load-manifests.service';
 import { TrucksService } from './trucks.service';
+
+/**
+ * El reparto opera en Argentina: si el "hoy" por defecto se tomara en UTC, un
+ * chofer que abre la app a la noche veria el stock de otro dia. Mismo helper
+ * que `driver-truck-assignments.controller.ts` (no hay un util compartido
+ * hoy, asi que se repite igual que en `users.service.ts`).
+ */
+const BUSINESS_TIME_ZONE = 'America/Argentina/Buenos_Aires';
+
+const todayInBusinessZone = () =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: BUSINESS_TIME_ZONE }).format(new Date());
 
 @Controller('trucks')
 @Roles('admin')
@@ -29,6 +42,7 @@ export class TrucksController {
   constructor(
     private readonly trucksService: TrucksService,
     private readonly assignmentsService: DriverTruckAssignmentsService,
+    private readonly loadManifestsService: LoadManifestsService,
   ) {}
 
   @Get()
@@ -57,6 +71,21 @@ export class TrucksController {
     await this.trucksService.getTruck(id);
 
     return this.assignmentsService.getTruckCalendar(id, from, to);
+  }
+
+  /**
+   * Stock derivado del camion (cargado - vendido). Mismo orden que
+   * `:id/calendar`: primero se confirma que el camion existe (404), recien
+   * despues se calcula.
+   */
+  @Get(':id/stock')
+  async getTruckStock(
+    @Param('id') id: string,
+    @Query('asOf') asOf?: string,
+  ): Promise<TruckStockSummary> {
+    await this.trucksService.getTruck(id);
+
+    return this.loadManifestsService.getTruckStock(id, asOf || todayInBusinessZone());
   }
 
   @Post()

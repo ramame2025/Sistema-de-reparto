@@ -107,6 +107,44 @@ export type ExpenseRecord = {
   receiptRef?: string;
 };
 
+export type LoadManifestItemInput = {
+  productCode: ProductCode;
+  quantity: number;
+};
+
+export type CreateLoadManifestInput = {
+  driverName: string;
+  truckId: string;
+  truckCode?: string;
+  items: LoadManifestItemInput[];
+  photoRef?: string;
+  note?: string;
+};
+
+export type LoadManifestRecord = {
+  id: string;
+  createdAt: string;
+  driverName: string;
+  truckId: string;
+  truckCode?: string;
+  items: LoadManifestItemInput[];
+  photoRef?: string;
+  note?: string;
+};
+
+export type TruckStockLine = {
+  productCode: ProductCode;
+  loaded: number;
+  sold: number;
+  remaining: number;
+};
+
+export type TruckStockSummary = {
+  truckId: string;
+  asOf: string;
+  lines: TruckStockLine[];
+};
+
 export type LoginInput = {
   username: string;
   password: string;
@@ -315,6 +353,40 @@ export function validateCreateExpenseInput(input: CreateExpenseInput): string[] 
 
   if (input.note && input.note.length > 300) {
     errors.push('note max length is 300');
+  }
+
+  return errors;
+}
+
+export function validateCreateLoadManifestInput(input: CreateLoadManifestInput): string[] {
+  const errors: string[] = [];
+
+  if (!input.truckId || input.truckId.trim().length === 0) {
+    errors.push('truckId is required');
+  }
+
+  if (!Array.isArray(input.items) || input.items.length === 0) {
+    errors.push('items must include at least one product');
+  }
+
+  if (Array.isArray(input.items)) {
+    input.items.forEach((item, index) => {
+      if (!PRODUCT_CODES.includes(item.productCode)) {
+        errors.push(`items[${index}].productCode is invalid`);
+      }
+
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+        errors.push(`items[${index}].quantity must be an integer greater than 0`);
+      }
+    });
+  }
+
+  if (input.photoRef !== undefined && input.photoRef.trim().length === 0) {
+    errors.push('photoRef must not be empty when provided');
+  }
+
+  if (input.note !== undefined && input.note.trim().length === 0) {
+    errors.push('note must not be empty when provided');
   }
 
   return errors;
