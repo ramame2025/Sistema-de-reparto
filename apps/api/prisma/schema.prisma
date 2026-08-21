@@ -83,6 +83,7 @@ model Sale {
   @@index([createdAt])
   @@index([driverName, createdAt])
   @@index([customerId])
+  @@index([truckId, createdAt])
 }
 
 model SaleItem {
@@ -146,15 +147,16 @@ model Customer {
 }
 
 model Truck {
-  id          String   @id @default(cuid())
-  code        String   @unique
-  plate       String   @unique
-  capacity    Int
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  sales       Sale[]
-  assignments DriverTruckAssignment[]
+  id            String   @id @default(cuid())
+  code          String   @unique
+  plate         String   @unique
+  capacity      Int
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  sales         Sale[]
+  assignments   DriverTruckAssignment[]
+  loadManifests LoadManifest[]
 
   @@index([isActive, code])
 }
@@ -173,6 +175,32 @@ model DriverTruckAssignment {
   @@index([truckId, startDate])
   @@index([driverId, startDate])
   @@index([truckId, kind, startDate])
+}
+
+model LoadManifest {
+  id         String            @id @default(cuid())
+  createdAt  DateTime          @default(now())
+  driverName String            @default("sin-chofer")
+  truckId    String
+  truckCode  String?
+  photoRef   String?
+  note       String?
+  truck      Truck             @relation(fields: [truckId], references: [id])
+  items      LoadManifestItem[]
+
+  @@index([createdAt])
+  @@index([driverName, createdAt])
+  @@index([truckId, createdAt])
+}
+
+model LoadManifestItem {
+  id          String       @id @default(cuid())
+  manifestId  String
+  productCode ProductCode
+  quantity    Int
+  manifest    LoadManifest @relation(fields: [manifestId], references: [id], onDelete: Cascade)
+
+  @@index([manifestId])
 }
 
 model ProductPrice {
