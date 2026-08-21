@@ -744,4 +744,61 @@ describe('DriverTruckAssignmentsService', () => {
       expect(result).toBeNull();
     });
   });
+  describe('resolveAssignmentsForDriversOnDate', () => {
+    it('resolves several drivers with ONE query, applying the specificity rule to each', async () => {
+      // La pantalla de usuarios lista N choferes: preguntar de a uno seria N+1.
+      prisma.driverTruckAssignment.findMany.mockResolvedValue([
+        buildAssignmentRow({
+          id: 'tit-juan',
+          driverId: 'juan',
+          truckId: 'truck-1',
+          kind: 'titular',
+          startDate: new Date('2026-02-01T00:00:00.000Z'),
+          endDate: null,
+        }),
+        buildAssignmentRow({
+          id: 'tit-pedro',
+          driverId: 'pedro',
+          truckId: 'truck-2',
+          kind: 'titular',
+          startDate: new Date('2026-02-01T00:00:00.000Z'),
+          endDate: null,
+        }),
+        buildAssignmentRow({
+          id: 'cov-pedro',
+          driverId: 'pedro',
+          truckId: 'truck-1',
+          kind: 'cobertura',
+          startDate: new Date('2026-02-11T00:00:00.000Z'),
+          endDate: new Date('2026-02-11T00:00:00.000Z'),
+        }),
+      ]);
+
+      const result = await service.resolveAssignmentsForDriversOnDate(
+        ['juan', 'pedro'],
+        '2026-02-11',
+      );
+
+      expect(prisma.driverTruckAssignment.findMany).toHaveBeenCalledTimes(1);
+      expect(result.get('juan')?.truckId).toBe('truck-1');
+      // Ese dia Pedro cubre el truck-1, no maneja su titular truck-2.
+      expect(result.get('pedro')?.truckId).toBe('truck-1');
+      expect(result.get('pedro')?.kind).toBe('cobertura');
+    });
+
+    it('omits drivers with no assignment that day instead of mapping them to null', async () => {
+      prisma.driverTruckAssignment.findMany.mockResolvedValue([]);
+
+      const result = await service.resolveAssignmentsForDriversOnDate(['juan'], '2026-02-11');
+
+      expect(result.has('juan')).toBe(false);
+    });
+
+    it('does not query at all when there are no drivers to resolve', async () => {
+      const result = await service.resolveAssignmentsForDriversOnDate([], '2026-02-11');
+
+      expect(result.size).toBe(0);
+      expect(prisma.driverTruckAssignment.findMany).not.toHaveBeenCalled();
+    });
+  });
 });
