@@ -30,10 +30,13 @@ export const USER_ROLES = ['admin', 'chofer'] as const;
 
 export const ASSIGNMENT_KINDS = ['titular', 'cobertura'] as const;
 
+export const SALE_KINDS = ['sale', 'churn'] as const;
+
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export type UserRole = (typeof USER_ROLES)[number];
 export type AssignmentKind = (typeof ASSIGNMENT_KINDS)[number];
+export type SaleKind = (typeof SALE_KINDS)[number];
 
 export type PriceTable = Record<CustomerType, Record<ProductCode, number>>;
 
@@ -53,10 +56,35 @@ export type CreateSaleInput = {
   note?: string;
   customerId?: string;
   truckId?: string;
+  containerReturned?: boolean;
+};
+
+/**
+ * Payload para registrar una visita sin venta (churn): container devuelto,
+ * nada vendido. A proposito NO tiene `items` ni `paymentMethod` -- esos
+ * campos no existen en este input, se fuerzan server-side en
+ * `recordEmptyVisit` (fuera de scope de esta unidad).
+ */
+export type RecordEmptyVisitInput = {
+  clientGeneratedId?: string;
+  driverName: string;
+  truckCode?: string;
+  truckId?: string;
+  customerName: string;
+  customerType: CustomerType;
+  customerId?: string;
+  note?: string;
 };
 
 export type UpdateSaleInput = CreateSaleInput & {
   reason: string;
+  /**
+   * Hint de validacion solamente: le dice al validador puro si debe saltear
+   * los chequeos de paymentMethod/items. El service SIEMPRE revalida contra
+   * el `kind` almacenado en la fila real antes de aplicar el cambio -- este
+   * campo nunca es la unica fuente de verdad.
+   */
+  kind?: SaleKind;
 };
 
 export type SaleRecord = {
@@ -70,9 +98,16 @@ export type SaleRecord = {
   total: number;
   customerName: string;
   customerType: CustomerType;
-  paymentMethod: PaymentMethod;
+  /**
+   * `null` para una fila de churn (`kind === 'churn'`): no hubo pago, es el
+   * hecho de negocio real, no un dato faltante. Toda fila `kind === 'sale'`
+   * sigue teniendo un `PaymentMethod` valido.
+   */
+  paymentMethod: PaymentMethod | null;
   items: SaleItemInput[];
   note?: string;
+  kind: SaleKind;
+  containerReturned?: boolean;
 };
 
 export type CancelSaleInput = {
@@ -266,8 +301,88 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
   return errors;
 }
 
+export function validateRecordEmptyVisitInput(input: RecordEmptyVisitInput): string[] {
+  const errors: string[] = [];
+
+  if (
+    input.clientGeneratedId !== undefined &&
+    input.clientGeneratedId.trim().length < 8
+  ) {
+    errors.push('clientGeneratedId must have at least 8 characters when provided');
+  }
+
+  if (!input.customerName || input.customerName.trim().length < 2) {
+    errors.push("customerName must have at least 2 characters");
+  }
+
+  if (!input.driverName || input.driverName.trim().length < 2) {
+    errors.push('driverName must have at least 2 characters');
+  }
+
+  if (input.truckCode && input.truckCode.trim().length < 2) {
+    errors.push('truckCode must have at least 2 characters when provided');
+  }
+
+  if (input.customerId !== undefined && input.customerId.trim().length === 0) {
+    errors.push('customerId must not be empty when provided');
+  }
+
+  if (input.truckId !== undefined && input.truckId.trim().length === 0) {
+    errors.push('truckId must not be empty when provided');
+  }
+
+  if (!CUSTOMER_TYPES.includes(input.customerType)) {
+    errors.push("customerType is invalid");
+  }
+
+  return errors;
+}
+
+function validateSaleIdentityFields(input: UpdateSaleInput): string[] {
+  const errors: string[] = [];
+
+  if (
+    input.clientGeneratedId !== undefined &&
+    input.clientGeneratedId.trim().length < 8
+  ) {
+    errors.push('clientGeneratedId must have at least 8 characters when provided');
+  }
+
+  if (!input.customerName || input.customerName.trim().length < 2) {
+    errors.push("customerName must have at least 2 characters");
+  }
+
+  if (!input.driverName || input.driverName.trim().length < 2) {
+    errors.push('driverName must have at least 2 characters');
+  }
+
+  if (input.truckCode && input.truckCode.trim().length < 2) {
+    errors.push('truckCode must have at least 2 characters when provided');
+  }
+
+  if (input.customerId !== undefined && input.customerId.trim().length === 0) {
+    errors.push('customerId must not be empty when provided');
+  }
+
+  if (input.truckId !== undefined && input.truckId.trim().length === 0) {
+    errors.push('truckId must not be empty when provided');
+  }
+
+  if (!CUSTOMER_TYPES.includes(input.customerType)) {
+    errors.push("customerType is invalid");
+  }
+
+  return errors;
+}
+
 export function validateUpdateSaleInput(input: UpdateSaleInput): string[] {
-  const errors = validateCreateSaleInput(input);
+  // input.kind is a validation hint only: it tells the pure validator whether
+  // to skip paymentMethod/items checks. The service re-verifies it against
+  // the stored row's kind before applying any change (never trusted alone).
+  const errors =
+    input.kind === 'churn'
+      ? validateSaleIdentityFields(input)
+      : validateCreateSaleInput(input);
 
   if (!input.reason || input.reason.trim().length < 3) {
     errors.push('reason must have at least 3 characters');

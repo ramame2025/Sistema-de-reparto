@@ -1,6 +1,12 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import type { CreateSaleInput, PriceTable, SaleRecord, UpdateSaleInput } from '@distribuidor/shared';
+import type {
+  CreateSaleInput,
+  PriceTable,
+  RecordEmptyVisitInput,
+  SaleRecord,
+  UpdateSaleInput,
+} from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
 import { SalesService } from './sales.service';
@@ -26,9 +32,22 @@ function buildSaleRow(overrides: Record<string, unknown> = {}) {
     paymentMethod: 'efectivo',
     total: 0,
     note: null,
+    kind: 'sale',
+    containerReturned: null,
     items: [{ productCode: 'G10', quantity: 2 }],
     ...overrides,
   };
+}
+
+function buildChurnRow(overrides: Record<string, unknown> = {}) {
+  return buildSaleRow({
+    kind: 'churn',
+    paymentMethod: null,
+    total: 0,
+    containerReturned: true,
+    items: [],
+    ...overrides,
+  });
 }
 
 function buildCreateInput(overrides: Partial<CreateSaleInput> = {}): CreateSaleInput {
@@ -46,6 +65,17 @@ function buildUpdateInput(overrides: Partial<UpdateSaleInput> = {}): UpdateSaleI
   return {
     ...buildCreateInput(overrides),
     reason: 'Corrección de venta',
+  };
+}
+
+function buildRecordEmptyVisitInput(
+  overrides: Partial<RecordEmptyVisitInput> = {},
+): RecordEmptyVisitInput {
+  return {
+    driverName: 'Juan',
+    customerName: 'Kiosco Sur',
+    customerType: 'final',
+    ...overrides,
   };
 }
 
@@ -283,6 +313,256 @@ describe('SalesService', () => {
       expect(prisma.sale.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ total: 400 }) }),
       );
+    });
+
+    it('throws ConflictException and writes nothing when input.kind disagrees with the stored kind (sale row, churn requested)', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildSaleRow({ kind: 'sale' }));
+
+      await expect(
+        service.updateSale('sale-1', buildUpdateInput({ kind: 'churn' })),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.sale.update).not.toHaveBeenCalled();
+      expect(prisma.saleAudit.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when a stored churn row is edited without declaring kind=churn (defaults to sale)', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildChurnRow());
+
+      await expect(
+        service.updateSale('sale-1', buildUpdateInput()),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.sale.update).not.toHaveBeenCalled();
+      expect(prisma.saleAudit.create).not.toHaveBeenCalled();
+    });
+
+    it('edits a stored churn row successfully with no items/paymentMethod when input.kind matches, forcing paymentMethod=null and total=0', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildChurnRow());
+      prisma.sale.update.mockResolvedValue(buildChurnRow({ customerName: 'Nuevo nombre' }));
+
+      const churnEdit = {
+        driverName: 'Juan',
+        customerName: 'Nuevo nombre',
+        customerType: 'final',
+        reason: 'Corrección de identidad',
+        kind: 'churn',
+      } as UpdateSaleInput;
+
+      const result = await service.updateSale('sale-1', churnEdit);
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            paymentMethod: null,
+            total: 0,
+            items: { create: [] },
+          }),
+        }),
+      );
+      expect(prisma.saleAudit.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ action: 'edited' }) }),
+      );
+      expect(result.kind).toBe('churn');
+    });
+
+    it('leaves normal-sale editing completely unchanged, whether or not input.kind is present', async () => {
+      prisma.sale.update.mockResolvedValue(buildSaleRow({ total: 200 }));
+
+      const result = await service.updateSale('sale-1', buildUpdateInput({ kind: 'sale' }));
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ total: 200 }) }),
+      );
+      expect(result.total).toBe(200);
+    });
+  });
+
+  describe('recordEmptyVisit', () => {
+    it('creates a Sale forced to kind=churn, paymentMethod=null, total=0, containerReturned=true, zero items, and one created SaleAudit', async () => {
+      prisma.sale.create.mockResolvedValue(buildChurnRow());
+
+      const result = await service.recordEmptyVisit(buildRecordEmptyVisitInput());
+
+      expect(prisma.customer.findUnique).not.toHaveBeenCalled();
+      expect(prisma.truck.findUnique).not.toHaveBeenCalled();
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            kind: 'churn',
+            paymentMethod: null,
+            total: 0,
+            containerReturned: true,
+            items: { create: [] },
+            audits: { create: expect.objectContaining({ action: 'created' }) },
+          }),
+        }),
+      );
+      expect(result.kind).toBe('churn');
+      expect(result.paymentMethod).toBeNull();
+      expect(result.total).toBe(0);
+      expect(result.containerReturned).toBe(true);
+      expect(result.items).toEqual([]);
+    });
+
+    it('forces kind/paymentMethod/total/containerReturned/items server-side even if a caller smuggles conflicting values onto the input', async () => {
+      prisma.sale.create.mockResolvedValue(buildChurnRow());
+
+      const smuggledInput = {
+        ...buildRecordEmptyVisitInput(),
+        kind: 'sale',
+        paymentMethod: 'efectivo',
+        total: 999,
+        containerReturned: false,
+        items: [{ productCode: 'G10', quantity: 5 }],
+      } as unknown as RecordEmptyVisitInput;
+
+      await service.recordEmptyVisit(smuggledInput);
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            kind: 'churn',
+            paymentMethod: null,
+            total: 0,
+            containerReturned: true,
+            items: { create: [] },
+          }),
+        }),
+      );
+    });
+
+    it('resolves driverName from actorUsername over input.driverName, same as createSale', async () => {
+      prisma.sale.create.mockResolvedValue(buildChurnRow({ driverName: 'maria.gomez' }));
+
+      await service.recordEmptyVisit(
+        buildRecordEmptyVisitInput({ driverName: 'Juan' }),
+        'maria.gomez',
+      );
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ driverName: 'maria.gomez' }) }),
+      );
+    });
+
+    it('denormalizes customerName/customerType from a linked active Customer, same as createSale', async () => {
+      prisma.customer.findUnique.mockResolvedValue({
+        id: 'customer-1',
+        name: 'Distribuidora Norte',
+        customerType: 'distribuidor',
+        isActive: true,
+      });
+      prisma.sale.create.mockResolvedValue(buildChurnRow());
+
+      await service.recordEmptyVisit(
+        buildRecordEmptyVisitInput({
+          customerId: 'customer-1',
+          customerType: 'final',
+          customerName: 'nombre incorrecto',
+        }),
+      );
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            customerType: 'distribuidor',
+            customerName: 'Distribuidora Norte',
+            customerId: 'customer-1',
+          }),
+        }),
+      );
+    });
+
+    it('rejects an unknown customerId with NotFoundException and creates nothing', async () => {
+      prisma.customer.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.recordEmptyVisit(buildRecordEmptyVisitInput({ customerId: 'missing-customer' })),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a customerId linked to an inactive Customer with ConflictException and creates nothing', async () => {
+      prisma.customer.findUnique.mockResolvedValue({
+        id: 'customer-1',
+        name: 'Kiosco Sur',
+        customerType: 'final',
+        isActive: false,
+      });
+
+      await expect(
+        service.recordEmptyVisit(buildRecordEmptyVisitInput({ customerId: 'customer-1' })),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown truckId with NotFoundException and creates nothing', async () => {
+      prisma.truck.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.recordEmptyVisit(buildRecordEmptyVisitInput({ truckId: 'missing-truck' })),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a truckId linked to an inactive Truck with ConflictException and creates nothing', async () => {
+      prisma.truck.findUnique.mockResolvedValue({ id: 'truck-1', isActive: false });
+
+      await expect(
+        service.recordEmptyVisit(buildRecordEmptyVisitInput({ truckId: 'truck-1' })),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    it('returns the existing row instead of creating a duplicate when clientGeneratedId already exists (offline-queue retry), same as createSale', async () => {
+      const existingChurnRow = buildChurnRow({ clientGeneratedId: 'queue-item-1' });
+      prisma.sale.findUnique.mockResolvedValue(existingChurnRow);
+
+      const result = await service.recordEmptyVisit(
+        buildRecordEmptyVisitInput({ clientGeneratedId: 'queue-item-1' }),
+      );
+
+      expect(prisma.sale.findUnique).toHaveBeenCalledWith({
+        where: { clientGeneratedId: 'queue-item-1' },
+        include: { items: true },
+      });
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+      expect(result.kind).toBe('churn');
+    });
+
+    it('creates a new row when clientGeneratedId is provided but no matching row exists yet', async () => {
+      prisma.sale.findUnique.mockResolvedValue(null);
+      prisma.sale.create.mockResolvedValue(buildChurnRow({ clientGeneratedId: 'queue-item-2' }));
+
+      await service.recordEmptyVisit(
+        buildRecordEmptyVisitInput({ clientGeneratedId: 'queue-item-2' }),
+      );
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ clientGeneratedId: 'queue-item-2' }),
+        }),
+      );
+    });
+  });
+
+  describe('cancelSale', () => {
+    it('cancels a churn row identically to a normal sale (regression guard — no code change to cancelSale)', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildChurnRow({ status: 'active' }));
+      prisma.sale.update.mockResolvedValue(
+        buildChurnRow({ status: 'canceled', canceledAt: new Date('2026-01-02T00:00:00.000Z'), cancelReason: 'Cliente se mudó' }),
+      );
+
+      const result = await service.cancelSale('sale-1', { reason: 'Cliente se mudó' });
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'canceled',
+            cancelReason: 'Cliente se mudó',
+            audits: { create: expect.objectContaining({ action: 'canceled' }) },
+          }),
+        }),
+      );
+      expect(result.status).toBe('canceled');
     });
   });
 

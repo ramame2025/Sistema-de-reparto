@@ -3,13 +3,17 @@ import {
   type CreateCustomerInput,
   type CreateSaleInput,
   type CreateTruckInput,
+  type RecordEmptyVisitInput,
   type UpdatePriceInput,
+  type UpdateSaleInput,
   type UpdateTruckInput,
   validateCreateAssignmentInput,
   validateCreateCustomerInput,
   validateCreateSaleInput,
   validateCreateTruckInput,
+  validateRecordEmptyVisitInput,
   validateUpdatePriceInput,
+  validateUpdateSaleInput,
   validateUpdateTruckInput,
 } from '@distribuidor/shared';
 
@@ -230,5 +234,142 @@ describe('validateCreateSaleInput (widened with optional FKs)', () => {
   it('rejects an empty-string customerId when provided', () => {
     const errors = validateCreateSaleInput({ ...base, customerId: '' });
     expect(errors).toContain('customerId must not be empty when provided');
+  });
+});
+
+describe('validateRecordEmptyVisitInput', () => {
+  const base: RecordEmptyVisitInput = {
+    driverName: 'Juan',
+    customerName: 'Kiosco Sur',
+    customerType: 'final',
+  };
+
+  it('accepts a valid payload with no items and no paymentMethod', () => {
+    expect(validateRecordEmptyVisitInput(base)).toEqual([]);
+  });
+
+  it('accepts a valid payload with optional customerId/truckId/truckCode/note', () => {
+    const input: RecordEmptyVisitInput = {
+      ...base,
+      customerId: 'customer-1',
+      truckId: 'truck-1',
+      truckCode: 'T-01',
+      note: 'no habia stock',
+    };
+    expect(validateRecordEmptyVisitInput(input)).toEqual([]);
+  });
+
+  it('rejects a customerName shorter than 2 characters', () => {
+    const errors = validateRecordEmptyVisitInput({ ...base, customerName: 'K' });
+    expect(errors).toContain('customerName must have at least 2 characters');
+  });
+
+  it('rejects a driverName shorter than 2 characters', () => {
+    const errors = validateRecordEmptyVisitInput({ ...base, driverName: 'J' });
+    expect(errors).toContain('driverName must have at least 2 characters');
+  });
+
+  it('rejects an invalid customerType', () => {
+    const errors = validateRecordEmptyVisitInput({
+      ...base,
+      customerType: 'mayorista' as RecordEmptyVisitInput['customerType'],
+    });
+    expect(errors).toContain('customerType is invalid');
+  });
+
+  it('rejects an empty-string customerId when provided', () => {
+    const errors = validateRecordEmptyVisitInput({ ...base, customerId: '' });
+    expect(errors).toContain('customerId must not be empty when provided');
+  });
+
+  it('rejects an empty-string truckId when provided', () => {
+    const errors = validateRecordEmptyVisitInput({ ...base, truckId: '' });
+    expect(errors).toContain('truckId must not be empty when provided');
+  });
+
+  it('rejects a truckCode shorter than 2 characters when provided', () => {
+    const errors = validateRecordEmptyVisitInput({ ...base, truckCode: 'T' });
+    expect(errors).toContain('truckCode must have at least 2 characters when provided');
+  });
+
+  it('rejects a clientGeneratedId shorter than 8 characters when provided', () => {
+    const errors = validateRecordEmptyVisitInput({ ...base, clientGeneratedId: 'short' });
+    expect(errors).toContain(
+      'clientGeneratedId must have at least 8 characters when provided',
+    );
+  });
+
+  it('does not require paymentMethod or items (fields do not exist on this input)', () => {
+    // RecordEmptyVisitInput has no items/paymentMethod fields at all; the validator
+    // must never produce their error messages for a payload that only has identity fields.
+    const errors = validateRecordEmptyVisitInput(base);
+    expect(errors).not.toContain('paymentMethod is invalid');
+    expect(errors).not.toContain('items must include at least one product');
+  });
+});
+
+describe('validateUpdateSaleInput', () => {
+  const base: UpdateSaleInput = {
+    driverName: 'Juan',
+    customerName: 'Kiosco Sur',
+    customerType: 'final',
+    paymentMethod: 'efectivo',
+    items: [{ productCode: 'G10', quantity: 1 }],
+    reason: 'ajuste de cantidad',
+  };
+
+  it('accepts a valid normal-sale update payload (kind omitted)', () => {
+    expect(validateUpdateSaleInput(base)).toEqual([]);
+  });
+
+  it('accepts a valid normal-sale update payload with kind explicitly "sale"', () => {
+    expect(validateUpdateSaleInput({ ...base, kind: 'sale' })).toEqual([]);
+  });
+
+  it('rejects a normal-sale update with no items (kind omitted, unchanged behavior)', () => {
+    const errors = validateUpdateSaleInput({ ...base, items: [] });
+    expect(errors).toContain('items must include at least one product');
+  });
+
+  it('rejects a normal-sale update with no paymentMethod (kind omitted, unchanged behavior)', () => {
+    const { paymentMethod, ...rest } = base;
+    const errors = validateUpdateSaleInput(rest as UpdateSaleInput);
+    expect(errors).toContain('paymentMethod is invalid');
+  });
+
+  it('rejects a normal-sale update with no items even when kind is explicitly "sale"', () => {
+    const errors = validateUpdateSaleInput({ ...base, kind: 'sale', items: [] });
+    expect(errors).toContain('items must include at least one product');
+  });
+
+  it('accepts a churn-row update with no items and no paymentMethod when kind is "churn"', () => {
+    // A real churn PATCH from the client never includes paymentMethod/items at
+    // all (RecordEmptyVisitInput doesn't have them); simulate that with
+    // `unknown` since UpdateSaleInput's TS shape still requires the fields
+    // (see UpdateSaleInput.kind docs) -- only the runtime validator branches.
+    const { paymentMethod, items, ...rest } = base;
+    const input = {
+      ...rest,
+      items: [],
+      kind: 'churn',
+    } as unknown as UpdateSaleInput;
+    expect(validateUpdateSaleInput(input)).toEqual([]);
+  });
+
+  it('still validates identity fields on a churn-row update', () => {
+    const { paymentMethod, items, ...rest } = base;
+    const input = {
+      ...rest,
+      items: [],
+      kind: 'churn',
+      customerName: 'K',
+    } as unknown as UpdateSaleInput;
+    const errors = validateUpdateSaleInput(input);
+    expect(errors).toContain('customerName must have at least 2 characters');
+  });
+
+  it('still requires reason regardless of kind', () => {
+    const errors = validateUpdateSaleInput({ ...base, kind: 'churn', items: [], reason: '' });
+    expect(errors).toContain('reason must have at least 3 characters');
   });
 });

@@ -20,6 +20,7 @@ export const EXPENSE_CATEGORIES = [
 ];
 export const USER_ROLES = ['admin', 'chofer'];
 export const ASSIGNMENT_KINDS = ['titular', 'cobertura'];
+export const SALE_KINDS = ['sale', 'churn'];
 export const DEFAULT_PRICE_TABLE = {
     final: { G10: 8500, G15: 13000, G45: 39000, G15_AUTO: 14500 },
     comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },
@@ -73,8 +74,65 @@ export function validateCreateSaleInput(input) {
     }
     return errors;
 }
+export function validateRecordEmptyVisitInput(input) {
+    const errors = [];
+    if (input.clientGeneratedId !== undefined &&
+        input.clientGeneratedId.trim().length < 8) {
+        errors.push('clientGeneratedId must have at least 8 characters when provided');
+    }
+    if (!input.customerName || input.customerName.trim().length < 2) {
+        errors.push("customerName must have at least 2 characters");
+    }
+    if (!input.driverName || input.driverName.trim().length < 2) {
+        errors.push('driverName must have at least 2 characters');
+    }
+    if (input.truckCode && input.truckCode.trim().length < 2) {
+        errors.push('truckCode must have at least 2 characters when provided');
+    }
+    if (input.customerId !== undefined && input.customerId.trim().length === 0) {
+        errors.push('customerId must not be empty when provided');
+    }
+    if (input.truckId !== undefined && input.truckId.trim().length === 0) {
+        errors.push('truckId must not be empty when provided');
+    }
+    if (!CUSTOMER_TYPES.includes(input.customerType)) {
+        errors.push("customerType is invalid");
+    }
+    return errors;
+}
+function validateSaleIdentityFields(input) {
+    const errors = [];
+    if (input.clientGeneratedId !== undefined &&
+        input.clientGeneratedId.trim().length < 8) {
+        errors.push('clientGeneratedId must have at least 8 characters when provided');
+    }
+    if (!input.customerName || input.customerName.trim().length < 2) {
+        errors.push("customerName must have at least 2 characters");
+    }
+    if (!input.driverName || input.driverName.trim().length < 2) {
+        errors.push('driverName must have at least 2 characters');
+    }
+    if (input.truckCode && input.truckCode.trim().length < 2) {
+        errors.push('truckCode must have at least 2 characters when provided');
+    }
+    if (input.customerId !== undefined && input.customerId.trim().length === 0) {
+        errors.push('customerId must not be empty when provided');
+    }
+    if (input.truckId !== undefined && input.truckId.trim().length === 0) {
+        errors.push('truckId must not be empty when provided');
+    }
+    if (!CUSTOMER_TYPES.includes(input.customerType)) {
+        errors.push("customerType is invalid");
+    }
+    return errors;
+}
 export function validateUpdateSaleInput(input) {
-    const errors = validateCreateSaleInput(input);
+    // input.kind is a validation hint only: it tells the pure validator whether
+    // to skip paymentMethod/items checks. The service re-verifies it against
+    // the stored row's kind before applying any change (never trusted alone).
+    const errors = input.kind === 'churn'
+        ? validateSaleIdentityFields(input)
+        : validateCreateSaleInput(input);
     if (!input.reason || input.reason.trim().length < 3) {
         errors.push('reason must have at least 3 characters');
     }

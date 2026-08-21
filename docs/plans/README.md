@@ -44,7 +44,7 @@ What's missing, grouped by theme:
 1. **Domain foundations** — `Customer`, `Truck`, driver↔truck assignment (with capacity), DB-backed `PriceList`. Nothing else has anywhere to stand without this. → [`customer-truck-pricing-foundations.md`](./customer-truck-pricing-foundations.md)
 2. **Driver-app refactor** — introduce screen navigation before stacking more flows on top of the monolith. → [`driver-app-navigation.md`](./driver-app-navigation.md)
 3. **Load manifest ("remito de carga")** — "load the truck" screen (products + quantities + photo), and per-truck stock (loaded − sold today = carries over to tomorrow).
-4. **Visit/container model** — extend `Sale` to support "received empty container: yes/no" and the "received empty, delivered nothing" churn case.
+4. **Visit/container model** — extend `Sale` to support "received empty container: yes/no" and the "received empty, delivered nothing" churn case. → [`visit-container-model.md`](./visit-container-model.md)
 5. **Point-in-time geolocation** — capture lat/lng when a sale is confirmed (no routing yet).
 6. **Customer picker + quick creation + proximity suggestion** — depends on 1 (registry) and 5 (location).
 7. **Payment proof photo** on a sale (same mechanism already used for expense receipts).
@@ -65,4 +65,5 @@ What's missing, grouped by theme:
 |---|---|---|
 | 1. Domain foundations | `customer-truck-pricing-foundations` | Merged into `main` (PRs #3–#8, consolidated by #22) |
 | 2. Driver-app refactor | `driver-app-navigation` | Merged into `main` (PRs #11–#20) |
-| 3–9 | — | Not started |
+| 4. Visit/container model | `visit-container-model` | Planned (explore/proposal/spec/design/tasks done, not yet applied) |
+| 3, 5–9 | — | Not started |
