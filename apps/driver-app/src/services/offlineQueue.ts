@@ -1,4 +1,4 @@
-import type { CreateSaleInput } from '@distribuidor/shared';
+import type { CreateSaleInput, RecordEmptyVisitInput, SaleKind } from '@distribuidor/shared';
 
 const BASE_BACKOFF_MS = 5000;
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
@@ -6,9 +6,17 @@ const MAX_BACKOFF_MS = 5 * 60 * 1000;
 export const computeBackoff = (retries: number): number =>
   Math.min(BASE_BACKOFF_MS * 2 ** retries, MAX_BACKOFF_MS);
 
+/**
+ * `kind` is OPTIONAL, not a required discriminant: entries already persisted
+ * on a driver's device from before this change have no `kind` field at all.
+ * Every consumer treats a missing `kind` as `'sale'` (see
+ * `SyncContext.syncPendingSales`) so old queued sales keep working without a
+ * migration. Only `enqueueEmptyVisit` ever writes `kind: 'churn'`.
+ */
 export type PendingSale = {
   queueId: string;
-  payload: CreateSaleInput;
+  kind?: SaleKind;
+  payload: CreateSaleInput | RecordEmptyVisitInput;
   createdAt: string;
   retries: number;
   nextRetryAt: number;
@@ -40,11 +48,13 @@ export const applySyncFailure = (
   lastError: errorMessage,
 });
 
-export const normalizePendingSalePayload = (
-  payload: CreateSaleInput,
+export const normalizePendingSalePayload = <
+  T extends { driverName: string; truckCode?: string },
+>(
+  payload: T,
   fallbackDriverName: string,
   fallbackTruckCode: string,
-): CreateSaleInput => ({
+): T => ({
   ...payload,
   driverName: payload.driverName?.trim() || fallbackDriverName,
   truckCode: payload.truckCode?.trim() || fallbackTruckCode || undefined,

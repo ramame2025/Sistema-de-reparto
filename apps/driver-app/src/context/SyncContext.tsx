@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { CreateSaleInput, SaleRecord } from '@distribuidor/shared';
+import type { CreateSaleInput, RecordEmptyVisitInput, SaleRecord } from '@distribuidor/shared';
 import { useAuth } from './AuthContext';
 import { useTruck } from './TruckContext';
 import {
@@ -41,6 +41,14 @@ export type SyncContextValue = {
   assignedTruckCode: string;
   trySendSale(payload: CreateSaleInput): Promise<string>;
   enqueueSale(payload: CreateSaleInput, cause: string): Promise<number>;
+  /**
+   * Churn twin of `trySendSale`/`enqueueSale`: same online-first-then-queue
+   * pattern, routed to `POST /sales/empty-visit` instead of `POST /sales`.
+   * Kept as separate functions (not an overload) so callers/tests read the
+   * intent plainly, matching NewSaleScreen's visibly distinct action.
+   */
+  trySendEmptyVisit(payload: RecordEmptyVisitInput): Promise<string>;
+  enqueueEmptyVisit(payload: RecordEmptyVisitInput, cause: string): Promise<number>;
   syncPendingSales(manual: boolean): Promise<SyncOutcome>;
   refreshDaySummary(): Promise<void>;
 };
@@ -169,6 +177,34 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     async (payload: CreateSaleInput, cause: string): Promise<number> => {
       const entry: PendingSale = {
         queueId: buildQueueId(),
+        kind: 'sale',
+        payload,
+        createdAt: new Date().toISOString(),
+        retries: 0,
+        nextRetryAt: Date.now(),
+        lastError: cause,
+      };
+
+      const next = [...pendingSales, entry];
+      await persistPendingSales(next);
+      return next.length;
+    },
+    [pendingSales, persistPendingSales],
+  );
+
+  const trySendEmptyVisit = useCallback(
+    async (payload: RecordEmptyVisitInput): Promise<string> => {
+      const saved = await api.post<{ id: string }>('/sales/empty-visit', payload);
+      return saved.id;
+    },
+    [api],
+  );
+
+  const enqueueEmptyVisit = useCallback(
+    async (payload: RecordEmptyVisitInput, cause: string): Promise<number> => {
+      const entry: PendingSale = {
+        queueId: buildQueueId(),
+        kind: 'churn',
         payload,
         createdAt: new Date().toISOString(),
         retries: 0,
@@ -205,7 +241,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
           }
 
           try {
-            await trySendSale(entry.payload);
+            // Missing `kind` (legacy queued entry, persisted before this
+            // field existed) is treated as 'sale' -- see PendingSale's doc
+            // comment in offlineQueue.ts.
+            if (entry.kind === 'churn') {
+              await trySendEmptyVisit(entry.payload as RecordEmptyVisitInput);
+            } else {
+              await trySendSale(entry.payload as CreateSaleInput);
+            }
             synced += 1;
             remaining = remaining.filter((item) => item.queueId !== entry.queueId);
             await persistPendingSales(remaining);
@@ -227,7 +270,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         setSyncing(false);
       }
     },
-    [token, pendingSales, trySendSale, persistPendingSales, refreshDaySummary],
+    [token, pendingSales, trySendSale, trySendEmptyVisit, persistPendingSales, refreshDaySummary],
   );
 
   // Preserved verbatim: interval torn down and recreated on every queue
@@ -252,6 +295,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       assignedTruckCode,
       trySendSale,
       enqueueSale,
+      trySendEmptyVisit,
+      enqueueEmptyVisit,
       syncPendingSales,
       refreshDaySummary,
     }),
@@ -264,6 +309,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       assignedTruckCode,
       trySendSale,
       enqueueSale,
+      trySendEmptyVisit,
+      enqueueEmptyVisit,
       syncPendingSales,
       refreshDaySummary,
     ],

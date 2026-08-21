@@ -65,6 +65,8 @@ const baseSyncValue = {
   assignedTruckCode: 'CAMION-07',
   trySendSale: jest.fn(),
   enqueueSale: jest.fn(),
+  trySendEmptyVisit: jest.fn(),
+  enqueueEmptyVisit: jest.fn(),
   syncPendingSales: jest.fn(),
   refreshDaySummary: jest.fn().mockResolvedValue(undefined),
 };
@@ -82,12 +84,16 @@ const baseAuthValue = {
 
 let mockedTrySendSale: jest.Mock;
 let mockedEnqueueSale: jest.Mock;
+let mockedTrySendEmptyVisit: jest.Mock;
+let mockedEnqueueEmptyVisit: jest.Mock;
 let mockedRefreshDaySummary: jest.Mock;
 let mockedApiPatch: jest.Mock;
 
 beforeEach(() => {
   mockedTrySendSale = jest.fn();
   mockedEnqueueSale = jest.fn().mockResolvedValue(1);
+  mockedTrySendEmptyVisit = jest.fn();
+  mockedEnqueueEmptyVisit = jest.fn().mockResolvedValue(1);
   mockedRefreshDaySummary = jest.fn().mockResolvedValue(undefined);
   mockedApiPatch = jest.fn();
 
@@ -95,6 +101,8 @@ beforeEach(() => {
     ...baseSyncValue,
     trySendSale: mockedTrySendSale,
     enqueueSale: mockedEnqueueSale,
+    trySendEmptyVisit: mockedTrySendEmptyVisit,
+    enqueueEmptyVisit: mockedEnqueueEmptyVisit,
     refreshDaySummary: mockedRefreshDaySummary,
   });
   mockedUseTruck.mockReturnValue(baseTruckValue);
@@ -283,5 +291,110 @@ describe('NewSaleScreen/edit last sale', () => {
       ),
     );
     expect(screen.getByText('Venta editada correctamente.')).toBeTruthy();
+  });
+});
+
+describe('NewSaleScreen/envase devuelto toggle (visit-container-model Unit 4)', () => {
+  it('renders unmarked by default and flips state when pressed', async () => {
+    await render(<NewSaleScreen />);
+
+    const toggle = screen.getByTestId('new-sale-container-returned-toggle');
+    expect(toggle).toBeTruthy();
+    expect(screen.getByText('Envase devuelto: sin marcar')).toBeTruthy();
+
+    await fireEvent.press(toggle);
+    expect(screen.getByText('Envase devuelto: si')).toBeTruthy();
+
+    await fireEvent.press(toggle);
+    expect(screen.getByText('Envase devuelto: no')).toBeTruthy();
+  });
+
+  it('omits containerReturned from the Guardar venta payload when never touched', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    const payload = mockedTrySendSale.mock.calls[0][0];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'containerReturned')).toBe(false);
+  });
+
+  it('includes containerReturned:true in the Guardar venta payload once toggled on', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByTestId('new-sale-container-returned-toggle'));
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({ containerReturned: true });
+  });
+});
+
+describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model Unit 4)', () => {
+  it('renders as a distinct, separately labeled action from Guardar venta', async () => {
+    await render(<NewSaleScreen />);
+
+    expect(screen.getByTestId('new-sale-record-visit-button')).toBeTruthy();
+    expect(screen.getByText('Registrar visita sin venta')).toBeTruthy();
+  });
+
+  it('does not require any items loaded, unlike Guardar venta', async () => {
+    mockedTrySendEmptyVisit.mockResolvedValue('visit-1');
+
+    await render(<NewSaleScreen />);
+    // No qty increment pressed -- zero items in the cart.
+    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+
+    await waitFor(() => expect(mockedTrySendEmptyVisit).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Agrega al menos un producto antes de guardar.')).toBeNull();
+  });
+
+  it('calls trySendEmptyVisit with an items/paymentMethod-free payload and shows a distinct confirmation', async () => {
+    mockedTrySendEmptyVisit.mockResolvedValue('visit-1');
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+
+    await waitFor(() => expect(mockedTrySendEmptyVisit).toHaveBeenCalledTimes(1));
+    const payload = mockedTrySendEmptyVisit.mock.calls[0][0];
+    expect(payload).not.toHaveProperty('items');
+    expect(payload).not.toHaveProperty('paymentMethod');
+    expect(payload).toMatchObject({ driverName: 'chofer1', truckId: 'truck-1', truckCode: 'CAMION-07' });
+
+    // Distinct copy so a chofer never mistakes this for a normal sale confirmation.
+    expect(screen.getByText('Visita sin venta registrada. ID: visit-1')).toBeTruthy();
+    expect(mockedTrySendSale).not.toHaveBeenCalled();
+  });
+
+  it('falls back to enqueueEmptyVisit on failure, same offline-queue pattern saveSale uses', async () => {
+    mockedTrySendEmptyVisit.mockRejectedValue(new Error('Network request failed'));
+    mockedEnqueueEmptyVisit.mockResolvedValue(1);
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+
+    await waitFor(() => expect(mockedEnqueueEmptyVisit).toHaveBeenCalledTimes(1));
+    expect(mockedEnqueueEmptyVisit).toHaveBeenCalledWith(
+      expect.objectContaining({ driverName: 'chofer1' }),
+      'Network request failed',
+    );
+    expect(
+      screen.getByText('Sin conexion. Visita sin venta en cola offline (1 pendientes).'),
+    ).toBeTruthy();
+  });
+
+  it('blocks the visit and explains why when the driver has no truck today, same guard as saveSale', async () => {
+    mockedUseTruck.mockReturnValue({ ...baseTruckValue, truck: null });
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+
+    expect(mockedTrySendEmptyVisit).not.toHaveBeenCalled();
+    expect(mockedEnqueueEmptyVisit).not.toHaveBeenCalled();
+    expect(screen.getByTestId('new-sale-no-truck')).toBeTruthy();
   });
 });
