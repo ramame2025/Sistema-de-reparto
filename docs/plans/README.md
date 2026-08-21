@@ -68,4 +68,4 @@ What's missing, grouped by theme:
 | 3. Load manifest | `load-manifest` | Merged into `main` |
 | 4. Visit/container model | `visit-container-model` | Merged into `main` |
 | 5, 6, 8, 9 | — | Not started |
-| 7. Payment proof photo | `payment-proof-photo` | Planned |
+| 7. Payment proof photo | `payment-proof-photo` | Merged into `main` |
