@@ -28,6 +28,7 @@ jest.mock('../context/AuthContext', () => {
 
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { NewSaleScreen } from './NewSaleScreen';
 import { useSync } from '../context/SyncContext';
 import { useAuth } from '../context/AuthContext';
@@ -36,6 +37,7 @@ import { useTruck } from '../context/TruckContext';
 const mockedUseSync = useSync as jest.Mock;
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseTruck = useTruck as jest.Mock;
+const mockedLaunchImageLibraryAsync = ImagePicker.launchImageLibraryAsync as jest.Mock;
 
 const assignedTruck = {
   assignmentId: 'a-1',
@@ -76,7 +78,7 @@ const baseAuthValue = {
   token: 'tok',
   username: 'chofer1',
   loading: false,
-  api: { patch: jest.fn() },
+  api: { patch: jest.fn(), postForm: jest.fn() },
   login: jest.fn(),
   logout: jest.fn(),
   requireAuthToken: jest.fn(() => 'tok'),
@@ -88,6 +90,7 @@ let mockedTrySendEmptyVisit: jest.Mock;
 let mockedEnqueueEmptyVisit: jest.Mock;
 let mockedRefreshDaySummary: jest.Mock;
 let mockedApiPatch: jest.Mock;
+let mockedApiPostForm: jest.Mock;
 
 beforeEach(() => {
   mockedTrySendSale = jest.fn();
@@ -96,6 +99,7 @@ beforeEach(() => {
   mockedEnqueueEmptyVisit = jest.fn().mockResolvedValue(1);
   mockedRefreshDaySummary = jest.fn().mockResolvedValue(undefined);
   mockedApiPatch = jest.fn();
+  mockedApiPostForm = jest.fn();
 
   mockedUseSync.mockReturnValue({
     ...baseSyncValue,
@@ -108,7 +112,13 @@ beforeEach(() => {
   mockedUseTruck.mockReturnValue(baseTruckValue);
   mockedUseAuth.mockReturnValue({
     ...baseAuthValue,
-    api: { patch: mockedApiPatch },
+    api: { patch: mockedApiPatch, postForm: mockedApiPostForm },
+  });
+
+  mockedLaunchImageLibraryAsync.mockClear();
+  mockedLaunchImageLibraryAsync.mockResolvedValue({
+    canceled: false,
+    assets: [{ uri: 'file://fake.jpg' }],
   });
 });
 
@@ -396,5 +406,68 @@ describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model
     expect(mockedTrySendEmptyVisit).not.toHaveBeenCalled();
     expect(mockedEnqueueEmptyVisit).not.toHaveBeenCalled();
     expect(screen.getByTestId('new-sale-no-truck')).toBeTruthy();
+  });
+});
+
+describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
+  it('does not render the payment proof control when paymentMethod is efectivo (default)', async () => {
+    await render(<NewSaleScreen />);
+
+    expect(screen.queryByTestId('new-sale-payment-proof-pick-gallery')).toBeNull();
+    expect(screen.queryByTestId('new-sale-payment-proof-capture-camera')).toBeNull();
+  });
+
+  it.each(['transferencia', 'qr', 'tarjeta'])(
+    'renders the payment proof control when paymentMethod is %s',
+    async (method) => {
+      await render(<NewSaleScreen />);
+
+      await fireEvent.press(screen.getByText(method));
+
+      expect(screen.getByTestId('new-sale-payment-proof-pick-gallery')).toBeTruthy();
+      expect(screen.getByTestId('new-sale-payment-proof-capture-camera')).toBeTruthy();
+    },
+  );
+
+  it('hides the payment proof control again when switching back to efectivo', async () => {
+    await render(<NewSaleScreen />);
+
+    await fireEvent.press(screen.getByText('transferencia'));
+    expect(screen.getByTestId('new-sale-payment-proof-pick-gallery')).toBeTruthy();
+
+    await fireEvent.press(screen.getByText('efectivo'));
+    expect(screen.queryByTestId('new-sale-payment-proof-pick-gallery')).toBeNull();
+  });
+
+  it('uploads a picked photo and includes paymentProofRef in the Guardar venta payload', async () => {
+    mockedApiPostForm.mockResolvedValue({ url: 'https://cdn.test/proof-1.jpg' });
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByText('transferencia'));
+    await fireEvent.press(screen.getByTestId('new-sale-payment-proof-pick-gallery'));
+
+    await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(1));
+    expect(mockedApiPostForm).toHaveBeenCalledWith('/uploads/receipt', expect.any(FormData));
+
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
+      paymentProofRef: 'https://cdn.test/proof-1.jpg',
+    });
+  });
+
+  it('omits paymentProofRef from the Guardar venta payload when no photo was ever picked', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    const payload = mockedTrySendSale.mock.calls[0][0];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'paymentProofRef')).toBe(false);
   });
 });

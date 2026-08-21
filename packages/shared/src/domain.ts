@@ -57,6 +57,7 @@ export type CreateSaleInput = {
   customerId?: string;
   truckId?: string;
   containerReturned?: boolean;
+  paymentProofRef?: string;
 };
 
 /**
@@ -108,6 +109,7 @@ export type SaleRecord = {
   note?: string;
   kind: SaleKind;
   containerReturned?: boolean;
+  paymentProofRef?: string;
 };
 
 export type CancelSaleInput = {
@@ -346,6 +348,10 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
         errors.push(`items[${index}].quantity must be an integer greater than 0`);
       }
     });
+  }
+
+  if (input.paymentProofRef !== undefined && input.paymentProofRef.trim().length === 0) {
+    errors.push('paymentProofRef must not be empty when provided');
   }
 
   return errors;

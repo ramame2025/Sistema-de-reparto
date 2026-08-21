@@ -237,6 +237,24 @@ describe('validateCreateSaleInput (widened with optional FKs)', () => {
     const errors = validateCreateSaleInput({ ...base, customerId: '' });
     expect(errors).toContain('customerId must not be empty when provided');
   });
+
+  it('accepts a payload with no paymentProofRef (unchanged behavior)', () => {
+    expect(validateCreateSaleInput(base)).toEqual([]);
+  });
+
+  it('accepts a non-empty paymentProofRef regardless of paymentMethod, incluso efectivo', () => {
+    const input: CreateSaleInput = {
+      ...base,
+      paymentMethod: 'efectivo',
+      paymentProofRef: 'https://example.com/uploads/receipt_123.jpg',
+    };
+    expect(validateCreateSaleInput(input)).toEqual([]);
+  });
+
+  it('rejects an empty/whitespace-only paymentProofRef when provided', () => {
+    const errors = validateCreateSaleInput({ ...base, paymentProofRef: '   ' });
+    expect(errors).toContain('paymentProofRef must not be empty when provided');
+  });
 });
 
 describe('validateCreateLoadManifestInput', () => {

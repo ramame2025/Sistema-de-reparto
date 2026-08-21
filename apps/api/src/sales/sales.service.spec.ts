@@ -34,6 +34,7 @@ function buildSaleRow(overrides: Record<string, unknown> = {}) {
     note: null,
     kind: 'sale',
     containerReturned: null,
+    paymentProofRef: null,
     items: [{ productCode: 'G10', quantity: 2 }],
     ...overrides,
   };
@@ -231,6 +232,60 @@ describe('SalesService', () => {
         expect.objectContaining({ data: expect.objectContaining({ total: 400 }) }),
       );
     });
+
+    it('stores paymentProofRef when provided in the payload', async () => {
+      prisma.sale.create.mockResolvedValue(
+        buildSaleRow({ paymentProofRef: 'https://example.com/uploads/receipt_1.jpg' }),
+      );
+
+      await service.createSale(
+        buildCreateInput({ paymentProofRef: 'https://example.com/uploads/receipt_1.jpg' }),
+      );
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            paymentProofRef: 'https://example.com/uploads/receipt_1.jpg',
+          }),
+        }),
+      );
+    });
+
+    it('stores paymentProofRef as null when omitted from the payload', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(buildCreateInput());
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ paymentProofRef: null }),
+        }),
+      );
+    });
+
+    it('stores containerReturned when provided in the payload', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow({ containerReturned: true }));
+
+      await service.createSale(buildCreateInput({ containerReturned: true }));
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ containerReturned: true }),
+        }),
+      );
+    });
+
+    it('stores containerReturned as null when omitted from the payload', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(buildCreateInput());
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ containerReturned: null }),
+        }),
+      );
+    });
   });
 
   describe('updateSale', () => {
@@ -373,6 +428,140 @@ describe('SalesService', () => {
         expect.objectContaining({ data: expect.objectContaining({ total: 200 }) }),
       );
       expect(result.total).toBe(200);
+    });
+
+    it('sets paymentProofRef on a kind=sale row when the edit payload supplies one', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildSaleRow({ paymentProofRef: null }));
+      prisma.sale.update.mockResolvedValue(
+        buildSaleRow({ paymentProofRef: 'https://example.com/uploads/receipt_new.jpg' }),
+      );
+
+      const result = await service.updateSale(
+        'sale-1',
+        buildUpdateInput({ paymentProofRef: 'https://example.com/uploads/receipt_new.jpg' }),
+      );
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            paymentProofRef: 'https://example.com/uploads/receipt_new.jpg',
+          }),
+        }),
+      );
+      expect(result.paymentProofRef).toBe('https://example.com/uploads/receipt_new.jpg');
+    });
+
+    it('changes an existing paymentProofRef on a kind=sale row to a new value', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({ paymentProofRef: 'https://example.com/uploads/old.jpg' }),
+      );
+      prisma.sale.update.mockResolvedValue(
+        buildSaleRow({ paymentProofRef: 'https://example.com/uploads/new.jpg' }),
+      );
+
+      await service.updateSale(
+        'sale-1',
+        buildUpdateInput({ paymentProofRef: 'https://example.com/uploads/new.jpg' }),
+      );
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            paymentProofRef: 'https://example.com/uploads/new.jpg',
+          }),
+        }),
+      );
+    });
+
+    it('clears an existing paymentProofRef on a kind=sale row when the edit payload omits it', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({ paymentProofRef: 'https://example.com/uploads/old.jpg' }),
+      );
+      prisma.sale.update.mockResolvedValue(buildSaleRow({ paymentProofRef: null }));
+
+      await service.updateSale('sale-1', buildUpdateInput());
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ paymentProofRef: null }),
+        }),
+      );
+    });
+
+    it('sets containerReturned on a kind=sale row when the edit payload supplies it', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildSaleRow({ containerReturned: null }));
+      prisma.sale.update.mockResolvedValue(buildSaleRow({ containerReturned: true }));
+
+      await service.updateSale('sale-1', buildUpdateInput({ containerReturned: true }));
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ containerReturned: true }),
+        }),
+      );
+    });
+
+    it('clears containerReturned on a kind=sale row when the edit payload omits it', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildSaleRow({ containerReturned: true }));
+      prisma.sale.update.mockResolvedValue(buildSaleRow({ containerReturned: null }));
+
+      await service.updateSale('sale-1', buildUpdateInput());
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ containerReturned: null }),
+        }),
+      );
+    });
+
+    it('always stores paymentProofRef=null on a kind=churn row, even when the request supplies a value', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildChurnRow());
+      prisma.sale.update.mockResolvedValue(buildChurnRow());
+
+      const churnEdit = {
+        driverName: 'Juan',
+        customerName: 'Nuevo nombre',
+        customerType: 'final',
+        reason: 'Corrección de identidad',
+        kind: 'churn',
+        paymentProofRef: 'https://example.com/uploads/smuggled.jpg',
+      } as UpdateSaleInput;
+
+      const result = await service.updateSale('sale-1', churnEdit);
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ paymentProofRef: null }),
+        }),
+      );
+      expect(result.paymentProofRef).toBeUndefined();
+    });
+
+    it('includes paymentProofRef in the audit before/after snapshots', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({ paymentProofRef: 'https://example.com/uploads/old.jpg' }),
+      );
+      prisma.sale.update.mockResolvedValue(
+        buildSaleRow({ paymentProofRef: 'https://example.com/uploads/new.jpg' }),
+      );
+
+      await service.updateSale(
+        'sale-1',
+        buildUpdateInput({ paymentProofRef: 'https://example.com/uploads/new.jpg' }),
+      );
+
+      expect(prisma.saleAudit.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            before: expect.objectContaining({
+              paymentProofRef: 'https://example.com/uploads/old.jpg',
+            }),
+            after: expect.objectContaining({
+              paymentProofRef: 'https://example.com/uploads/new.jpg',
+            }),
+          }),
+        }),
+      );
     });
   });
 

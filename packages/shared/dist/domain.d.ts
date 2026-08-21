@@ -29,6 +29,7 @@ export type CreateSaleInput = {
     customerId?: string;
     truckId?: string;
     containerReturned?: boolean;
+    paymentProofRef?: string;
 };
 /**
  * Payload para registrar una visita sin venta (churn): container devuelto,
@@ -77,6 +78,7 @@ export type SaleRecord = {
     note?: string;
     kind: SaleKind;
     containerReturned?: boolean;
+    paymentProofRef?: string;
 };
 export type CancelSaleInput = {
     reason: string;

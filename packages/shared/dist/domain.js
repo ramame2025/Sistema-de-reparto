@@ -72,6 +72,9 @@ export function validateCreateSaleInput(input) {
             }
         });
     }
+    if (input.paymentProofRef !== undefined && input.paymentProofRef.trim().length === 0) {
+        errors.push('paymentProofRef must not be empty when provided');
+    }
     return errors;
 }
 export function validateRecordEmptyVisitInput(input) {

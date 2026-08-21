@@ -47,7 +47,7 @@ What's missing, grouped by theme:
 4. **Visit/container model** — extend `Sale` to support "received empty container: yes/no" and the "received empty, delivered nothing" churn case. → [`visit-container-model.md`](./visit-container-model.md)
 5. **Point-in-time geolocation** — capture lat/lng when a sale is confirmed (no routing yet).
 6. **Customer picker + quick creation + proximity suggestion** — depends on 1 (registry) and 5 (location).
-7. **Payment proof photo** on a sale (same mechanism already used for expense receipts).
+7. **Payment proof photo** on a sale (same mechanism already used for expense receipts). → [`payment-proof-photo.md`](./payment-proof-photo.md)
 8. **Live dashboard + admin-assigned daily customer list.**
 9. **Driver UX polish** — big buttons, minimal typing — final pass once the logic is solid.
 
@@ -67,4 +67,5 @@ What's missing, grouped by theme:
 | 2. Driver-app refactor | `driver-app-navigation` | Merged into `main` (PRs #11–#20) |
 | 3. Load manifest | `load-manifest` | Merged into `main` |
 | 4. Visit/container model | `visit-container-model` | Merged into `main` |
-| 5–9 | — | Not started |
+| 5, 6, 8, 9 | — | Not started |
+| 7. Payment proof photo | `payment-proof-photo` | Planned |

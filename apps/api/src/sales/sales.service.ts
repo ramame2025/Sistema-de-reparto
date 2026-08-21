@@ -143,6 +143,8 @@ export class SalesService {
         total,
         customerId,
         truckId,
+        paymentProofRef: input.paymentProofRef?.trim() || null,
+        containerReturned: input.containerReturned ?? null,
         items: {
           create: input.items.map((item) => ({
             productCode: item.productCode as PrismaProductCode,
@@ -265,6 +267,15 @@ export class SalesService {
         }));
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
+    // A churn row never has a payment, so it never has a payment proof either
+    // (Design decision #6): forced null here too, same as paymentMethod/items,
+    // regardless of whatever the edit payload does or doesn't carry.
+    const resolvedPaymentProofRef = isChurn ? null : (input.paymentProofRef?.trim() || null);
+    // A churn row always means "container returned" (recordEmptyVisit forces
+    // this true at creation) -- an edit never changes that fact, same
+    // forcing logic as the fields above. A normal sale keeps whatever the
+    // edit payload says (undefined -> null, "not asked").
+    const resolvedContainerReturned = isChurn ? true : (input.containerReturned ?? null);
 
     const beforeSnapshot = {
       driverName: existing.driverName,
@@ -274,6 +285,8 @@ export class SalesService {
       paymentMethod: existing.paymentMethod,
       total: existing.total,
       note: existing.note,
+      paymentProofRef: existing.paymentProofRef,
+      containerReturned: existing.containerReturned,
       items: existing.items.map((item) => ({
         productCode: item.productCode,
         quantity: item.quantity,
@@ -295,6 +308,8 @@ export class SalesService {
           total,
           customerId,
           truckId,
+          paymentProofRef: resolvedPaymentProofRef,
+          containerReturned: resolvedContainerReturned,
           items: {
             create: resolvedItems,
           },
@@ -316,6 +331,8 @@ export class SalesService {
             paymentMethod: sale.paymentMethod,
             total: sale.total,
             note: sale.note,
+            paymentProofRef: sale.paymentProofRef,
+            containerReturned: sale.containerReturned,
             items: sale.items.map((item) => ({
               productCode: item.productCode,
               quantity: item.quantity,
@@ -404,6 +421,7 @@ export class SalesService {
       note: sale.note ?? undefined,
       kind: sale.kind,
       containerReturned: sale.containerReturned ?? undefined,
+      paymentProofRef: sale.paymentProofRef ?? undefined,
       items: sale.items.map((item) => ({
         productCode: item.productCode,
         quantity: item.quantity,

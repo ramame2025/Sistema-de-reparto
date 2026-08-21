@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import {
   CUSTOMER_TYPES,
   DEFAULT_PRICE_TABLE,
@@ -67,6 +68,10 @@ export function NewSaleScreen() {
   // `undefined` = nunca tocado (se omite del payload, "no preguntado" en el
   // backend). Solo pasa a true/false cuando el chofer toca el control.
   const [containerReturned, setContainerReturned] = useState<boolean | undefined>(undefined);
+  // '' = nunca tocado (se omite del payload, igual criterio que
+  // containerReturned). Solo se completa cuando la foto termina de subirse.
+  const [paymentProofRef, setPaymentProofRef] = useState('');
+  const [uploadingProof, setUploadingProof] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<FeedbackTone>('info');
@@ -103,6 +108,82 @@ export function NewSaleScreen() {
     setMessageTone(tone);
   };
 
+  /**
+   * Adaptado de ExpensesScreen.pickReceiptImage/captureReceiptImage/
+   * uploadReceipt: mismo mecanismo (`/uploads/receipt`, reusado sin cambios
+   * por decision del roadmap), mismo patron de estado local. Solo se
+   * renderiza cuando paymentMethod !== 'efectivo' (Open Question 2).
+   */
+  const uploadPaymentProof = async (uri: string) => {
+    const form = new FormData();
+    form.append('file', {
+      uri,
+      name: `payment_proof_${Date.now()}.jpg`,
+      type: 'image/jpeg',
+    } as never);
+
+    const uploaded = await api.postForm<{ url: string }>('/uploads/receipt', form);
+    return uploaded.url;
+  };
+
+  const pickPaymentProofImage = async () => {
+    try {
+      setUploadingProof(true);
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        showMessage('Permiso de galeria requerido para adjuntar el comprobante.', 'error');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.7,
+      });
+
+      if (result.canceled || result.assets.length === 0) {
+        return;
+      }
+
+      const uploadedUrl = await uploadPaymentProof(result.assets[0].uri);
+      setPaymentProofRef(uploadedUrl);
+      showMessage('Comprobante de pago cargado correctamente.', 'success');
+    } catch {
+      showMessage('No se pudo subir el comprobante de pago.', 'error');
+    } finally {
+      setUploadingProof(false);
+    }
+  };
+
+  const capturePaymentProofImage = async () => {
+    try {
+      setUploadingProof(true);
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        showMessage('Permiso de camara requerido para sacar el comprobante.', 'error');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.7,
+      });
+
+      if (result.canceled || result.assets.length === 0) {
+        return;
+      }
+
+      const uploadedUrl = await uploadPaymentProof(result.assets[0].uri);
+      setPaymentProofRef(uploadedUrl);
+      showMessage('Comprobante de pago capturado y cargado correctamente.', 'success');
+    } catch {
+      showMessage('No se pudo capturar/subir el comprobante de pago.', 'error');
+    } finally {
+      setUploadingProof(false);
+    }
+  };
+
   const saveSale = async () => {
     setMessage(null);
 
@@ -118,6 +199,9 @@ export function NewSaleScreen() {
       // Omitido (no la key) si el chofer nunca toco el control -- "no
       // preguntado" segun Open Question 1 del plan, no "false".
       ...(containerReturned !== undefined ? { containerReturned } : {}),
+      // Omitido (no la key) si nunca se subio una foto -- mismo criterio que
+      // containerReturned, no un string vacio.
+      ...(paymentProofRef ? { paymentProofRef } : {}),
     };
 
     // Sin camion asignado la venta quedaria sin unidad: se corta antes de
@@ -313,6 +397,36 @@ export function NewSaleScreen() {
           ))}
         </View>
 
+        {paymentMethod !== 'efectivo' && (
+          <View style={styles.paymentProofWrap}>
+            <Text style={styles.fieldLabel}>Comprobante de pago (opcional)</Text>
+            <Button
+              label={uploadingProof ? 'Subiendo comprobante...' : 'Adjuntar desde galeria'}
+              variant="secondary"
+              onPress={() => void pickPaymentProofImage()}
+              disabled={uploadingProof}
+              testID="new-sale-payment-proof-pick-gallery"
+            />
+            <Button
+              label={uploadingProof ? 'Subiendo comprobante...' : 'Sacar foto comprobante'}
+              variant="secondary"
+              onPress={() => void capturePaymentProofImage()}
+              disabled={uploadingProof}
+              testID="new-sale-payment-proof-capture-camera"
+            />
+            {paymentProofRef.length > 0 && (
+              <View style={styles.receiptPreviewWrap}>
+                <Text style={styles.apiHint}>Comprobante adjunto:</Text>
+                <Image
+                  source={{ uri: paymentProofRef }}
+                  style={styles.receiptPreview}
+                  resizeMode="cover"
+                />
+              </View>
+            )}
+          </View>
+        )}
+
         <Text style={styles.fieldLabel}>Envase</Text>
         <Button
           label={`Envase devuelto: ${
@@ -456,6 +570,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+  },
+  paymentProofWrap: {
+    gap: spacing.sm,
+  },
+  receiptPreviewWrap: {
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  receiptPreview: {
+    width: '100%',
+    height: 160,
+    borderRadius: 10,
+    marginTop: spacing.xs,
   },
   productRow: {
     flexDirection: 'row',
