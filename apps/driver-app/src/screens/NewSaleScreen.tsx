@@ -10,6 +10,7 @@ import {
   type CustomerType,
   type PaymentMethod,
   type ProductCode,
+  type RecordEmptyVisitInput,
   type SaleRecord,
 } from '@distribuidor/shared';
 import { Button } from '../components/Button';
@@ -54,7 +55,8 @@ function SegmentButton<T extends string>({ label, active, onPress }: SegmentButt
  * transport (context hooks + shared components) changed.
  */
 export function NewSaleScreen() {
-  const { trySendSale, enqueueSale, refreshDaySummary } = useSync();
+  const { trySendSale, enqueueSale, trySendEmptyVisit, enqueueEmptyVisit, refreshDaySummary } =
+    useSync();
   const { api, username } = useAuth();
   const { truck, status: truckStatus, error: truckError } = useTruck();
 
@@ -62,6 +64,9 @@ export function NewSaleScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [customerName, setCustomerName] = useState('Cliente de prueba');
   const [quantities, setQuantities] = useState<Record<ProductCode, number>>(EMPTY_QUANTITIES);
+  // `undefined` = nunca tocado (se omite del payload, "no preguntado" en el
+  // backend). Solo pasa a true/false cuando el chofer toca el control.
+  const [containerReturned, setContainerReturned] = useState<boolean | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<FeedbackTone>('info');
@@ -70,6 +75,7 @@ export function NewSaleScreen() {
   const [editReason, setEditReason] = useState('Correccion de carga');
   const [canceling, setCanceling] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [recordingVisit, setRecordingVisit] = useState(false);
 
   const currentItems = useMemo(
     () =>
@@ -109,6 +115,9 @@ export function NewSaleScreen() {
       customerType,
       paymentMethod,
       items: currentItems,
+      // Omitido (no la key) si el chofer nunca toco el control -- "no
+      // preguntado" segun Open Question 1 del plan, no "false".
+      ...(containerReturned !== undefined ? { containerReturned } : {}),
     };
 
     // Sin camion asignado la venta quedaria sin unidad: se corta antes de
@@ -205,6 +214,50 @@ export function NewSaleScreen() {
     }
   };
 
+  /**
+   * Accion deliberadamente separada de saveSale: registra una visita sin
+   * venta (envase devuelto, nada entregado). NO requiere items ni forma de
+   * pago -- RecordEmptyVisitInput ni siquiera tiene esos campos. Reusa el
+   * mismo mecanismo online-primero-despues-cola que saveSale
+   * (trySendEmptyVisit/enqueueEmptyVisit, gemelos de trySendSale/enqueueSale
+   * en SyncContext) para que tambien funcione sin señal.
+   */
+  const recordVisit = async () => {
+    setMessage(null);
+
+    if (!truck) {
+      showMessage('No podes registrar visitas sin un camion asignado para hoy.', 'error');
+      return;
+    }
+
+    const payload: RecordEmptyVisitInput = {
+      clientGeneratedId: buildClientGeneratedId(),
+      driverName: username,
+      truckId: truck?.truckId,
+      truckCode: truck?.code,
+      customerName,
+      customerType,
+    };
+
+    try {
+      setRecordingVisit(true);
+      const visitId = await trySendEmptyVisit(payload);
+      // Copia deliberadamente distinta de la de una venta normal: el chofer
+      // no debe confundir esto con "vendi algo".
+      showMessage(`Visita sin venta registrada. ID: ${visitId}`, 'success');
+      await refreshDaySummary();
+    } catch (error) {
+      const cause = error instanceof Error ? error.message : 'No se pudo registrar la visita';
+      const queueLength = await enqueueEmptyVisit(payload, cause);
+      showMessage(
+        `Sin conexion. Visita sin venta en cola offline (${queueLength} pendientes).`,
+        'warning',
+      );
+    } finally {
+      setRecordingVisit(false);
+    }
+  };
+
   return (
     <ScreenContainer testID="new-sale-screen" scroll>
       <Text style={styles.tag}>Distribuidor · App chofer</Text>
@@ -259,6 +312,16 @@ export function NewSaleScreen() {
             />
           ))}
         </View>
+
+        <Text style={styles.fieldLabel}>Envase</Text>
+        <Button
+          label={`Envase devuelto: ${
+            containerReturned === undefined ? 'sin marcar' : containerReturned ? 'si' : 'no'
+          }`}
+          variant={containerReturned ? 'primary' : 'secondary'}
+          onPress={() => setContainerReturned((previous) => !(previous ?? false))}
+          testID="new-sale-container-returned-toggle"
+        />
       </Card>
 
       <Card style={styles.card}>
@@ -293,6 +356,22 @@ export function NewSaleScreen() {
           disabled={saving}
         />
         <FeedbackBanner message={message} tone={messageTone} />
+      </Card>
+
+      <Card style={styles.card}>
+        <Text style={styles.fieldLabel}>Visita sin venta</Text>
+        <Text style={styles.apiHint}>
+          Para cuando el cliente devuelve el envase pero no compra nada. No
+          necesita productos cargados -- es una accion distinta de guardar
+          una venta.
+        </Text>
+        <Button
+          label={recordingVisit ? 'Registrando...' : 'Registrar visita sin venta'}
+          variant="secondary"
+          onPress={() => void recordVisit()}
+          disabled={recordingVisit}
+          testID="new-sale-record-visit-button"
+        />
       </Card>
 
       <Card style={styles.card}>

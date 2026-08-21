@@ -7,6 +7,7 @@ import useSWR from "swr";
 import { useApiClient, useAuth } from "../../../context/AuthContext";
 import { resolveReceiptUrl } from "../../../lib/api-client";
 import { downloadCsvReport } from "../../../lib/csv";
+import { formatPaymentMethod } from "../../../lib/format";
 import {
   EXPENSE_CATEGORIES,
   PAYMENT_METHODS,
@@ -224,7 +225,7 @@ export default function ReportesPage() {
         sale.truckCode ?? "",
         sale.customerName,
         sale.customerType,
-        sale.paymentMethod,
+        formatPaymentMethod(sale.paymentMethod),
         sale.status,
         sale.total,
         sale.cancelReason ?? "",
@@ -435,7 +436,7 @@ export default function ReportesPage() {
                     <td className="py-2 pr-4">{sale.truckCode ?? "-"}</td>
                     <td className="py-2 pr-4">{sale.customerName}</td>
                     <td className="py-2 pr-4">{sale.customerType}</td>
-                    <td className="py-2 pr-4">{sale.paymentMethod}</td>
+                    <td className="py-2 pr-4">{formatPaymentMethod(sale.paymentMethod)}</td>
                     <td className="py-2 pr-4">
                       <span
                         className={

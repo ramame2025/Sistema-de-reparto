@@ -25,6 +25,11 @@ enum SaleStatus {
   canceled
 }
 
+enum SaleKind {
+  sale
+  churn
+}
+
 enum SaleAuditAction {
   created
   edited
@@ -60,35 +65,38 @@ enum AssignmentKind {
 }
 
 model Sale {
-  id            String       @id @default(cuid())
-  clientGeneratedId String?   @unique
-  createdAt     DateTime     @default(now())
-  status        SaleStatus   @default(active)
-  canceledAt    DateTime?
-  cancelReason  String?
-  driverName    String       @default("sin-chofer")
-  truckCode     String?
-  total         Int
-  customerName  String
-  customerType  CustomerType
-  paymentMethod PaymentMethod
-  note          String?
-  customerId    String?
-  truckId       String?
-  customer      Customer?    @relation(fields: [customerId], references: [id])
-  truck         Truck?       @relation(fields: [truckId], references: [id])
-  items         SaleItem[]
-  audits        SaleAudit[]
+  id                String         @id @default(cuid())
+  clientGeneratedId String?        @unique
+  createdAt         DateTime       @default(now())
+  status            SaleStatus     @default(active)
+  canceledAt        DateTime?
+  cancelReason      String?
+  driverName        String         @default("sin-chofer")
+  truckCode         String?
+  total             Int
+  customerName      String
+  customerType      CustomerType
+  paymentMethod     PaymentMethod?
+  note              String?
+  customerId        String?
+  truckId           String?
+  kind              SaleKind       @default(sale)
+  containerReturned Boolean?
+  customer          Customer?      @relation(fields: [customerId], references: [id])
+  truck             Truck?         @relation(fields: [truckId], references: [id])
+  items             SaleItem[]
+  audits            SaleAudit[]
 
   @@index([createdAt])
   @@index([driverName, createdAt])
   @@index([customerId])
   @@index([truckId, createdAt])
+  @@index([kind, createdAt])
 }
 
 model SaleItem {
   id          String      @id @default(cuid())
-  saleId       String
+  saleId      String
   productCode ProductCode
   quantity    Int
   sale        Sale        @relation(fields: [saleId], references: [id], onDelete: Cascade)
@@ -122,12 +130,12 @@ model DriverExpense {
 }
 
 model UserAccount {
-  id           String   @id @default(cuid())
-  username     String   @unique
+  id           String                  @id @default(cuid())
+  username     String                  @unique
   passwordHash String
   role         UserRole
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
   assignments  DriverTruckAssignment[]
 }
 
@@ -147,13 +155,13 @@ model Customer {
 }
 
 model Truck {
-  id            String   @id @default(cuid())
-  code          String   @unique
-  plate         String   @unique
+  id            String                  @id @default(cuid())
+  code          String                  @unique
+  plate         String                  @unique
   capacity      Int
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  isActive      Boolean                 @default(true)
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
   sales         Sale[]
   assignments   DriverTruckAssignment[]
   loadManifests LoadManifest[]
@@ -178,14 +186,14 @@ model DriverTruckAssignment {
 }
 
 model LoadManifest {
-  id         String            @id @default(cuid())
-  createdAt  DateTime          @default(now())
-  driverName String            @default("sin-chofer")
+  id         String             @id @default(cuid())
+  createdAt  DateTime           @default(now())
+  driverName String             @default("sin-chofer")
   truckId    String
   truckCode  String?
   photoRef   String?
   note       String?
-  truck      Truck             @relation(fields: [truckId], references: [id])
+  truck      Truck              @relation(fields: [truckId], references: [id])
   items      LoadManifestItem[]
 
   @@index([createdAt])

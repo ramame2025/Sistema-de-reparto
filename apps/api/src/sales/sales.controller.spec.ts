@@ -82,4 +82,11 @@ describe('SalesController', () => {
       expect(roles).toEqual(['admin']);
     });
   });
+
+  describe('recordEmptyVisit', () => {
+    it('is restricted to admin and chofer roles, same as createSale', () => {
+      const roles = Reflect.getMetadata(ROLES_KEY, SalesController.prototype.recordEmptyVisit);
+      expect(roles).toEqual(['admin', 'chofer']);
+    });
+  });
 });

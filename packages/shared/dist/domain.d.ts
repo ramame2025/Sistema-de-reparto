@@ -6,10 +6,12 @@ export declare const PAYMENT_METHODS: readonly ["efectivo", "transferencia", "qr
 export declare const EXPENSE_CATEGORIES: readonly ["combustible", "peaje", "comida", "mantenimiento", "varios"];
 export declare const USER_ROLES: readonly ["admin", "chofer"];
 export declare const ASSIGNMENT_KINDS: readonly ["titular", "cobertura"];
+export declare const SALE_KINDS: readonly ["sale", "churn"];
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export type UserRole = (typeof USER_ROLES)[number];
 export type AssignmentKind = (typeof ASSIGNMENT_KINDS)[number];
+export type SaleKind = (typeof SALE_KINDS)[number];
 export type PriceTable = Record<CustomerType, Record<ProductCode, number>>;
 export type SaleItemInput = {
     productCode: ProductCode;
@@ -26,9 +28,33 @@ export type CreateSaleInput = {
     note?: string;
     customerId?: string;
     truckId?: string;
+    containerReturned?: boolean;
+};
+/**
+ * Payload para registrar una visita sin venta (churn): container devuelto,
+ * nada vendido. A proposito NO tiene `items` ni `paymentMethod` -- esos
+ * campos no existen en este input, se fuerzan server-side en
+ * `recordEmptyVisit` (fuera de scope de esta unidad).
+ */
+export type RecordEmptyVisitInput = {
+    clientGeneratedId?: string;
+    driverName: string;
+    truckCode?: string;
+    truckId?: string;
+    customerName: string;
+    customerType: CustomerType;
+    customerId?: string;
+    note?: string;
 };
 export type UpdateSaleInput = CreateSaleInput & {
     reason: string;
+    /**
+     * Hint de validacion solamente: le dice al validador puro si debe saltear
+     * los chequeos de paymentMethod/items. El service SIEMPRE revalida contra
+     * el `kind` almacenado en la fila real antes de aplicar el cambio -- este
+     * campo nunca es la unica fuente de verdad.
+     */
+    kind?: SaleKind;
 };
 export type SaleRecord = {
     id: string;
@@ -41,9 +67,16 @@ export type SaleRecord = {
     total: number;
     customerName: string;
     customerType: CustomerType;
-    paymentMethod: PaymentMethod;
+    /**
+     * `null` para una fila de churn (`kind === 'churn'`): no hubo pago, es el
+     * hecho de negocio real, no un dato faltante. Toda fila `kind === 'sale'`
+     * sigue teniendo un `PaymentMethod` valido.
+     */
+    paymentMethod: PaymentMethod | null;
     items: SaleItemInput[];
     note?: string;
+    kind: SaleKind;
+    containerReturned?: boolean;
 };
 export type CancelSaleInput = {
     reason: string;
@@ -192,6 +225,7 @@ export type UpdatePriceInput = {
 export declare const DEFAULT_PRICE_TABLE: PriceTable;
 export declare function calculateSaleTotal(customerType: CustomerType, items: SaleItemInput[], prices: PriceTable): number;
 export declare function validateCreateSaleInput(input: CreateSaleInput): string[];
+export declare function validateRecordEmptyVisitInput(input: RecordEmptyVisitInput): string[];
 export declare function validateUpdateSaleInput(input: UpdateSaleInput): string[];
 export declare function validateCancelSaleInput(input: CancelSaleInput): string[];
 export declare function validateCreateExpenseInput(input: CreateExpenseInput): string[];

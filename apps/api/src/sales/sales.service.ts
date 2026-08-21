@@ -4,7 +4,9 @@ import {
   type CancelSaleInput,
   type CreateSaleInput,
   type CustomerType,
+  type RecordEmptyVisitInput,
   type SaleAuditRecord,
+  type SaleKind,
   type SaleRecord,
   type UpdateSaleInput,
 } from '@distribuidor/shared';
@@ -13,6 +15,7 @@ import {
   PaymentMethod as PrismaPaymentMethod,
   ProductCode as PrismaProductCode,
   SaleAuditAction as PrismaSaleAuditAction,
+  SaleKind as PrismaSaleKind,
   type SaleAudit,
   type Sale,
   type SaleItem,
@@ -27,6 +30,18 @@ type ResolvedSaleLinks = {
   truckId: string | null;
 };
 
+/**
+ * Subset of fields `resolveCustomerAndTruck` actually needs. `CreateSaleInput`
+ * and `RecordEmptyVisitInput` both satisfy this shape, so the same
+ * customerId/truckId existence+active lookup logic serves `createSale` (via
+ * `CreateSaleInput`/`UpdateSaleInput`) and `recordEmptyVisit` (via
+ * `RecordEmptyVisitInput`) without duplicating it.
+ */
+type SaleIdentityLookupInput = Pick<
+  CreateSaleInput,
+  'customerType' | 'customerName' | 'customerId' | 'truckId'
+>;
+
 @Injectable()
 export class SalesService {
   constructor(
@@ -35,7 +50,7 @@ export class SalesService {
   ) {}
 
   private async resolveCustomerAndTruck(
-    input: CreateSaleInput,
+    input: SaleIdentityLookupInput,
   ): Promise<ResolvedSaleLinks> {
     let customerType = input.customerType;
     let customerName = input.customerName.trim();
@@ -147,6 +162,65 @@ export class SalesService {
     return this.toSaleRecord(sale);
   }
 
+  /**
+   * Records a churn visit: container returned, nothing delivered. Isolated
+   * from `createSale` on purpose (Design decision #1) -- its own
+   * `prisma.sale.create` call, forces `kind: 'churn'`, `paymentMethod: null`,
+   * `total: 0`, `containerReturned: true`, and zero `SaleItem` rows
+   * server-side regardless of anything a caller might smuggle in, since
+   * `RecordEmptyVisitInput` never carries `items`/`paymentMethod` in the
+   * first place.
+   */
+  async recordEmptyVisit(
+    input: RecordEmptyVisitInput,
+    actorUsername?: string,
+  ): Promise<SaleRecord> {
+    if (input.clientGeneratedId) {
+      const existing = await this.prisma.sale.findUnique({
+        where: { clientGeneratedId: input.clientGeneratedId },
+        include: { items: true },
+      });
+
+      if (existing) {
+        return this.toSaleRecord(existing);
+      }
+    }
+
+    const { customerType, customerName, customerId, truckId } =
+      await this.resolveCustomerAndTruck(input);
+    const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
+    const resolvedTruckCode = input.truckCode?.trim() || null;
+
+    const sale = await this.prisma.sale.create({
+      data: {
+        clientGeneratedId: input.clientGeneratedId ?? null,
+        driverName: resolvedDriverName,
+        truckCode: resolvedTruckCode,
+        customerName,
+        customerType: customerType as PrismaCustomerType,
+        paymentMethod: null,
+        note: input.note?.trim() || null,
+        total: 0,
+        kind: PrismaSaleKind.churn,
+        containerReturned: true,
+        customerId,
+        truckId,
+        items: {
+          create: [],
+        },
+        audits: {
+          create: {
+            action: PrismaSaleAuditAction.created,
+            reason: 'Visita sin venta',
+          },
+        },
+      },
+      include: { items: true },
+    });
+
+    return this.toSaleRecord(sale);
+  }
+
   async updateSale(id: string, input: UpdateSaleInput, actorUsername?: string): Promise<SaleRecord> {
     const existing = await this.prisma.sale.findUnique({
       where: { id },
@@ -161,10 +235,34 @@ export class SalesService {
       throw new ConflictException('Canceled sales cannot be edited');
     }
 
+    // Kind-consistency guard (Design decision #3): the row's *stored* kind is
+    // the only source of truth. `input.kind` is a validation hint the pure
+    // shared validator used to decide which checks to run -- here it is only
+    // ever compared against the real, persisted kind, never trusted alone.
+    // Mismatch -> reject before touching anything else.
+    const existingKind = existing.kind as SaleKind;
+    const requestedKind: SaleKind = input.kind ?? 'sale';
+
+    if (existingKind !== requestedKind) {
+      throw new ConflictException('Sale kind does not match the stored record');
+    }
+
+    const isChurn = existingKind === 'churn';
+
     const priceTable = await this.pricesService.getPriceTable();
     const { customerType, customerName, customerId, truckId } =
       await this.resolveCustomerAndTruck(input);
-    const total = calculateSaleTotal(customerType, input.items, priceTable);
+    // A churn row never has items/paymentMethod, on create or on edit
+    // (Design decision #2/#5): forced here too, regardless of whatever the
+    // edit payload does or doesn't carry, mirroring `recordEmptyVisit`.
+    const total = isChurn ? 0 : calculateSaleTotal(customerType, input.items, priceTable);
+    const resolvedPaymentMethod = isChurn ? null : (input.paymentMethod as PrismaPaymentMethod);
+    const resolvedItems = isChurn
+      ? []
+      : input.items.map((item) => ({
+          productCode: item.productCode as PrismaProductCode,
+          quantity: item.quantity,
+        }));
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
 
@@ -192,16 +290,13 @@ export class SalesService {
           truckCode: resolvedTruckCode,
           customerName,
           customerType: customerType as PrismaCustomerType,
-          paymentMethod: input.paymentMethod as PrismaPaymentMethod,
+          paymentMethod: resolvedPaymentMethod,
           note: input.note?.trim() || null,
           total,
           customerId,
           truckId,
           items: {
-            create: input.items.map((item) => ({
-              productCode: item.productCode as PrismaProductCode,
-              quantity: item.quantity,
-            })),
+            create: resolvedItems,
           },
         },
         include: { items: true },
@@ -301,8 +396,14 @@ export class SalesService {
       total: sale.total,
       customerName: sale.customerName,
       customerType: sale.customerType,
+      // `paymentMethod` is nullable at both the DB and `SaleRecord` type
+      // level: `null` for a churn row (`kind === 'churn'`, written by
+      // `recordEmptyVisit`), a real `PaymentMethod` for every normal sale.
+      // Direct assignment, no cast needed -- both sides agree on the type.
       paymentMethod: sale.paymentMethod,
       note: sale.note ?? undefined,
+      kind: sale.kind,
+      containerReturned: sale.containerReturned ?? undefined,
       items: sale.items.map((item) => ({
         productCode: item.productCode,
         quantity: item.quantity,

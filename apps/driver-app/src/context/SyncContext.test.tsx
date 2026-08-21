@@ -9,7 +9,7 @@ import { AuthProvider, useAuth } from './AuthContext';
 import { SyncProvider, useSync } from './SyncContext';
 import { TruckProvider, useTruck } from './TruckContext';
 import { computeBackoff, type PendingSale } from '../services/offlineQueue';
-import type { CreateSaleInput, SaleRecord } from '@distribuidor/shared';
+import type { CreateSaleInput, RecordEmptyVisitInput, SaleRecord } from '@distribuidor/shared';
 
 const DRIVER_AUTH_TOKEN_KEY = 'driver_auth_token_v1';
 const OFFLINE_QUEUE_KEY = 'driver_pending_sales_v1';
@@ -36,10 +36,16 @@ const makeFetchRouter = (
     myTruck?: () => Promise<Response>;
     getSales?: () => Promise<Response>;
     postSale?: () => Promise<Response>;
+    postEmptyVisit?: () => Promise<Response>;
   } = {},
 ): typeof fetch =>
   jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.endsWith('/sales/empty-visit') && init?.method === 'POST') {
+      return overrides.postEmptyVisit
+        ? overrides.postEmptyVisit()
+        : Promise.resolve(jsonResponse({ id: 'visit-default' }));
+    }
     if (url.endsWith('/auth/me')) {
       return overrides.authMe
         ? overrides.authMe()
@@ -92,6 +98,16 @@ const buildPayload = (overrides: Partial<CreateSaleInput> = {}): CreateSaleInput
   customerType: 'final',
   paymentMethod: 'efectivo',
   items: [{ productCode: 'G10', quantity: 1 }],
+  ...overrides,
+});
+
+const buildEmptyVisitPayload = (
+  overrides: Partial<RecordEmptyVisitInput> = {},
+): RecordEmptyVisitInput => ({
+  driverName: 'chofer1',
+  truckCode: 'CAMION-01',
+  customerName: 'Cliente de prueba',
+  customerType: 'final',
   ...overrides,
 });
 
@@ -463,6 +479,7 @@ describe('SyncContext/4.4 refreshDaySummary chaining + visible summaryError', ()
       customerType: 'final',
       paymentMethod: 'efectivo',
       items: [{ productCode: 'G10', quantity: 1 }],
+      kind: 'sale',
     };
 
     globalThis.fetch = makeFetchRouter({
@@ -535,6 +552,123 @@ describe('SyncContext/10.3 driver-scoped sales endpoint (PR10)', () => {
     expect(globalThis.fetch).not.toHaveBeenCalledWith(
       'http://localhost:4000/sales',
       expect.objectContaining({ cache: 'no-store' }),
+    );
+  });
+});
+
+describe('SyncContext/5.x churn action reuses the offline queue (visit-container-model Unit 4)', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  it('trySendEmptyVisit posts to /sales/empty-visit and returns the created id', async () => {
+    globalThis.fetch = makeFetchRouter({
+      postEmptyVisit: () => Promise.resolve(jsonResponse({ id: 'visit-1' })),
+    });
+    const result = await renderAuthenticated();
+
+    let id = '';
+    await act(async () => {
+      id = await result.current.sync.trySendEmptyVisit(buildEmptyVisitPayload());
+    });
+
+    expect(id).toBe('visit-1');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:4000/sales/empty-visit',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('enqueueEmptyVisit persists a churn-kind entry under the same offline queue key as sales', async () => {
+    globalThis.fetch = makeFetchRouter();
+    const result = await renderAuthenticated();
+
+    let newLength = -1;
+    await act(async () => {
+      newLength = await result.current.sync.enqueueEmptyVisit(buildEmptyVisitPayload(), 'offline');
+    });
+
+    expect(newLength).toBe(1);
+    expect(result.current.sync.pendingSales).toHaveLength(1);
+    expect(result.current.sync.pendingSales[0].kind).toBe('churn');
+    expect(result.current.sync.pendingSales[0].lastError).toBe('offline');
+
+    const raw = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
+    const stored = JSON.parse(raw as string);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].kind).toBe('churn');
+  });
+
+  it('syncPendingSales retries a queued churn entry against /sales/empty-visit, never /sales', async () => {
+    globalThis.fetch = makeFetchRouter({
+      postEmptyVisit: () => Promise.resolve(jsonResponse({ id: 'visit-synced' })),
+    });
+    const result = await renderAuthenticated();
+
+    await act(async () => {
+      await result.current.sync.enqueueEmptyVisit(buildEmptyVisitPayload(), 'offline');
+    });
+
+    let outcome: { synced: number; remaining: number; skipped: boolean } | undefined;
+    await act(async () => {
+      outcome = await result.current.sync.syncPendingSales(true);
+    });
+
+    expect(outcome).toEqual({ synced: 1, remaining: 0, skipped: false });
+    expect(result.current.sync.pendingSales).toHaveLength(0);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:4000/sales/empty-visit',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      'http://localhost:4000/sales',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('syncs a mixed queue (one sale, one churn visit), routing each to its own endpoint', async () => {
+    globalThis.fetch = makeFetchRouter({
+      postSale: () => Promise.resolve(jsonResponse({ id: 'sale-synced' })),
+      postEmptyVisit: () => Promise.resolve(jsonResponse({ id: 'visit-synced' })),
+    });
+    const result = await renderAuthenticated();
+
+    await act(async () => {
+      await result.current.sync.enqueueSale(buildPayload(), 'offline');
+    });
+    await act(async () => {
+      await result.current.sync.enqueueEmptyVisit(buildEmptyVisitPayload(), 'offline');
+    });
+
+    let outcome: { synced: number; remaining: number; skipped: boolean } | undefined;
+    await act(async () => {
+      outcome = await result.current.sync.syncPendingSales(true);
+    });
+
+    expect(outcome).toEqual({ synced: 2, remaining: 0, skipped: false });
+    expect(result.current.sync.pendingSales).toHaveLength(0);
+  });
+
+  it('treats a legacy queued entry with no kind field as a normal sale (backward compatibility)', async () => {
+    await AsyncStorage.setItem(
+      OFFLINE_QUEUE_KEY,
+      JSON.stringify([buildEntry({ queueId: 'q_legacy' })]),
+    );
+    globalThis.fetch = makeFetchRouter({
+      postSale: () => Promise.resolve(jsonResponse({ id: 'sale-legacy' })),
+    });
+    const result = await renderAuthenticated();
+    await waitFor(() => expect(result.current.sync.pendingSales).toHaveLength(1));
+
+    let outcome: { synced: number; remaining: number; skipped: boolean } | undefined;
+    await act(async () => {
+      outcome = await result.current.sync.syncPendingSales(true);
+    });
+
+    expect(outcome).toEqual({ synced: 1, remaining: 0, skipped: false });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:4000/sales',
+      expect.objectContaining({ method: 'POST' }),
     );
   });
 });

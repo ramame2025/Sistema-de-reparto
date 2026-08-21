@@ -12,9 +12,11 @@ import {
 import {
   type CancelSaleInput,
   type CreateSaleInput,
+  type RecordEmptyVisitInput,
   type UpdateSaleInput,
   validateCancelSaleInput,
   validateCreateSaleInput,
+  validateRecordEmptyVisitInput,
   validateUpdateSaleInput,
 } from '@distribuidor/shared';
 import { SalesService } from './sales.service';
@@ -59,6 +61,18 @@ export class SalesController {
     }
 
     return this.salesService.createSale(input, req.user?.username);
+  }
+
+  @Roles('admin', 'chofer')
+  @Post('empty-visit')
+  async recordEmptyVisit(@Body() input: RecordEmptyVisitInput, @Req() req: AuthRequest) {
+    const errors = validateRecordEmptyVisitInput(input);
+
+    if (errors.length > 0) {
+      throw new BadRequestException({ message: 'Invalid empty-visit payload', errors });
+    }
+
+    return this.salesService.recordEmptyVisit(input, req.user?.username);
   }
 
   @Roles('admin', 'chofer')
