@@ -67,6 +67,6 @@ What's missing, grouped by theme:
 | 2. Driver-app refactor | `driver-app-navigation` | Merged into `main` (PRs #11–#20) |
 | 3. Load manifest | `load-manifest` | Merged into `main` |
 | 4. Visit/container model | `visit-container-model` | Merged into `main` |
-| 5. Point-in-time geolocation | `point-in-time-geolocation` | Planned — explore/proposal/spec/design/tasks complete, not yet implemented |
+| 5. Point-in-time geolocation | `point-in-time-geolocation` | Merged into `main` |
 | 6, 8, 9 | — | Not started |
 | 7. Payment proof photo | `payment-proof-photo` | Merged into `main` |
