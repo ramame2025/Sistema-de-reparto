@@ -6,7 +6,6 @@ import { useApiClient, useAuth } from "../../context/AuthContext";
 import { resolveReceiptUrl } from "../../lib/api-client";
 import { downloadCsvReport } from "../../lib/csv";
 import {
-  type CreateUserInput,
   EXPENSE_CATEGORIES,
   PAYMENT_METHODS,
   PRODUCT_CODES,
@@ -16,8 +15,6 @@ import {
   type ProductCode,
   type SaleAuditRecord,
   type SaleRecord,
-  type UserRole,
-  type UserSummary,
 } from "@distribuidor/shared";
 
 type SaleStatusFilter = "all" | "active" | "canceled";
@@ -42,13 +39,6 @@ export default function Home() {
     isLoading: expensesLoading,
     error: expensesLoadError,
   } = useSWR<ExpenseRecord[]>("/expenses");
-  const {
-    data: users = [],
-    isValidating: usersLoading,
-    error: usersLoadError,
-    mutate: reloadUsers,
-  } = useSWR<UserSummary[]>("/users");
-
   const [saleDateFrom, setSaleDateFrom] = useState("");
   const [saleDateTo, setSaleDateTo] = useState("");
   const [saleStatusFilter, setSaleStatusFilter] = useState<SaleStatusFilter>("all");
@@ -63,12 +53,6 @@ export default function Home() {
     useState<ExpenseCategoryFilter>("all");
   const [selectedSaleForAudit, setSelectedSaleForAudit] = useState<SaleRecord | null>(null);
   const [saleActionError, setSaleActionError] = useState<string | null>(null);
-  const [userActionError, setUserActionError] = useState<string | null>(null);
-  const [userNotice, setUserNotice] = useState<string | null>(null);
-  const [newUserUsername, setNewUserUsername] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("");
-  const [newUserRole, setNewUserRole] = useState<UserRole>("chofer");
-  const [creatingUser, setCreatingUser] = useState(false);
 
   // La auditoria se pide sola al elegir una venta: con la clave en null,
   // SWR simplemente no dispara la request.
@@ -80,8 +64,6 @@ export default function Home() {
   const error =
     saleActionError ??
     (salesLoadError || expensesLoadError ? "No se pudo cargar la lista de ventas." : null);
-  const userError =
-    userActionError ?? (usersLoadError ? "No se pudo cargar usuarios." : null);
 
   const cancelSale = async (sale: SaleRecord) => {
     const reason = window.prompt("Motivo de anulacion", "Error de carga");
@@ -95,70 +77,6 @@ export default function Home() {
       await reloadSales();
     } catch {
       setSaleActionError("No se pudo anular la venta.");
-    }
-  };
-
-  const createUser = async () => {
-    const payload: CreateUserInput = {
-      username: newUserUsername,
-      password: newUserPassword,
-      role: newUserRole,
-    };
-
-    try {
-      setCreatingUser(true);
-      setUserActionError(null);
-      setUserNotice(null);
-
-      await api.post("/users", payload);
-
-      setNewUserUsername("");
-      setNewUserPassword("");
-      setNewUserRole("chofer");
-      setUserNotice("Usuario creado correctamente.");
-      await reloadUsers();
-    } catch {
-      setUserActionError("No se pudo crear el usuario.");
-    } finally {
-      setCreatingUser(false);
-    }
-  };
-
-  const resetUserPassword = async (user: UserSummary) => {
-    const nextPassword = window.prompt(`Nueva password para ${user.username}`);
-    if (!nextPassword) {
-      return;
-    }
-
-    try {
-      setUserActionError(null);
-      setUserNotice(null);
-
-      await api.patch(`/users/${user.id}/password`, { password: nextPassword });
-
-      setUserNotice(`Password actualizada para ${user.username}.`);
-      await reloadUsers();
-    } catch {
-      setUserActionError("No se pudo actualizar la password.");
-    }
-  };
-
-  const deleteUser = async (user: UserSummary) => {
-    const confirmed = window.confirm(`Eliminar usuario ${user.username}?`);
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      setUserActionError(null);
-      setUserNotice(null);
-
-      await api.remove(`/users/${user.id}`);
-
-      setUserNotice(`Usuario ${user.username} eliminado.`);
-      await reloadUsers();
-    } catch {
-      setUserActionError("No se pudo eliminar el usuario.");
     }
   };
 
@@ -677,115 +595,6 @@ export default function Home() {
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <h2 className="text-xl font-semibold">Usuarios</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Gestion de cuentas para roles admin y chofer.
-        </p>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <label className="text-sm text-slate-600">
-            Usuario
-            <input
-              type="text"
-              value={newUserUsername}
-              onChange={(event) => setNewUserUsername(event.target.value)}
-              className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="text-sm text-slate-600">
-            Password
-            <input
-              type="password"
-              value={newUserPassword}
-              onChange={(event) => setNewUserPassword(event.target.value)}
-              className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="text-sm text-slate-600">
-            Rol
-            <select
-              value={newUserRole}
-              onChange={(event) => setNewUserRole(event.target.value as UserRole)}
-              className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            >
-              <option value="chofer">chofer</option>
-              <option value="admin">admin</option>
-            </select>
-          </label>
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void createUser()}
-            disabled={creatingUser}
-            className="rounded bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-          >
-            {creatingUser ? "Creando..." : "Crear usuario"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void reloadUsers()}
-            disabled={usersLoading}
-            className="rounded bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-          >
-            {usersLoading ? "Actualizando..." : "Actualizar lista"}
-          </button>
-        </div>
-
-        {userError && <p className="mt-3 text-sm text-rose-700">{userError}</p>}
-        {userNotice && <p className="mt-3 text-sm text-emerald-700">{userNotice}</p>}
-
-        {!loading && users.length === 0 && (
-          <p className="mt-4 text-sm text-slate-600">No hay usuarios cargados.</p>
-        )}
-
-        {users.length > 0 && (
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-slate-500">
-                  <th className="py-2 pr-4">Usuario</th>
-                  <th className="py-2 pr-4">Rol</th>
-                  <th className="py-2 pr-4">Creado</th>
-                  <th className="py-2 pr-4">Actualizado</th>
-                  <th className="py-2 pr-4">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4">{user.username}</td>
-                    <td className="py-2 pr-4">{user.role}</td>
-                    <td className="py-2 pr-4">{new Date(user.createdAt).toLocaleString("es-AR")}</td>
-                    <td className="py-2 pr-4">{new Date(user.updatedAt).toLocaleString("es-AR")}</td>
-                    <td className="py-2 pr-4">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void resetUserPassword(user)}
-                          className="rounded bg-amber-600 px-3 py-1 text-white hover:bg-amber-700"
-                        >
-                          Reset password
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void deleteUser(user)}
-                          className="rounded bg-rose-600 px-3 py-1 text-white hover:bg-rose-700"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
               </tbody>
             </table>
           </div>

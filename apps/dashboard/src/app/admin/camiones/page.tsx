@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import type { CreateTruckInput, TruckRecord } from "@distribuidor/shared";
 import { useApiClient } from "../../../context/AuthContext";
@@ -11,8 +12,10 @@ const EMPTY_FORM: CreateTruckInput = { code: "", plate: "", capacity: 0 };
 export default function CamionesPage() {
   const api = useApiClient();
 
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [showInactive, setShowInactive] = useState(false);
-  const [selectedTruck, setSelectedTruck] = useState<TruckRecord | null>(null);
   const [form, setForm] = useState<CreateTruckInput>(EMPTY_FORM);
   const [creating, setCreating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -26,6 +29,16 @@ export default function CamionesPage() {
   } = useSWR<TruckRecord[]>(`/trucks?includeInactive=${showInactive}`);
 
   const error = actionError ?? (loadError ? "No se pudo cargar camiones." : null);
+
+  // El camion abierto vive en la URL, no en estado local. Asi el calendario
+  // se puede enlazar desde otra pantalla (la columna "camion hoy" de Usuarios)
+  // y la seleccion se deriva en vez de sincronizarse con un efecto.
+  const selectedTruckId = searchParams.get("truck");
+  const selectedTruck = trucks.find((truck) => truck.id === selectedTruckId) ?? null;
+
+  const openCalendar = (truckId: string | null) => {
+    router.replace(truckId ? `/admin/camiones?truck=${truckId}` : "/admin/camiones");
+  };
 
   const createTruck = async () => {
     try {
@@ -84,8 +97,8 @@ export default function CamionesPage() {
       setNotice(null);
       await api.patch(`/trucks/${truck.id}`, { isActive });
       setNotice(`Camion ${truck.code} ${isActive ? "reactivado" : "dado de baja"}.`);
-      if (!isActive && selectedTruck?.id === truck.id) {
-        setSelectedTruck(null);
+      if (!isActive && selectedTruckId === truck.id) {
+        openCalendar(null);
       }
       await reloadTrucks();
     } catch {
@@ -184,7 +197,7 @@ export default function CamionesPage() {
                   <tr
                     key={truck.id}
                     className={`border-b border-slate-100 ${
-                      selectedTruck?.id === truck.id ? "bg-sky-50" : ""
+                      selectedTruckId === truck.id ? "bg-sky-50" : ""
                     }`}
                   >
                     <td className="py-2 pr-4 font-medium">{truck.code}</td>
@@ -207,13 +220,11 @@ export default function CamionesPage() {
                           <button
                             type="button"
                             onClick={() =>
-                              setSelectedTruck(
-                                selectedTruck?.id === truck.id ? null : truck,
-                              )
+                              openCalendar(selectedTruckId === truck.id ? null : truck.id)
                             }
                             className="rounded bg-sky-700 px-3 py-1 font-semibold text-white hover:bg-sky-800"
                           >
-                            {selectedTruck?.id === truck.id ? "Cerrar" : "Calendario"}
+                            {selectedTruckId === truck.id ? "Cerrar" : "Calendario"}
                           </button>
                         )}
                         <button
