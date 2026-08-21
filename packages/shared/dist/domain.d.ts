@@ -30,6 +30,8 @@ export type CreateSaleInput = {
     truckId?: string;
     containerReturned?: boolean;
     paymentProofRef?: string;
+    latitude?: number;
+    longitude?: number;
 };
 /**
  * Payload para registrar una visita sin venta (churn): container devuelto,
@@ -79,6 +81,8 @@ export type SaleRecord = {
     kind: SaleKind;
     containerReturned?: boolean;
     paymentProofRef?: string;
+    latitude?: number;
+    longitude?: number;
 };
 export type CancelSaleInput = {
     reason: string;

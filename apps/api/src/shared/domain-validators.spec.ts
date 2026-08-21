@@ -255,6 +255,40 @@ describe('validateCreateSaleInput (widened with optional FKs)', () => {
     const errors = validateCreateSaleInput({ ...base, paymentProofRef: '   ' });
     expect(errors).toContain('paymentProofRef must not be empty when provided');
   });
+
+  it('accepts a payload with no latitude/longitude (unchanged behavior)', () => {
+    expect(validateCreateSaleInput(base)).toEqual([]);
+  });
+
+  it('accepts a valid latitude/longitude pair regardless of paymentMethod, incluso efectivo', () => {
+    const input: CreateSaleInput = {
+      ...base,
+      paymentMethod: 'efectivo',
+      latitude: -34.6037,
+      longitude: -58.3816,
+    };
+    expect(validateCreateSaleInput(input)).toEqual([]);
+  });
+
+  it('rejects latitude provided without longitude', () => {
+    const errors = validateCreateSaleInput({ ...base, latitude: -34.6037 });
+    expect(errors).toContain('latitude and longitude must be provided together');
+  });
+
+  it('rejects longitude provided without latitude', () => {
+    const errors = validateCreateSaleInput({ ...base, longitude: -58.3816 });
+    expect(errors).toContain('latitude and longitude must be provided together');
+  });
+
+  it('rejects an out-of-range latitude', () => {
+    const errors = validateCreateSaleInput({ ...base, latitude: 200, longitude: -58.3816 });
+    expect(errors).toContain('latitude must be between -90 and 90');
+  });
+
+  it('rejects an out-of-range longitude', () => {
+    const errors = validateCreateSaleInput({ ...base, latitude: -34.6037, longitude: -400 });
+    expect(errors).toContain('longitude must be between -180 and 180');
+  });
 });
 
 describe('validateCreateLoadManifestInput', () => {

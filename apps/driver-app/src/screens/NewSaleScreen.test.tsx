@@ -29,6 +29,7 @@ jest.mock('../context/AuthContext', () => {
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { NewSaleScreen } from './NewSaleScreen';
 import { useSync } from '../context/SyncContext';
 import { useAuth } from '../context/AuthContext';
@@ -38,6 +39,9 @@ const mockedUseSync = useSync as jest.Mock;
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseTruck = useTruck as jest.Mock;
 const mockedLaunchImageLibraryAsync = ImagePicker.launchImageLibraryAsync as jest.Mock;
+const mockedRequestForegroundPermissionsAsync =
+  Location.requestForegroundPermissionsAsync as jest.Mock;
+const mockedGetCurrentPositionAsync = Location.getCurrentPositionAsync as jest.Mock;
 
 const assignedTruck = {
   assignmentId: 'a-1',
@@ -119,6 +123,13 @@ beforeEach(() => {
   mockedLaunchImageLibraryAsync.mockResolvedValue({
     canceled: false,
     assets: [{ uri: 'file://fake.jpg' }],
+  });
+
+  mockedRequestForegroundPermissionsAsync.mockClear();
+  mockedRequestForegroundPermissionsAsync.mockResolvedValue({ granted: true });
+  mockedGetCurrentPositionAsync.mockClear();
+  mockedGetCurrentPositionAsync.mockResolvedValue({
+    coords: { latitude: -34.6037, longitude: -58.3816 },
   });
 });
 
@@ -469,5 +480,57 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
     const payload = mockedTrySendSale.mock.calls[0][0];
     expect(Object.prototype.hasOwnProperty.call(payload, 'paymentProofRef')).toBe(false);
+  });
+});
+
+describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geolocation)', () => {
+  it('includes latitude/longitude in the Guardar venta payload when permission is granted and the read succeeds', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
+      latitude: -34.6037,
+      longitude: -58.3816,
+    });
+  });
+
+  it('omits latitude/longitude and still saves the sale when the location permission is denied', async () => {
+    mockedRequestForegroundPermissionsAsync.mockResolvedValue({ granted: false });
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    const payload = mockedTrySendSale.mock.calls[0][0];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'latitude')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(payload, 'longitude')).toBe(false);
+    expect(mockedGetCurrentPositionAsync).not.toHaveBeenCalled();
+  });
+
+  it('omits latitude/longitude and still saves the sale when the location read never resolves before the timeout', async () => {
+    jest.useFakeTimers();
+    try {
+      mockedGetCurrentPositionAsync.mockReturnValue(new Promise(() => {}));
+      mockedTrySendSale.mockResolvedValue('sale-123');
+
+      await render(<NewSaleScreen />);
+      await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+      await fireEvent.press(screen.getByText('Guardar venta'));
+
+      await jest.advanceTimersByTimeAsync(8000);
+
+      expect(mockedTrySendSale).toHaveBeenCalledTimes(1);
+      const payload = mockedTrySendSale.mock.calls[0][0];
+      expect(Object.prototype.hasOwnProperty.call(payload, 'latitude')).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(payload, 'longitude')).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

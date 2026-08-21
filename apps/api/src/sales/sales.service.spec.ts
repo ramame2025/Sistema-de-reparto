@@ -35,6 +35,8 @@ function buildSaleRow(overrides: Record<string, unknown> = {}) {
     kind: 'sale',
     containerReturned: null,
     paymentProofRef: null,
+    latitude: null,
+    longitude: null,
     items: [{ productCode: 'G10', quantity: 2 }],
     ...overrides,
   };
@@ -283,6 +285,32 @@ describe('SalesService', () => {
       expect(prisma.sale.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ containerReturned: null }),
+        }),
+      );
+    });
+
+    it('stores latitude/longitude when provided in the payload', async () => {
+      prisma.sale.create.mockResolvedValue(
+        buildSaleRow({ latitude: -34.6037, longitude: -58.3816 }),
+      );
+
+      await service.createSale(buildCreateInput({ latitude: -34.6037, longitude: -58.3816 }));
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ latitude: -34.6037, longitude: -58.3816 }),
+        }),
+      );
+    });
+
+    it('stores latitude/longitude as null when omitted from the payload', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(buildCreateInput());
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ latitude: null, longitude: null }),
         }),
       );
     });
@@ -535,6 +563,42 @@ describe('SalesService', () => {
         }),
       );
       expect(result.paymentProofRef).toBeUndefined();
+    });
+
+    it('never changes a previously-stored latitude/longitude, even when the edit payload supplies different values', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({ latitude: -34.6037, longitude: -58.3816 }),
+      );
+      prisma.sale.update.mockResolvedValue(
+        buildSaleRow({ latitude: -34.6037, longitude: -58.3816 }),
+      );
+
+      await service.updateSale(
+        'sale-1',
+        buildUpdateInput({ latitude: 10, longitude: 20 }),
+      );
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ latitude: -34.6037, longitude: -58.3816 }),
+        }),
+      );
+    });
+
+    it('never populates a never-captured latitude/longitude (stored null), even when the edit payload supplies values', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildSaleRow({ latitude: null, longitude: null }));
+      prisma.sale.update.mockResolvedValue(buildSaleRow({ latitude: null, longitude: null }));
+
+      await service.updateSale(
+        'sale-1',
+        buildUpdateInput({ latitude: -34.6037, longitude: -58.3816 }),
+      );
+
+      expect(prisma.sale.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ latitude: null, longitude: null }),
+        }),
+      );
     });
 
     it('includes paymentProofRef in the audit before/after snapshots', async () => {

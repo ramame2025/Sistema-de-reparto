@@ -145,6 +145,8 @@ export class SalesService {
         truckId,
         paymentProofRef: input.paymentProofRef?.trim() || null,
         containerReturned: input.containerReturned ?? null,
+        latitude: input.latitude ?? null,
+        longitude: input.longitude ?? null,
         items: {
           create: input.items.map((item) => ({
             productCode: item.productCode as PrismaProductCode,
@@ -276,6 +278,18 @@ export class SalesService {
     // forcing logic as the fields above. A normal sale keeps whatever the
     // edit payload says (undefined -> null, "not asked").
     const resolvedContainerReturned = isChurn ? true : (input.containerReturned ?? null);
+    // Immutability by design (Open Question 3 / Design decision #6): unlike
+    // every other editable field above, latitude/longitude are NEVER derived
+    // from `input` here, unconditionally -- not just for churn rows. They are
+    // structurally present on `UpdateSaleInput` (inherited via composition
+    // over `CreateSaleInput`, same as `kind`), but a GPS coordinate for a past
+    // instant has no honest real-world referent once that instant has passed;
+    // it can only be fabricated on edit. The row's stored value from creation
+    // time is the only source of truth, forever. Do NOT "fix" this to read
+    // input.latitude/input.longitude "for consistency" with paymentProofRef --
+    // that would silently break this guarantee.
+    const resolvedLatitude = existing.latitude;
+    const resolvedLongitude = existing.longitude;
 
     const beforeSnapshot = {
       driverName: existing.driverName,
@@ -310,6 +324,8 @@ export class SalesService {
           truckId,
           paymentProofRef: resolvedPaymentProofRef,
           containerReturned: resolvedContainerReturned,
+          latitude: resolvedLatitude,
+          longitude: resolvedLongitude,
           items: {
             create: resolvedItems,
           },
@@ -422,6 +438,8 @@ export class SalesService {
       kind: sale.kind,
       containerReturned: sale.containerReturned ?? undefined,
       paymentProofRef: sale.paymentProofRef ?? undefined,
+      latitude: sale.latitude ?? undefined,
+      longitude: sale.longitude ?? undefined,
       items: sale.items.map((item) => ({
         productCode: item.productCode,
         quantity: item.quantity,

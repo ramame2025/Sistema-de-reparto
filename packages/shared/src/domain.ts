@@ -58,6 +58,8 @@ export type CreateSaleInput = {
   truckId?: string;
   containerReturned?: boolean;
   paymentProofRef?: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 /**
@@ -110,6 +112,8 @@ export type SaleRecord = {
   kind: SaleKind;
   containerReturned?: boolean;
   paymentProofRef?: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 export type CancelSaleInput = {
@@ -352,6 +356,24 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
 
   if (input.paymentProofRef !== undefined && input.paymentProofRef.trim().length === 0) {
     errors.push('paymentProofRef must not be empty when provided');
+  }
+
+  if ((input.latitude !== undefined) !== (input.longitude !== undefined)) {
+    errors.push('latitude and longitude must be provided together');
+  }
+
+  if (
+    input.latitude !== undefined &&
+    (!Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90)
+  ) {
+    errors.push('latitude must be between -90 and 90');
+  }
+
+  if (
+    input.longitude !== undefined &&
+    (!Number.isFinite(input.longitude) || input.longitude < -180 || input.longitude > 180)
+  ) {
+    errors.push('longitude must be between -180 and 180');
   }
 
   return errors;

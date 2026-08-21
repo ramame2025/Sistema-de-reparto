@@ -83,6 +83,8 @@ model Sale {
   kind              SaleKind       @default(sale)
   containerReturned Boolean?
   paymentProofRef   String?
+  latitude          Float?
+  longitude         Float?
   customer          Customer?      @relation(fields: [customerId], references: [id])
   truck             Truck?         @relation(fields: [truckId], references: [id])
   items             SaleItem[]
