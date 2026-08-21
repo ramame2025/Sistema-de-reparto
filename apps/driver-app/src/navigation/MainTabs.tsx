@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { ExpensesScreen } from '../screens/ExpensesScreen';
-import { HomeScreen } from '../screens/HomeScreen';
 import { NewSaleScreen } from '../screens/NewSaleScreen';
 import { SyncScreen } from '../screens/SyncScreen';
+import { HomeStack } from './HomeStack';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
 
@@ -42,7 +42,7 @@ export function MainTabs() {
     >
       <Tab.Screen
         name="Inicio"
-        component={HomeScreen}
+        component={HomeStack}
         options={{
           tabBarIcon: makeTabIcon('home-outline', 'tab-icon-inicio'),
         }}

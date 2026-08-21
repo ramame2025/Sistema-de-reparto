@@ -1,15 +1,22 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { LoadManifestRecord } from '@distribuidor/shared';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
+import type { HomeStackParamList } from '../navigation/HomeStack';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
+
+type HomeScreenNavigationProp = NativeStackNavigationProp<HomeStackParamList, 'Home'>;
 
 /**
  * Relocated verbatim from the pre-PR5 App.tsx "Resumen de jornada" card:
@@ -23,9 +30,37 @@ import { typography } from '../theme/typography';
 export function HomeScreen() {
   const { daySummary, summaryLoading, summaryError, refreshDaySummary, pendingSales } = useSync();
   const { truck } = useTruck();
+  const { api } = useAuth();
+  const navigation = useNavigation<HomeScreenNavigationProp>();
+
+  // Manifest status: fetched once on mount alongside refreshDaySummary, per
+  // the design's HomeScreen consumer contract (docs/plans/load-manifest.md
+  // §4 Interfaces). Filtered to "today" client-side with the exact same
+  // criterion SyncContext.refreshDaySummary already uses for sales
+  // (`createdAt.slice(0, 10) === today`) — no server-side "today" filter
+  // exists for this endpoint, same as /sales/mine.
+  const [manifestLoadedToday, setManifestLoadedToday] = useState(false);
+  const [manifestError, setManifestError] = useState<string | null>(null);
+
+  const refreshManifestStatus = useCallback(async () => {
+    try {
+      const manifests = await api.get<LoadManifestRecord[]>('/load-manifests/mine', {
+        cache: 'no-store',
+      });
+      const today = new Date().toISOString().slice(0, 10);
+      setManifestLoadedToday(manifests.some((manifest) => manifest.createdAt.slice(0, 10) === today));
+      setManifestError(null);
+    } catch (error) {
+      // Visible-error posture, same as summaryError — no silent catch.
+      const message =
+        error instanceof Error ? error.message : 'No se pudo verificar el remito de hoy.';
+      setManifestError(message);
+    }
+  }, [api]);
 
   useEffect(() => {
     void refreshDaySummary();
+    void refreshManifestStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh once on mount only, matches the original's mount-time fetch
   }, []);
 
@@ -73,6 +108,31 @@ export function HomeScreen() {
 
         <Button label="Actualizar resumen" onPress={() => void refreshDaySummary()} />
       </Card>
+
+      <Card style={styles.card}>
+        <Text style={styles.fieldLabel}>Remito de carga</Text>
+
+        {manifestError ? (
+          <View testID="home-manifest-error">
+            <FeedbackBanner message={manifestError} tone="error" />
+          </View>
+        ) : manifestLoadedToday ? (
+          <Text style={styles.manifestLoaded} testID="home-manifest-loaded">
+            Ya cargaste el remito hoy.
+          </Text>
+        ) : (
+          <Text style={styles.manifestMissing} testID="home-manifest-missing">
+            No cargaste el remito de hoy.
+          </Text>
+        )}
+
+        <Button
+          label="Cargar camión"
+          variant="secondary"
+          onPress={() => navigation.navigate('LoadManifest')}
+          testID="home-manifest-cta"
+        />
+      </Card>
     </ScreenContainer>
   );
 }
@@ -91,6 +151,17 @@ const styles = StyleSheet.create({
   assignedTruck: {
     fontWeight: '600',
     marginBottom: 8,
+  },
+  manifestMissing: {
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  manifestLoaded: {
+    fontSize: typography.sizes.sm,
+    color: colors.textPrimary,
+    fontWeight: typography.weights.medium,
+    marginBottom: spacing.sm,
   },
   fieldLabel: {
     fontSize: typography.sizes.sm,

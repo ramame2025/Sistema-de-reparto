@@ -33,7 +33,10 @@ const baseAuthValue = {
   token: null,
   username: '',
   loading: false,
-  api: {},
+  // HomeScreen (PR5) now calls api.get('/load-manifests/mine') on mount
+  // alongside refreshDaySummary — the "Inicio" tab is eagerly mounted by
+  // bottom-tabs, so this needs a real jest.fn() here, not an empty object.
+  api: { get: jest.fn().mockResolvedValue([]) },
   login: jest.fn(),
   logout: jest.fn(),
   requireAuthToken: jest.fn(() => null),
@@ -109,6 +112,17 @@ describe('RootNavigator/authenticated', () => {
     expect(screen.getByText('Nueva Venta')).toBeTruthy();
     expect(screen.getByText('Gastos')).toBeTruthy();
     expect(screen.getByText('Sincronización')).toBeTruthy();
+  });
+
+  it('Inicio still renders HomeScreen content, now nested inside HomeStack (PR5)', async () => {
+    mockedUseAuth.mockReturnValue({ ...baseAuthValue, status: 'authenticated', username: 'chofer1' });
+
+    await render(<RootNavigator />);
+
+    // bottom-tabs eagerly mounts only the initially-focused tab (Inicio),
+    // which is now a 2-screen native-stack instead of a bare HomeScreen —
+    // this proves the "Home" route inside HomeStack actually renders.
+    expect(screen.getByTestId('home-screen')).toBeTruthy();
   });
 
   it('exposes exactly 4 tabs, each with an icon and a visible text label, and no drawer/hamburger element', async () => {
