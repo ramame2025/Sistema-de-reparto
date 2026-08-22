@@ -1,18 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { type CreateCustomerInput, type CustomerType } from '@distribuidor/shared';
+import {
+  type CreateCustomerInput,
+  type CustomerRecord,
+  type CustomerType,
+} from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type CustomerRecord = {
-  id: string;
-  name: string;
-  customerType: CustomerType;
-  zone?: string;
-  latitude?: number;
-  longitude?: number;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
+export type { CustomerRecord };
 
 @Injectable()
 export class CustomersService {

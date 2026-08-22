@@ -46,7 +46,7 @@ What's missing, grouped by theme:
 3. **Load manifest ("remito de carga")** — "load the truck" screen (products + quantities + photo), and per-truck stock (loaded − sold today = carries over to tomorrow). → [`load-manifest.md`](./load-manifest.md)
 4. **Visit/container model** — extend `Sale` to support "received empty container: yes/no" and the "received empty, delivered nothing" churn case. → [`visit-container-model.md`](./visit-container-model.md)
 5. **Point-in-time geolocation** — capture lat/lng when a sale is confirmed (no routing yet). → [`point-in-time-geolocation.md`](./point-in-time-geolocation.md)
-6. **Customer picker + quick creation + proximity suggestion** — depends on 1 (registry) and 5 (location).
+6. **Customer picker + quick creation + proximity suggestion** — depends on 1 (registry) and 5 (location). → [`customer-picker-proximity.md`](./customer-picker-proximity.md)
 7. **Payment proof photo** on a sale (same mechanism already used for expense receipts). → [`payment-proof-photo.md`](./payment-proof-photo.md)
 8. **Live dashboard + admin-assigned daily customer list.**
 9. **Driver UX polish** — big buttons, minimal typing — final pass once the logic is solid.
@@ -68,5 +68,6 @@ What's missing, grouped by theme:
 | 3. Load manifest | `load-manifest` | Merged into `main` |
 | 4. Visit/container model | `visit-container-model` | Merged into `main` |
 | 5. Point-in-time geolocation | `point-in-time-geolocation` | Merged into `main` |
-| 6, 8, 9 | — | Not started |
+| 6. Customer picker + proximity | `customer-picker-proximity` | Planned |
 | 7. Payment proof photo | `payment-proof-photo` | Merged into `main` |
+| 8, 9 | — | Not started |

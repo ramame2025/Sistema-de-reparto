@@ -241,6 +241,18 @@ export type CreateCustomerInput = {
   longitude?: number;
 };
 
+export type CustomerRecord = {
+  id: string;
+  name: string;
+  customerType: CustomerType;
+  zone?: string;
+  latitude?: number;
+  longitude?: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CreateTruckInput = {
   code: string;
   plate: string;

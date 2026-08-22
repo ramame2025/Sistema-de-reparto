@@ -21,11 +21,13 @@ export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Get()
+  @Roles('admin', 'chofer')
   async listCustomers() {
     return this.customersService.listCustomers();
   }
 
   @Post()
+  @Roles('admin', 'chofer')
   async createCustomer(@Body() input: CreateCustomerInput) {
     const errors = validateCreateCustomerInput(input);
     if (errors.length > 0) {
