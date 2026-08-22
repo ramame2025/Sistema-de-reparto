@@ -70,5 +70,5 @@ What's missing, grouped by theme:
 | 5. Point-in-time geolocation | `point-in-time-geolocation` | Merged into `main` |
 | 6. Customer picker + proximity | `customer-picker-proximity` | Merged into `main` |
 | 7. Payment proof photo | `payment-proof-photo` | Merged into `main` |
-| 8. Live dashboard + admin-assigned daily customer list | `live-dashboard-assigned-customers` | Planned |
+| 8. Live dashboard + admin-assigned daily customer list | `live-dashboard-assigned-customers` | Merged into `main` |
 | 9 | — | Not started |
