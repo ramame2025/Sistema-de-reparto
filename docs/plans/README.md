@@ -48,7 +48,7 @@ What's missing, grouped by theme:
 5. **Point-in-time geolocation** — capture lat/lng when a sale is confirmed (no routing yet). → [`point-in-time-geolocation.md`](./point-in-time-geolocation.md)
 6. **Customer picker + quick creation + proximity suggestion** — depends on 1 (registry) and 5 (location). → [`customer-picker-proximity.md`](./customer-picker-proximity.md)
 7. **Payment proof photo** on a sale (same mechanism already used for expense receipts). → [`payment-proof-photo.md`](./payment-proof-photo.md)
-8. **Live dashboard + admin-assigned daily customer list.**
+8. **Live dashboard + admin-assigned daily customer list.** → [`live-dashboard-assigned-customers.md`](./live-dashboard-assigned-customers.md)
 9. **Driver UX polish** — big buttons, minimal typing — final pass once the logic is solid.
 
 ## Cross-Cutting Decisions (apply to the whole roadmap unless a phase says otherwise)
@@ -70,4 +70,5 @@ What's missing, grouped by theme:
 | 5. Point-in-time geolocation | `point-in-time-geolocation` | Merged into `main` |
 | 6. Customer picker + proximity | `customer-picker-proximity` | Merged into `main` |
 | 7. Payment proof photo | `payment-proof-photo` | Merged into `main` |
-| 8, 9 | — | Not started |
+| 8. Live dashboard + admin-assigned daily customer list | `live-dashboard-assigned-customers` | Planned |
+| 9 | — | Not started |

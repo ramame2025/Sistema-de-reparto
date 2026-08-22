@@ -39,12 +39,12 @@ export default function DashboardPage() {
     data: sales = [],
     isLoading: salesLoading,
     error: salesError,
-  } = useSWR<SaleRecord[]>("/sales");
+  } = useSWR<SaleRecord[]>("/sales", { refreshInterval: 15000 });
   const {
     data: expenses = [],
     isLoading: expensesLoading,
     error: expensesError,
-  } = useSWR<ExpenseRecord[]>("/expenses");
+  } = useSWR<ExpenseRecord[]>("/expenses", { refreshInterval: 15000 });
 
   const loading = salesLoading || expensesLoading;
   const error =
