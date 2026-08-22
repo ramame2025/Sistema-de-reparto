@@ -295,6 +295,32 @@ export type UpdatePriceInput = {
   amount: number;
 };
 
+/**
+ * Lista de clientes a visitar de un chofer en un dia puntual. Envelope
+ * resuelto (no bare `customerId[]`): reusa `CustomerRecord` tal cual, sin
+ * duplicar su forma.
+ */
+export type DriverCustomerAssignmentRecord = {
+  id: string;
+  driverId: string;
+  date: string; // YYYY-MM-DD
+  customers: CustomerRecord[]; // preserva el orden asignado
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateDriverCustomerAssignmentInput = {
+  driverId: string;
+  date: string; // YYYY-MM-DD
+  customerIds: string[];
+};
+
+/** Respuesta de GET /driver-customer-assignments/me — 200 con lista vacia, nunca 404. */
+export type MyAssignedCustomersResponse = {
+  date: string;
+  customers: CustomerRecord[];
+};
+
 export const DEFAULT_PRICE_TABLE: PriceTable = {
   final: { G10: 8500, G15: 13000, G45: 39000, G15_AUTO: 14500 },
   comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },
@@ -719,6 +745,34 @@ export function validateUpdatePriceInput(input: UpdatePriceInput): string[] {
 
   if (!Number.isInteger(input.amount) || input.amount <= 0) {
     errors.push('amount must be a positive integer');
+  }
+
+  return errors;
+}
+
+/**
+ * `customerIds: []` es valido (vacia la lista del dia, Spec "An empty array
+ * clears the list"): no se rechaza por vacio, solo por duplicados o campos
+ * de identidad faltantes/invalidos.
+ */
+export function validateCreateDriverCustomerAssignmentInput(
+  input: CreateDriverCustomerAssignmentInput,
+): string[] {
+  const errors: string[] = [];
+
+  if (!input.driverId || input.driverId.trim().length === 0) {
+    errors.push('driverId is required');
+  }
+
+  if (!input.date || input.date.trim().length === 0) {
+    errors.push('date is required');
+  } else if (Number.isNaN(new Date(input.date).getTime())) {
+    errors.push('date must be a valid date');
+  }
+
+  const uniqueCount = new Set(input.customerIds).size;
+  if (uniqueCount !== input.customerIds.length) {
+    errors.push('duplicate customerId');
   }
 
   return errors;

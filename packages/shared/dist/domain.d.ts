@@ -239,6 +239,29 @@ export type CreateAssignmentInput = {
 export type UpdatePriceInput = {
     amount: number;
 };
+/**
+ * Lista de clientes a visitar de un chofer en un dia puntual. Envelope
+ * resuelto (no bare `customerId[]`): reusa `CustomerRecord` tal cual, sin
+ * duplicar su forma.
+ */
+export type DriverCustomerAssignmentRecord = {
+    id: string;
+    driverId: string;
+    date: string;
+    customers: CustomerRecord[];
+    createdAt: string;
+    updatedAt: string;
+};
+export type CreateDriverCustomerAssignmentInput = {
+    driverId: string;
+    date: string;
+    customerIds: string[];
+};
+/** Respuesta de GET /driver-customer-assignments/me — 200 con lista vacia, nunca 404. */
+export type MyAssignedCustomersResponse = {
+    date: string;
+    customers: CustomerRecord[];
+};
 export declare const DEFAULT_PRICE_TABLE: PriceTable;
 export declare function calculateSaleTotal(customerType: CustomerType, items: SaleItemInput[], prices: PriceTable): number;
 export declare function validateCreateSaleInput(input: CreateSaleInput): string[];
@@ -255,3 +278,9 @@ export declare function validateCreateTruckInput(input: CreateTruckInput): strin
 export declare function validateUpdateTruckInput(input: UpdateTruckInput): string[];
 export declare function validateCreateAssignmentInput(input: CreateAssignmentInput): string[];
 export declare function validateUpdatePriceInput(input: UpdatePriceInput): string[];
+/**
+ * `customerIds: []` es valido (vacia la lista del dia, Spec "An empty array
+ * clears the list"): no se rechaza por vacio, solo por duplicados o campos
+ * de identidad faltantes/invalidos.
+ */
+export declare function validateCreateDriverCustomerAssignmentInput(input: CreateDriverCustomerAssignmentInput): string[];

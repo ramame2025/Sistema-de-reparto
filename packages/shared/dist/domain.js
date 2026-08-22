@@ -327,3 +327,25 @@ export function validateUpdatePriceInput(input) {
     }
     return errors;
 }
+/**
+ * `customerIds: []` es valido (vacia la lista del dia, Spec "An empty array
+ * clears the list"): no se rechaza por vacio, solo por duplicados o campos
+ * de identidad faltantes/invalidos.
+ */
+export function validateCreateDriverCustomerAssignmentInput(input) {
+    const errors = [];
+    if (!input.driverId || input.driverId.trim().length === 0) {
+        errors.push('driverId is required');
+    }
+    if (!input.date || input.date.trim().length === 0) {
+        errors.push('date is required');
+    }
+    else if (Number.isNaN(new Date(input.date).getTime())) {
+        errors.push('date must be a valid date');
+    }
+    const uniqueCount = new Set(input.customerIds).size;
+    if (uniqueCount !== input.customerIds.length) {
+        errors.push('duplicate customerId');
+    }
+    return errors;
+}

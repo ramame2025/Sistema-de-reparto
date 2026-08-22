@@ -133,26 +133,28 @@ model DriverExpense {
 }
 
 model UserAccount {
-  id           String                  @id @default(cuid())
-  username     String                  @unique
-  passwordHash String
-  role         UserRole
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
-  assignments  DriverTruckAssignment[]
+  id                  String                     @id @default(cuid())
+  username            String                     @unique
+  passwordHash        String
+  role                UserRole
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  assignments         DriverTruckAssignment[]
+  customerAssignments DriverCustomerAssignment[]
 }
 
 model Customer {
-  id           String       @id @default(cuid())
-  name         String
-  customerType CustomerType
-  zone         String?
-  latitude     Float?
-  longitude    Float?
-  isActive     Boolean      @default(true)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  sales        Sale[]
+  id                String                          @id @default(cuid())
+  name              String
+  customerType      CustomerType
+  zone              String?
+  latitude          Float?
+  longitude         Float?
+  isActive          Boolean                         @default(true)
+  createdAt         DateTime                        @default(now())
+  updatedAt         DateTime                        @updatedAt
+  sales             Sale[]
+  assignmentEntries DriverCustomerAssignmentEntry[]
 
   @@index([isActive, name])
 }
@@ -186,6 +188,35 @@ model DriverTruckAssignment {
   @@index([truckId, startDate])
   @@index([driverId, startDate])
   @@index([truckId, kind, startDate])
+}
+
+/// Un unico row por chofer+dia (parent+items, no rango): la lista se
+/// reemplaza entera en cada edicion, nunca se superpone ni se resuelve por
+/// especificidad como DriverTruckAssignment.
+model DriverCustomerAssignment {
+  id        String                          @id @default(cuid())
+  driverId  String
+  date      DateTime
+  createdAt DateTime                        @default(now())
+  updatedAt DateTime                        @updatedAt
+  driver    UserAccount                     @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  entries   DriverCustomerAssignmentEntry[]
+
+  @@unique([driverId, date])
+  @@index([driverId, date])
+}
+
+model DriverCustomerAssignmentEntry {
+  id           String                   @id @default(cuid())
+  assignmentId String
+  customerId   String
+  position     Int                      @default(0)
+  assignment   DriverCustomerAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  customer     Customer                 @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@unique([assignmentId, customerId])
+  @@index([assignmentId])
+  @@index([customerId])
 }
 
 model LoadManifest {

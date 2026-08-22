@@ -1,6 +1,7 @@
 import {
   type CreateAssignmentInput,
   type CreateCustomerInput,
+  type CreateDriverCustomerAssignmentInput,
   type CreateLoadManifestInput,
   type CreateSaleInput,
   type CreateTruckInput,
@@ -10,6 +11,7 @@ import {
   type UpdateTruckInput,
   validateCreateAssignmentInput,
   validateCreateCustomerInput,
+  validateCreateDriverCustomerAssignmentInput,
   validateCreateLoadManifestInput,
   validateCreateSaleInput,
   validateCreateTruckInput,
@@ -436,6 +438,56 @@ describe('validateRecordEmptyVisitInput', () => {
     const errors = validateRecordEmptyVisitInput(base);
     expect(errors).not.toContain('paymentMethod is invalid');
     expect(errors).not.toContain('items must include at least one product');
+  });
+});
+
+describe('validateCreateDriverCustomerAssignmentInput', () => {
+  const base: CreateDriverCustomerAssignmentInput = {
+    driverId: 'driver-1',
+    date: '2026-08-21',
+    customerIds: ['customer-1', 'customer-2'],
+  };
+
+  it('accepts a valid payload', () => {
+    expect(validateCreateDriverCustomerAssignmentInput(base)).toEqual([]);
+  });
+
+  it('accepts an empty customerIds array (clears the list)', () => {
+    expect(
+      validateCreateDriverCustomerAssignmentInput({ ...base, customerIds: [] }),
+    ).toEqual([]);
+  });
+
+  it('rejects duplicate customerIds', () => {
+    const errors = validateCreateDriverCustomerAssignmentInput({
+      ...base,
+      customerIds: ['customer-1', 'customer-1', 'customer-2'],
+    });
+    expect(errors).toContain('duplicate customerId');
+  });
+
+  it('rejects a missing driverId', () => {
+    const errors = validateCreateDriverCustomerAssignmentInput({
+      ...base,
+      driverId: '',
+    });
+    expect(errors).toContain('driverId is required');
+  });
+
+  it('rejects a missing date', () => {
+    const errors = validateCreateDriverCustomerAssignmentInput({
+      ...base,
+      date: '',
+    });
+    expect(errors).toContain('date is required');
+  });
+
+  it('rejects an invalid date', () => {
+    const errors = validateCreateDriverCustomerAssignmentInput({
+      ...base,
+      date: 'not-a-date',
+    });
+    expect(errors).toContain('date must be a valid date');
   });
 });
 
