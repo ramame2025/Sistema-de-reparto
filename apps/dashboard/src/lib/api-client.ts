@@ -10,12 +10,13 @@ export class ApiError extends Error {
   }
 }
 
-type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 export type ApiClient = {
   get: <T>(path: string) => Promise<T>;
   post: <T>(path: string, body: unknown) => Promise<T>;
   patch: <T>(path: string, body?: unknown) => Promise<T>;
+  put: <T>(path: string, body: unknown) => Promise<T>;
   remove: (path: string) => Promise<void>;
 };
 
@@ -62,6 +63,7 @@ export function createApiClient(
     get: (path) => request("GET", path),
     post: (path, body) => request("POST", path, body),
     patch: (path, body) => request("PATCH", path, body),
+    put: (path, body) => request("PUT", path, body),
     remove: async (path) => {
       await request("DELETE", path);
     },

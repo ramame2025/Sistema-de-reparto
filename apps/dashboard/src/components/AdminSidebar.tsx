@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: "/admin/reportes", label: "Reportes" },
   { href: "/admin/usuarios", label: "Usuarios" },
   { href: "/admin/camiones", label: "Camiones" },
+  { href: "/admin/clientes-asignados", label: "Clientes asignados" },
 ] as const;
 
 export default function AdminSidebar() {
