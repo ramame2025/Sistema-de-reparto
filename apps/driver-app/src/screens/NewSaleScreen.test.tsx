@@ -26,6 +26,23 @@ jest.mock('../context/AuthContext', () => {
   };
 });
 
+// Phase 6 PR2 (docs/plans/customer-picker-proximity.md): NewSaleScreen now
+// reads the picked-customer param via useRoute() and navigates to the
+// picker via useNavigation() -- same hook-based pattern HomeScreen.test.tsx
+// already established, not screen props, since NewSaleScreen is rendered
+// standalone (no NavigationContainer) by every test in this file.
+// mockedRouteParams is reset in beforeEach and overridden per-test.
+let mockedRouteParams: { pickedCustomer?: { id: string; name: string; customerType: string } } | undefined;
+const mockedNavigate = jest.fn();
+jest.mock('@react-navigation/native', () => {
+  const actual = jest.requireActual('@react-navigation/native');
+  return {
+    ...actual,
+    useNavigation: () => ({ navigate: mockedNavigate }),
+    useRoute: () => ({ params: mockedRouteParams }),
+  };
+});
+
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -97,6 +114,8 @@ let mockedApiPatch: jest.Mock;
 let mockedApiPostForm: jest.Mock;
 
 beforeEach(() => {
+  mockedRouteParams = undefined;
+  mockedNavigate.mockClear();
   mockedTrySendSale = jest.fn();
   mockedEnqueueSale = jest.fn().mockResolvedValue(1);
   mockedTrySendEmptyVisit = jest.fn();
@@ -532,5 +551,69 @@ describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geol
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe('NewSaleScreen/elegir cliente (customer-picker-proximity PR2)', () => {
+  it('renders an "Elegir cliente" button that navigates to CustomerPicker', async () => {
+    await render(<NewSaleScreen />);
+
+    await fireEvent.press(screen.getByTestId('new-sale-pick-customer-button'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('CustomerPicker');
+  });
+
+  it('populates customerId/customerName/customerType from route.params.pickedCustomer', async () => {
+    mockedRouteParams = {
+      pickedCustomer: { id: 'customer-1', name: 'Kiosco Sur', customerType: 'comercio' },
+    };
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await render(<NewSaleScreen />);
+
+    expect(screen.getByDisplayValue('Kiosco Sur')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
+      customerId: 'customer-1',
+      customerName: 'Kiosco Sur',
+      customerType: 'comercio',
+    });
+  });
+
+  it('clears customerId when customerName is hand-edited after a pick (data-integrity safeguard)', async () => {
+    mockedRouteParams = {
+      pickedCustomer: { id: 'customer-1', name: 'Kiosco Sur', customerType: 'comercio' },
+    };
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await render(<NewSaleScreen />);
+
+    await fireEvent.changeText(
+      screen.getByDisplayValue('Kiosco Sur'),
+      'Kiosco Sur (nueva sucursal)',
+    );
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    const payload = mockedTrySendSale.mock.calls[0][0];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'customerId')).toBe(false);
+    expect(payload).toMatchObject({ customerName: 'Kiosco Sur (nueva sucursal)' });
+  });
+
+  it('omits customerId from the payload when no customer was ever picked', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    const payload = mockedTrySendSale.mock.calls[0][0];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'customerId')).toBe(false);
   });
 });

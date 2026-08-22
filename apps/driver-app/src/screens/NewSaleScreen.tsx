@@ -1,5 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import {
@@ -22,10 +24,13 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
+import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { ApiError } from '../services/apiClient';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
+
+type NewSaleScreenNavigationProp = NativeStackNavigationProp<NewSaleStackParamList, 'Sale'>;
 
 const EMPTY_QUANTITIES: Record<ProductCode, number> = {
   G10: 0,
@@ -113,10 +118,21 @@ export function NewSaleScreen() {
     useSync();
   const { api, username } = useAuth();
   const { truck, status: truckStatus, error: truckError } = useTruck();
+  const navigation = useNavigation<NewSaleScreenNavigationProp>();
+  const route = useRoute<RouteProp<NewSaleStackParamList, 'Sale'>>();
 
   const [customerType, setCustomerType] = useState<CustomerType>('final');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [customerName, setCustomerName] = useState('Cliente de prueba');
+  // Set only when a customer was picked via CustomerPickerScreen (Phase 6
+  // PR2, docs/plans/customer-picker-proximity.md design decision #7: params
+  // returned via navigation.navigate, no shared Context). Cleared the
+  // instant customerName is hand-edited afterward (design decision #9) --
+  // resolveCustomerAndTruck (apps/api/src/sales/sales.service.ts) silently
+  // overrides customerName/customerType from the stored Customer row
+  // whenever customerId is present, so an un-cleared customerId here would
+  // discard the driver's edit server-side without any visible error.
+  const [customerId, setCustomerId] = useState<string | undefined>(undefined);
   const [quantities, setQuantities] = useState<Record<ProductCode, number>>(EMPTY_QUANTITIES);
   // `undefined` = nunca tocado (se omite del payload, "no preguntado" en el
   // backend). Solo pasa a true/false cuando el chofer toca el control.
@@ -134,6 +150,30 @@ export function NewSaleScreen() {
   const [canceling, setCanceling] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [recordingVisit, setRecordingVisit] = useState(false);
+
+  // Syncs a customer picked in CustomerPickerScreen back into local state
+  // (Phase 6 PR2, docs/plans/customer-picker-proximity.md, "Data Flow"):
+  // fires whenever navigation returns to this screen with a new
+  // pickedCustomer param.
+  useEffect(() => {
+    const pickedCustomer = route.params?.pickedCustomer;
+    if (!pickedCustomer) {
+      return;
+    }
+
+    setCustomerId(pickedCustomer.id);
+    setCustomerName(pickedCustomer.name);
+    setCustomerType(pickedCustomer.customerType);
+  }, [route.params?.pickedCustomer]);
+
+  const onChangeCustomerName = (value: string) => {
+    setCustomerName(value);
+    // Closes the silent-discard trap documented above: an edit made after a
+    // pick must not still carry the stale customerId into the payload.
+    if (customerId) {
+      setCustomerId(undefined);
+    }
+  };
 
   const currentItems = useMemo(
     () =>
@@ -276,6 +316,10 @@ export function NewSaleScreen() {
       // Omitido (no las keys) si no hubo lectura exitosa -- permiso denegado,
       // sin fix de GPS, o timeout, mismo criterio que arriba.
       ...(location ? { latitude: location.latitude, longitude: location.longitude } : {}),
+      // Omitido (no la key) si nunca se eligio un cliente del picker, o si
+      // customerId se limpio por una edicion manual posterior -- mismo
+      // criterio condicional que los campos de arriba.
+      ...(customerId ? { customerId } : {}),
     };
 
     try {
@@ -431,8 +475,14 @@ export function NewSaleScreen() {
         <TextInput
           style={styles.input}
           value={customerName}
-          onChangeText={setCustomerName}
+          onChangeText={onChangeCustomerName}
           placeholder="Nombre del cliente"
+        />
+        <Button
+          label="Elegir cliente"
+          variant="secondary"
+          onPress={() => navigation.navigate('CustomerPicker')}
+          testID="new-sale-pick-customer-button"
         />
 
         <Text style={styles.fieldLabel}>Tipo de cliente</Text>

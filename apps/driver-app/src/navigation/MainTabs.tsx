@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { ExpensesScreen } from '../screens/ExpensesScreen';
-import { NewSaleScreen } from '../screens/NewSaleScreen';
 import { SyncScreen } from '../screens/SyncScreen';
 import { HomeStack } from './HomeStack';
+import { NewSaleStack } from './NewSaleStack';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
 
@@ -49,7 +49,7 @@ export function MainTabs() {
       />
       <Tab.Screen
         name="Nueva Venta"
-        component={NewSaleScreen}
+        component={NewSaleStack}
         options={{
           tabBarIcon: makeTabIcon('add-circle-outline', 'tab-icon-nueva-venta'),
           tabBarActiveTintColor: colors.primary,
