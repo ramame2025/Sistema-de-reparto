@@ -10,6 +10,10 @@ jest.mock('../context/AuthContext', () => {
   };
 });
 
+jest.mock('../services/location', () => ({
+  captureDeviceLocation: jest.fn(),
+}));
+
 const mockedNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
@@ -24,9 +28,12 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react-nativ
 import type { CustomerRecord } from '@distribuidor/shared';
 import { CustomerPickerScreen } from './CustomerPickerScreen';
 import { useAuth } from '../context/AuthContext';
+import { captureDeviceLocation } from '../services/location';
 
 const mockedUseAuth = useAuth as jest.Mock;
+const mockedCaptureDeviceLocation = captureDeviceLocation as jest.Mock;
 let mockedApiGet: jest.Mock;
+let mockedApiPost: jest.Mock;
 
 const customers: CustomerRecord[] = [
   {
@@ -47,15 +54,64 @@ const customers: CustomerRecord[] = [
   },
 ];
 
+// Three known distances from origin -34.60,-58.38 (Design decision #10/#11):
+// far (~10km), near (~0.5km), mid (~2km) -- deliberately not pre-sorted, so
+// a passing test proves sortByProximity actually reordered them.
+const locatedCustomers: CustomerRecord[] = [
+  {
+    id: 'far-1',
+    name: 'Deposito Lejano',
+    customerType: 'distribuidor',
+    latitude: -34.69,
+    longitude: -58.38,
+    isActive: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'near-1',
+    name: 'Kiosco Cercano',
+    customerType: 'comercio',
+    latitude: -34.6042,
+    longitude: -58.382,
+    isActive: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'mid-1',
+    name: 'Almacen Medio',
+    customerType: 'final',
+    latitude: -34.618,
+    longitude: -58.38,
+    isActive: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'unlocated-1',
+    name: 'Sin Coordenadas',
+    customerType: 'final',
+    isActive: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+];
+
+const readerLocation = { latitude: -34.6037, longitude: -58.3816 };
+
 beforeEach(() => {
   mockedNavigate.mockClear();
   mockedApiGet = jest.fn().mockResolvedValue(customers);
+  mockedApiPost = jest.fn();
+  mockedCaptureDeviceLocation.mockReset();
+  mockedCaptureDeviceLocation.mockResolvedValue(null);
   mockedUseAuth.mockReturnValue({
     status: 'authenticated' as const,
     token: 'tok',
     username: 'chofer1',
     loading: false,
-    api: { get: mockedApiGet },
+    api: { get: mockedApiGet, post: mockedApiPost },
     login: jest.fn(),
     logout: jest.fn(),
     requireAuthToken: jest.fn(() => 'tok'),
@@ -94,5 +150,140 @@ describe('CustomerPickerScreen/seleccion', () => {
     expect(mockedNavigate).toHaveBeenCalledWith('Sale', {
       pickedCustomer: { id: 'customer-1', name: 'Kiosco Sur', customerType: 'comercio' },
     });
+  });
+});
+
+// Phase 6 PR3 (docs/plans/customer-picker-proximity.md, design decisions
+// #10/#11): a fresh, independent captureDeviceLocation() read on mount,
+// then sortByProximity (packages/shared) reorders the fetched list --
+// nearest-first, unlocated items appended unchanged, never filtered out.
+describe('CustomerPickerScreen/cercania', () => {
+  it('sorts the rendered list by ascending distance when the GPS read succeeds, marking the nearest as cerca tuyo', async () => {
+    mockedApiGet.mockResolvedValue(locatedCustomers);
+    mockedCaptureDeviceLocation.mockResolvedValue(readerLocation);
+
+    await render(<CustomerPickerScreen />);
+
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText('Kiosco Cercano')).toBeTruthy());
+
+    const list = screen.getByTestId('customer-picker-list');
+    const names = list.props.data.map((c: CustomerRecord) => c.name);
+    expect(names).toEqual([
+      'Kiosco Cercano',
+      'Almacen Medio',
+      'Deposito Lejano',
+      'Sin Coordenadas',
+    ]);
+
+    expect(screen.getByTestId('customer-picker-near-badge-near-1')).toBeTruthy();
+    expect(screen.queryByTestId('customer-picker-near-badge-unlocated-1')).toBeNull();
+  });
+
+  it('keeps the plain fetched-order list, still searchable, when the GPS read fails/denies/times out', async () => {
+    mockedApiGet.mockResolvedValue(customers);
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+
+    await render(<CustomerPickerScreen />);
+
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText('Kiosco Sur')).toBeTruthy());
+
+    const list = screen.getByTestId('customer-picker-list');
+    const names = list.props.data.map((c: CustomerRecord) => c.name);
+    expect(names).toEqual(['Kiosco Sur', 'Almacen Norte']);
+
+    await fireEvent.changeText(screen.getByTestId('customer-picker-search'), 'almacen');
+    await waitFor(() => expect(screen.queryByText('Kiosco Sur')).toBeNull());
+    expect(screen.getByText('Almacen Norte')).toBeTruthy();
+  });
+});
+
+// Phase 6 PR3, design decisions #12/#13: quick creation is online-only,
+// requires only name + customerType, coordinates attached best-effort from
+// the same picker-open GPS read used for proximity sort above.
+describe('CustomerPickerScreen/alta rapida', () => {
+  it('includes latitude/longitude in the POST payload when a GPS reading is available', async () => {
+    mockedCaptureDeviceLocation.mockResolvedValue(readerLocation);
+    mockedApiPost.mockResolvedValue({
+      id: 'new-customer-1',
+      name: 'Almacen Norte 2',
+      customerType: 'final',
+      isActive: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    await render(<CustomerPickerScreen />);
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+
+    await fireEvent.changeText(
+      screen.getByTestId('customer-picker-quick-create-name'),
+      'Almacen Norte 2',
+    );
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-submit'));
+
+    await waitFor(() =>
+      expect(mockedApiPost).toHaveBeenCalledWith('/customers', {
+        name: 'Almacen Norte 2',
+        customerType: 'final',
+        latitude: readerLocation.latitude,
+        longitude: readerLocation.longitude,
+      }),
+    );
+    expect(mockedNavigate).toHaveBeenCalledWith('Sale', {
+      pickedCustomer: { id: 'new-customer-1', name: 'Almacen Norte 2', customerType: 'final' },
+    });
+  });
+
+  it('omits latitude/longitude from the POST payload when no GPS reading is available', async () => {
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+    mockedApiPost.mockResolvedValue({
+      id: 'new-customer-2',
+      name: 'Sin Ubicacion',
+      customerType: 'comercio',
+      isActive: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    await render(<CustomerPickerScreen />);
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+
+    await fireEvent.changeText(
+      screen.getByTestId('customer-picker-quick-create-name'),
+      'Sin Ubicacion',
+    );
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-type-comercio'));
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-submit'));
+
+    await waitFor(() =>
+      expect(mockedApiPost).toHaveBeenCalledWith('/customers', {
+        name: 'Sin Ubicacion',
+        customerType: 'comercio',
+      }),
+    );
+    expect(mockedApiPost.mock.calls[0][1]).not.toHaveProperty('latitude');
+    expect(mockedApiPost.mock.calls[0][1]).not.toHaveProperty('longitude');
+  });
+
+  it('shows an error banner and does not navigate away when the POST fails (incl. offline)', async () => {
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+    mockedApiPost.mockRejectedValue(new Error('Network request failed'));
+
+    await render(<CustomerPickerScreen />);
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+
+    await fireEvent.changeText(
+      screen.getByTestId('customer-picker-quick-create-name'),
+      'Cliente Fallido',
+    );
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-submit'));
+
+    await waitFor(() => expect(mockedApiPost).toHaveBeenCalledTimes(1));
+    expect(
+      screen.getByText('No se pudo crear el cliente. Revisa la conexion e intenta de nuevo.'),
+    ).toBeTruthy();
+    expect(mockedNavigate).not.toHaveBeenCalled();
   });
 });

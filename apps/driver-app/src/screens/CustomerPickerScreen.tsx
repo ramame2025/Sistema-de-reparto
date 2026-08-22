@@ -1,14 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { CustomerRecord } from '@distribuidor/shared';
+import {
+  CUSTOMER_TYPES,
+  sortByProximity,
+  type CustomerRecord,
+  type CustomerType,
+} from '@distribuidor/shared';
+import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { StatusBadge } from '../components/StatusBadge';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../services/apiClient';
+import { captureDeviceLocation, type CapturedLocation } from '../services/location';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
@@ -19,21 +27,32 @@ type CustomerPickerNavigationProp = NativeStackNavigationProp<
   'CustomerPicker'
 >;
 
+// How many nearest, coordinate-bearing customers get the "cerca tuyo"
+// marker (Open Question 2 / Design decision #10: sort, never filter --
+// the full list stays reachable below regardless of this number).
+const NEARBY_HIGHLIGHT_COUNT = 5;
+
 /**
- * v1 (Phase 6 PR2, docs/plans/customer-picker-proximity.md): search + manual
- * selection over the full customer registry. NO proximity sort and NO
- * quick-create yet — those are PR3 (design decisions #10-#12), layered onto
- * this already-shippable screen without touching this file's core shape.
+ * v2 (Phase 6 PR3, docs/plans/customer-picker-proximity.md): adds proximity
+ * suggestion and quick creation on top of PR2's search + manual selection.
  *
- * Fetches the customer list once on mount via useAuth().api.get, same
- * "fetch once, no polling" pattern HomeScreen uses for
- * /load-manifests/mine. Search is a plain client-side substring filter over
- * the already-fetched list (no server-side search param exists — see
- * customers.controller.ts). Uses useNavigation() rather than a `navigation`
- * prop, matching HomeScreen.tsx's established convention for a screen that
- * needs to navigate but isn't passed props directly (it's wired via
- * NewSaleStack's `component=` prop, same as HomeScreen is wired via
- * HomeStack).
+ * On mount, captures a fresh, independent GPS reading (design decision #11
+ * -- never reuses a previously-captured sale location) via the extracted
+ * services/location.ts helper (design decision #5), in parallel with the
+ * customer-list fetch. When the reading succeeds, the already
+ * search-filtered list is passed through packages/shared's sortByProximity
+ * (design decision #10 -- sorts, never filters: customers without
+ * coordinates stay in the list, just not marked "cerca tuyo"). When the
+ * reading fails/denies/times out, the list renders and is searchable
+ * exactly as PR2 already did -- the picker is never blocked (Open Question
+ * 5 / design decision #14).
+ *
+ * Quick creation (design decisions #12/#13) is a small inline form: only
+ * name + customerType are required inputs (no manual coordinate entry --
+ * the same GPS reading captured above is attached best-effort). It is
+ * online-only -- a failed POST /customers (including offline) shows an
+ * error banner and never navigates away, so the driver can still fall back
+ * to NewSaleScreen's free-text customerName field.
  */
 export function CustomerPickerScreen() {
   const { api } = useAuth();
@@ -43,6 +62,12 @@ export function CustomerPickerScreen() {
   const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [location, setLocation] = useState<CapturedLocation | null>(null);
+
+  const [quickCreateName, setQuickCreateName] = useState('');
+  const [quickCreateType, setQuickCreateType] = useState<CustomerType>('final');
+  const [creating, setCreating] = useState(false);
+  const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,13 +101,50 @@ export function CustomerPickerScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once on mount only
   }, []);
 
-  const visibleCustomers = useMemo(() => {
+  useEffect(() => {
+    let cancelled = false;
+
+    const readLocation = async () => {
+      const reading = await captureDeviceLocation();
+      if (!cancelled) {
+        setLocation(reading);
+      }
+    };
+
+    void readLocation();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fresh read once on mount only
+  }, []);
+
+  const searchFilteredCustomers = useMemo(() => {
     const normalized = searchText.trim().toLowerCase();
     if (!normalized) {
       return customers;
     }
     return customers.filter((customer) => customer.name.toLowerCase().includes(normalized));
   }, [customers, searchText]);
+
+  const visibleCustomers = useMemo(() => {
+    if (!location) {
+      return searchFilteredCustomers;
+    }
+    return sortByProximity(location, searchFilteredCustomers);
+  }, [searchFilteredCustomers, location]);
+
+  const nearbyCustomerIds = useMemo(() => {
+    if (!location) {
+      return new Set<string>();
+    }
+    return new Set(
+      visibleCustomers
+        .filter((customer) => customer.latitude !== undefined && customer.longitude !== undefined)
+        .slice(0, NEARBY_HIGHLIGHT_COUNT)
+        .map((customer) => customer.id),
+    );
+  }, [visibleCustomers, location]);
 
   const pickCustomer = (customer: CustomerRecord) => {
     navigation.navigate('Sale', {
@@ -94,8 +156,37 @@ export function CustomerPickerScreen() {
     });
   };
 
+  const submitQuickCreate = async () => {
+    setQuickCreateError(null);
+
+    try {
+      setCreating(true);
+      const created = await api.post<CustomerRecord>('/customers', {
+        name: quickCreateName,
+        customerType: quickCreateType,
+        // Omitido (no las keys) si no hubo lectura de ubicacion exitosa --
+        // mismo criterio "best-effort" que saveSale usa para
+        // latitude/longitude en NewSaleScreen (Open Question 4).
+        ...(location ? { latitude: location.latitude, longitude: location.longitude } : {}),
+      });
+
+      pickCustomer(created);
+    } catch (err) {
+      // Alta rapida es solo online (Open Question 13, design decision #13):
+      // un fallo -- incluida la falta de conexion -- muestra error y no
+      // navega. El chofer puede seguir con el nombre libre en NewSaleScreen.
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : 'No se pudo crear el cliente. Revisa la conexion e intenta de nuevo.';
+      setQuickCreateError(message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
-    <ScreenContainer testID="customer-picker-screen">
+    <ScreenContainer testID="customer-picker-screen" scroll>
       <Card style={styles.card}>
         <Text style={styles.fieldLabel}>Buscar cliente</Text>
         <TextInput
@@ -129,12 +220,50 @@ export function CustomerPickerScreen() {
               onPress={() => pickCustomer(item)}
               testID={`customer-picker-item-${item.id}`}
             >
-              <Text style={styles.customerName}>{item.name}</Text>
-              <Text style={styles.customerType}>{item.customerType}</Text>
+              <View style={styles.customerInfo}>
+                <Text style={styles.customerName}>{item.name}</Text>
+                <Text style={styles.customerType}>{item.customerType}</Text>
+              </View>
+              {nearbyCustomerIds.has(item.id) && (
+                <StatusBadge
+                  label="Cerca tuyo"
+                  status="info"
+                  testID={`customer-picker-near-badge-${item.id}`}
+                />
+              )}
             </Pressable>
           )}
         />
       )}
+
+      <Card style={styles.card}>
+        <Text style={styles.fieldLabel}>Crear cliente rapido</Text>
+        <TextInput
+          style={styles.input}
+          value={quickCreateName}
+          onChangeText={setQuickCreateName}
+          placeholder="Nombre del cliente nuevo"
+          testID="customer-picker-quick-create-name"
+        />
+        <View style={styles.segmentRow}>
+          {CUSTOMER_TYPES.map((type) => (
+            <Button
+              key={type}
+              label={type}
+              variant={quickCreateType === type ? 'primary' : 'secondary'}
+              onPress={() => setQuickCreateType(type)}
+              testID={`customer-picker-quick-create-type-${type}`}
+            />
+          ))}
+        </View>
+        <Button
+          label={creating ? 'Creando...' : 'Crear cliente'}
+          onPress={() => void submitQuickCreate()}
+          disabled={creating || quickCreateName.trim().length === 0}
+          testID="customer-picker-quick-create-submit"
+        />
+        <FeedbackBanner message={quickCreateError} tone="error" />
+      </Card>
     </ScreenContainer>
   );
 }
@@ -172,6 +301,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
   },
+  customerInfo: {
+    flexShrink: 1,
+  },
   customerName: {
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.bold,
@@ -180,5 +312,10 @@ const styles = StyleSheet.create({
   customerType: {
     fontSize: typography.sizes.sm,
     color: colors.textSecondary,
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
 });

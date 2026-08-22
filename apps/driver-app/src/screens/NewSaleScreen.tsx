@@ -3,7 +3,6 @@ import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
 import {
   CUSTOMER_TYPES,
   DEFAULT_PRICE_TABLE,
@@ -26,6 +25,7 @@ import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { ApiError } from '../services/apiClient';
+import { captureDeviceLocation } from '../services/location';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
@@ -41,58 +41,6 @@ const EMPTY_QUANTITIES: Record<ProductCode, number> = {
 
 const buildClientGeneratedId = () =>
   `m_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-
-// Tunable: no timing data exists yet for real GPS-fix latency in the
-// driver's actual delivery zones -- this is a placeholder best-guess
-// (Design decision #7 / Open Question 4), trivially adjustable in this one
-// place without touching any other layer.
-const LOCATION_TIMEOUT_MS = 8000;
-
-type CapturedLocation = { latitude: number; longitude: number };
-
-/**
- * Point-in-time GPS read (Design decision #2): captured only here, at the
- * exact moment saveSale() confirms the sale -- never on screen mount, since
- * NewSaleScreen is visited/abandoned repeatedly through the day and a
- * mount-time read could be stale or unrelated to the eventual confirmation.
- * Optional everywhere (Open Question 1): a denied permission, no fix, or a
- * read slower than LOCATION_TIMEOUT_MS all resolve to `null` -- the sale
- * always still saves, same "never block a sale" invariant already proven for
- * containerReturned/paymentProofRef.
- */
-const captureSaleLocation = async (): Promise<CapturedLocation | null> => {
-  try {
-    const permission = await Location.requestForegroundPermissionsAsync();
-    if (!permission.granted) {
-      return null;
-    }
-
-    let timeoutId: ReturnType<typeof setTimeout>;
-    // Cleared in `finally` regardless of which side of the race wins -- an
-    // uncleared timer would otherwise keep firing LOCATION_TIMEOUT_MS later
-    // even after a successful fast read, leaking a handle.
-    const timeout = new Promise<null>((resolve) => {
-      timeoutId = setTimeout(() => resolve(null), LOCATION_TIMEOUT_MS);
-    });
-
-    try {
-      const reading = await Promise.race([
-        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-        timeout,
-      ]);
-
-      if (!reading) {
-        return null;
-      }
-
-      return { latitude: reading.coords.latitude, longitude: reading.coords.longitude };
-    } finally {
-      clearTimeout(timeoutId!);
-    }
-  } catch {
-    return null;
-  }
-};
 
 type SegmentButtonProps<T extends string> = {
   label: T;
@@ -295,8 +243,10 @@ export function NewSaleScreen() {
 
     // Punto en el tiempo (point-in-time-geolocation): se captura aca, justo
     // antes de armar el payload final, no al montar la pantalla -- ver el
-    // comentario de captureSaleLocation.
-    const location = await captureSaleLocation();
+    // comentario de captureDeviceLocation (services/location.ts). Fase 6 PR3
+    // extrajo esta funcion de aca (era inline, captureSaleLocation) para que
+    // CustomerPickerScreen tambien pueda usarla sin duplicar la logica.
+    const location = await captureDeviceLocation();
 
     const payload: CreateSaleInput = {
       clientGeneratedId: buildClientGeneratedId(),
