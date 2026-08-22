@@ -68,6 +68,6 @@ What's missing, grouped by theme:
 | 3. Load manifest | `load-manifest` | Merged into `main` |
 | 4. Visit/container model | `visit-container-model` | Merged into `main` |
 | 5. Point-in-time geolocation | `point-in-time-geolocation` | Merged into `main` |
-| 6. Customer picker + proximity | `customer-picker-proximity` | Planned |
+| 6. Customer picker + proximity | `customer-picker-proximity` | Merged into `main` |
 | 7. Payment proof photo | `payment-proof-photo` | Merged into `main` |
 | 8, 9 | — | Not started |
