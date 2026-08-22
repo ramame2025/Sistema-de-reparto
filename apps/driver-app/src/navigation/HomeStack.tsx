@@ -1,10 +1,12 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { AssignedCustomersScreen } from '../screens/AssignedCustomersScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { LoadManifestScreen } from '../screens/LoadManifestScreen';
 
 export type HomeStackParamList = {
   Home: undefined;
   LoadManifest: undefined;
+  AssignedCustomers: undefined;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -23,6 +25,12 @@ const Stack = createNativeStackNavigator<HomeStackParamList>();
  * button of its own — this is the design's explicit "headerShown decision
  * left to implementation" call, resolved here without touching
  * LoadManifestScreen.tsx.
+ *
+ * `AssignedCustomers` (Phase 4 PR4, docs/plans/live-dashboard-assigned-customers.md,
+ * Sub-change B, design decision #9) is wired the exact same way as
+ * `LoadManifest`: a plain pushed screen, own header — not a modal, since
+ * this is a read-only view opened a few times a day, not a picker invoked
+ * on every sale (phase 6's `CustomerPicker` precedent doesn't apply here).
  */
 export function HomeStack() {
   return (
@@ -32,6 +40,11 @@ export function HomeStack() {
         name="LoadManifest"
         component={LoadManifestScreen}
         options={{ headerShown: true, title: 'Cargar camión' }}
+      />
+      <Stack.Screen
+        name="AssignedCustomers"
+        component={AssignedCustomersScreen}
+        options={{ headerShown: true, title: 'Clientes de hoy' }}
       />
     </Stack.Navigator>
   );

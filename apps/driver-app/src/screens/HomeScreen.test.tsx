@@ -41,7 +41,7 @@ jest.mock('@react-navigation/native', () => {
 });
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { HomeScreen } from './HomeScreen';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
@@ -262,7 +262,11 @@ describe('HomeScreen/manifest status banner (PR5)', () => {
     await render(<HomeScreen />);
 
     await waitFor(() => expect(screen.getByTestId('home-manifest-error')).toBeTruthy());
-    expect(screen.getByText('No se pudo conectar con el servidor.')).toBeTruthy();
+    expect(
+      within(screen.getByTestId('home-manifest-error')).getByText(
+        'No se pudo conectar con el servidor.',
+      ),
+    ).toBeTruthy();
     expect(screen.queryByTestId('home-manifest-missing')).toBeNull();
     expect(screen.queryByTestId('home-manifest-loaded')).toBeNull();
   });
@@ -290,5 +294,99 @@ describe('HomeScreen/manifest status banner (PR5)', () => {
     fireEvent.press(screen.getByTestId('home-manifest-cta'));
 
     expect(mockedNavigate).toHaveBeenCalledWith('LoadManifest');
+  });
+});
+
+describe('HomeScreen/clientes de hoy card (PR4)', () => {
+  // mockedApiGet is a single jest.fn() shared by both the manifest-status
+  // fetch and this new assigned-customers-status fetch (same pattern as
+  // manifest status — a plain useState/useEffect fetch, not a Context).
+  // Tests here configure it with mockImplementation, branching on the URL,
+  // so both fetches resolve independently within the same test.
+  const routeApiGet = (assignedResponse: unknown) =>
+    mockedApiGet.mockImplementation((url: string) => {
+      if (url === '/load-manifests/mine') {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith('/driver-customer-assignments/me')) {
+        return Promise.resolve(assignedResponse);
+      }
+      return Promise.reject(new Error(`unexpected url: ${url}`));
+    });
+
+  it('fetches assigned-customers status on mount, alongside the manifest status fetch', async () => {
+    routeApiGet({ date: '2026-02-11', customers: [] });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(mockedApiGet).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/driver-customer-assignments\/me\?date=/),
+        { cache: 'no-store' },
+      ),
+    );
+  });
+
+  it('shows the assigned count when there are customers assigned today', async () => {
+    routeApiGet({
+      date: '2026-02-11',
+      customers: [
+        { id: 'c1', name: 'Kiosco Norte', customerType: 'comercio' },
+        { id: 'c2', name: 'Juan Perez', customerType: 'final' },
+      ],
+    });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-assigned-customers-count')).toBeTruthy());
+    expect(screen.getByText('Tenes 2 clientes asignados hoy.')).toBeTruthy();
+  });
+
+  it('shows an empty-copy status when there are no customers assigned today', async () => {
+    routeApiGet({ date: '2026-02-11', customers: [] });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-assigned-customers-empty')).toBeTruthy(),
+    );
+  });
+
+  it('shows a visible error when the assigned-customers fetch fails, without blocking the rest of the screen', async () => {
+    mockedApiGet.mockImplementation((url: string) => {
+      if (url === '/load-manifests/mine') {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith('/driver-customer-assignments/me')) {
+        return Promise.reject(new Error('No se pudo conectar con el servidor.'));
+      }
+      return Promise.reject(new Error(`unexpected url: ${url}`));
+    });
+    mockedUseSync.mockReturnValue({
+      ...baseSyncValue,
+      daySummary: { activeCount: 3, canceledCount: 1, activeTotal: 15000 },
+    });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-assigned-customers-error')).toBeTruthy(),
+    );
+    expect(screen.getByText('No se pudo conectar con el servidor.')).toBeTruthy();
+    expect(screen.getByText('Ventas activas hoy: 3')).toBeTruthy();
+  });
+
+  it('navigates to AssignedCustomers when the CTA is pressed', async () => {
+    routeApiGet({ date: '2026-02-11', customers: [] });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-assigned-customers-empty')).toBeTruthy(),
+    );
+
+    fireEvent.press(screen.getByTestId('home-assigned-customers-cta'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('AssignedCustomers');
   });
 });

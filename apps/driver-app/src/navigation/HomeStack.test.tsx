@@ -20,6 +20,12 @@ jest.mock('../screens/HomeScreen', () => {
           >
             <Text>Ir a cargar camion</Text>
           </Pressable>
+          <Pressable
+            testID="home-stack-go-to-assigned-customers"
+            onPress={() => navigation.navigate('AssignedCustomers')}
+          >
+            <Text>Ir a clientes de hoy</Text>
+          </Pressable>
         </>
       );
     },
@@ -36,6 +42,28 @@ jest.mock('../screens/LoadManifestScreen', () => {
         <>
           <Text testID="home-stack-fake-manifest">Manifest fake</Text>
           <Pressable testID="home-stack-go-back" onPress={() => navigation.goBack()}>
+            <Text>Volver</Text>
+          </Pressable>
+        </>
+      );
+    },
+  };
+});
+
+// PR4 (docs/plans/live-dashboard-assigned-customers.md, Sub-change B): the
+// same fake-screen pattern used for LoadManifest above, now for
+// AssignedCustomers — kept independent of AssignedCustomersScreen's own
+// AuthContext dependency, which is covered by its own test file.
+jest.mock('../screens/AssignedCustomersScreen', () => {
+  const { useNavigation } = require('@react-navigation/native');
+  const { Text, Pressable } = require('react-native');
+  return {
+    AssignedCustomersScreen: () => {
+      const navigation = useNavigation();
+      return (
+        <>
+          <Text testID="home-stack-fake-assigned-customers">Assigned customers fake</Text>
+          <Pressable testID="home-stack-go-back-from-assigned" onPress={() => navigation.goBack()}>
             <Text>Volver</Text>
           </Pressable>
         </>
@@ -68,5 +96,27 @@ describe('HomeStack', () => {
 
     await waitFor(() => expect(screen.getByTestId('home-stack-fake-home')).toBeTruthy());
     expect(screen.queryByTestId('home-stack-fake-manifest')).toBeNull();
+  });
+
+  it('registers AssignedCustomers as a route, reachable and navigable back to Home', async () => {
+    await render(
+      <NavigationContainer>
+        <HomeStack />
+      </NavigationContainer>,
+    );
+
+    expect(screen.getByTestId('home-stack-fake-home')).toBeTruthy();
+    expect(screen.queryByTestId('home-stack-fake-assigned-customers')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('home-stack-go-to-assigned-customers'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-stack-fake-assigned-customers')).toBeTruthy(),
+    );
+
+    fireEvent.press(screen.getByTestId('home-stack-go-back-from-assigned'));
+
+    await waitFor(() => expect(screen.getByTestId('home-stack-fake-home')).toBeTruthy());
+    expect(screen.queryByTestId('home-stack-fake-assigned-customers')).toBeNull();
   });
 });

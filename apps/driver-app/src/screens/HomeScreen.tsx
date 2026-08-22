@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { LoadManifestRecord } from '@distribuidor/shared';
+import type { LoadManifestRecord, MyAssignedCustomersResponse } from '@distribuidor/shared';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
@@ -10,7 +10,7 @@ import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
-import { useTruck } from '../context/TruckContext';
+import { localDay, useTruck } from '../context/TruckContext';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
@@ -58,9 +58,35 @@ export function HomeScreen() {
     }
   }, [api]);
 
+  // Clientes de hoy: fetched once on mount alongside the summary and
+  // manifest status, per the same "screen-local fetch, not a Context"
+  // pattern (docs/plans/live-dashboard-assigned-customers.md, Sub-change B,
+  // design decision #10 — only this card + AssignedCustomersScreen consume
+  // this data this phase).
+  const [assignedCustomersCount, setAssignedCustomersCount] = useState(0);
+  const [assignedCustomersError, setAssignedCustomersError] = useState<string | null>(null);
+
+  const refreshAssignedCustomersStatus = useCallback(async () => {
+    try {
+      const today = localDay();
+      const response = await api.get<MyAssignedCustomersResponse>(
+        `/driver-customer-assignments/me?date=${today}`,
+        { cache: 'no-store' },
+      );
+      setAssignedCustomersCount(response.customers.length);
+      setAssignedCustomersError(null);
+    } catch (error) {
+      // Visible-error posture, same as summaryError/manifestError — no silent catch.
+      const message =
+        error instanceof Error ? error.message : 'No se pudo verificar tus clientes de hoy.';
+      setAssignedCustomersError(message);
+    }
+  }, [api]);
+
   useEffect(() => {
     void refreshDaySummary();
     void refreshManifestStatus();
+    void refreshAssignedCustomersStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh once on mount only, matches the original's mount-time fetch
   }, []);
 
@@ -131,6 +157,31 @@ export function HomeScreen() {
           variant="secondary"
           onPress={() => navigation.navigate('LoadManifest')}
           testID="home-manifest-cta"
+        />
+      </Card>
+
+      <Card style={styles.card}>
+        <Text style={styles.fieldLabel}>Clientes de hoy</Text>
+
+        {assignedCustomersError ? (
+          <View testID="home-assigned-customers-error">
+            <FeedbackBanner message={assignedCustomersError} tone="error" />
+          </View>
+        ) : assignedCustomersCount > 0 ? (
+          <Text style={styles.manifestLoaded} testID="home-assigned-customers-count">
+            Tenes {assignedCustomersCount} clientes asignados hoy.
+          </Text>
+        ) : (
+          <Text style={styles.manifestMissing} testID="home-assigned-customers-empty">
+            No tenes clientes asignados hoy.
+          </Text>
+        )}
+
+        <Button
+          label="Ver clientes de hoy"
+          variant="secondary"
+          onPress={() => navigation.navigate('AssignedCustomers')}
+          testID="home-assigned-customers-cta"
         />
       </Card>
     </ScreenContainer>
