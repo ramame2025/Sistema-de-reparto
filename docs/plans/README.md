@@ -71,4 +71,4 @@ What's missing, grouped by theme:
 | 6. Customer picker + proximity | `customer-picker-proximity` | Merged into `main` |
 | 7. Payment proof photo | `payment-proof-photo` | Merged into `main` |
 | 8. Live dashboard + admin-assigned daily customer list | `live-dashboard-assigned-customers` | Merged into `main` |
-| 9 | — | Not started |
+| 9. Driver UX polish | `driver-ux-polish` | Merged into `main` (PR #32) |
