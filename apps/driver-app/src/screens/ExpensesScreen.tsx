@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
   EXPENSE_CATEGORIES,
@@ -12,6 +13,7 @@ import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner'
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../services/apiClient';
+import { API_URL } from '../services/config';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
@@ -23,15 +25,12 @@ import { typography } from '../theme/typography';
  * scope (design's SyncContext consumer contract lists only NewSaleScreen
  * for `trySendSale`/`enqueueSale`; confirmed against the original App.tsx,
  * whose `saveExpense` catch block only sets an error message, no
- * `enqueueSale`-equivalent branch). Receipt upload now goes through
- * `AuthContext.api.postForm` (design's ApiClient contract) instead of a raw
- * `fetch` call with a manually attached bearer header. No field, validation,
- * or copy redesign — only the transport (context hook + shared components)
- * changed, per the design's ExpensesScreen consumer contract (`api`,
- * `username`).
+ * `enqueueSale`-equivalent branch). Receipt upload goes through
+ * expo-file-system's `File.upload()` (a native multipart task) rather than
+ * `AuthContext.api.postForm` -- see `uploadReceipt` below for why.
  */
 export function ExpensesScreen() {
-  const { api, username } = useAuth();
+  const { api, username, requireAuthToken } = useAuth();
 
   const [category, setCategory] = useState<ExpenseCategory>('combustible');
   const [amount, setAmount] = useState('0');
@@ -77,14 +76,26 @@ export function ExpensesScreen() {
   };
 
   const uploadReceipt = async (uri: string) => {
-    const form = new FormData();
-    form.append('file', {
-      uri,
-      name: `receipt_${Date.now()}.jpg`,
-      type: 'image/jpeg',
-    } as never);
+    // Uses expo-file-system's File.upload() (native multipart task) instead
+    // of building a JS FormData -- the RN {uri,name,type} FormData shorthand
+    // throws "Unsupported FormDataPart implementation", and reconstructing a
+    // Blob from the file's bytes throws "Creating blobs from 'ArrayBuffer'
+    // ... are not supported" on this RN/Expo version. File.upload() bypasses
+    // both by handling the multipart encoding natively.
+    const localFile = new File(uri);
+    const token = requireAuthToken();
+    const result = await localFile.upload(`${API_URL}/uploads/receipt`, {
+      uploadType: UploadType.MULTIPART,
+      fieldName: 'file',
+      mimeType: 'image/jpeg',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
 
-    const uploaded = await api.postForm<{ url: string }>('/uploads/receipt', form);
+    if (result.status < 200 || result.status >= 300) {
+      throw new ApiError(result.status, result.body || `API ${result.status}`);
+    }
+
+    const uploaded = JSON.parse(result.body) as { url: string };
     return uploaded.url;
   };
 

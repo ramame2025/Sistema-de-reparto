@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
   CUSTOMER_TYPES,
@@ -29,6 +30,7 @@ import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { ApiError } from '../services/apiClient';
+import { API_URL } from '../services/config';
 import { captureDeviceLocation } from '../services/location';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
@@ -68,7 +70,7 @@ function SegmentButton<T extends string>({ label, active, onPress }: SegmentButt
 export function NewSaleScreen() {
   const { trySendSale, enqueueSale, trySendEmptyVisit, enqueueEmptyVisit, refreshDaySummary } =
     useSync();
-  const { api, username } = useAuth();
+  const { api, username, requireAuthToken } = useAuth();
   const { truck, status: truckStatus, error: truckError } = useTruck();
   const navigation = useNavigation<NewSaleScreenNavigationProp>();
   const route = useRoute<RouteProp<NewSaleStackParamList, 'Sale'>>();
@@ -160,14 +162,26 @@ export function NewSaleScreen() {
    * renderiza cuando paymentMethod !== 'efectivo' (Open Question 2).
    */
   const uploadPaymentProof = async (uri: string) => {
-    const form = new FormData();
-    form.append('file', {
-      uri,
-      name: `payment_proof_${Date.now()}.jpg`,
-      type: 'image/jpeg',
-    } as never);
+    // Uses expo-file-system's File.upload() (native multipart task) instead
+    // of building a JS FormData -- the RN {uri,name,type} FormData shorthand
+    // throws "Unsupported FormDataPart implementation", and reconstructing a
+    // Blob from the file's bytes throws "Creating blobs from 'ArrayBuffer'
+    // ... are not supported" on this RN/Expo version. File.upload() bypasses
+    // both by handling the multipart encoding natively.
+    const localFile = new File(uri);
+    const token = requireAuthToken();
+    const result = await localFile.upload(`${API_URL}/uploads/receipt`, {
+      uploadType: UploadType.MULTIPART,
+      fieldName: 'file',
+      mimeType: 'image/jpeg',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
 
-    const uploaded = await api.postForm<{ url: string }>('/uploads/receipt', form);
+    if (result.status < 200 || result.status >= 300) {
+      throw new ApiError(result.status, result.body || `API ${result.status}`);
+    }
+
+    const uploaded = JSON.parse(result.body) as { url: string };
     return uploaded.url;
   };
 

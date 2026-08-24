@@ -20,6 +20,7 @@ jest.mock('../context/TruckContext', () => {
 
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import * as ExpoFileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { LoadManifestScreen } from './LoadManifestScreen';
 import { useAuth } from '../context/AuthContext';
@@ -34,6 +35,10 @@ const mockedRequestMediaLibraryPermissionsAsync =
   ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock;
 const mockedRequestCameraPermissionsAsync =
   ImagePicker.requestCameraPermissionsAsync as jest.Mock;
+const mockedFile = ExpoFileSystem.File as unknown as jest.Mock;
+// mockUpload is a manual-mock-only export not present in the real module's
+// types; see __mocks__/expo-file-system.ts.
+const mockUpload = (ExpoFileSystem as unknown as { mockUpload: jest.Mock }).mockUpload;
 
 const assignedTruck = {
   assignmentId: 'a-1',
@@ -54,19 +59,26 @@ const baseTruckValue = {
   reload: jest.fn(),
 };
 
+const successUpload = (url: string) => ({
+  body: JSON.stringify({ url }),
+  status: 200,
+  headers: {},
+});
+
 let mockedApiPost: jest.Mock;
-let mockedApiPostForm: jest.Mock;
 
 beforeEach(() => {
   mockedApiPost = jest.fn();
-  mockedApiPostForm = jest.fn();
+  mockedFile.mockClear();
+  mockUpload.mockClear();
+  mockUpload.mockResolvedValue(successUpload('https://cdn.test/mock-upload.jpg'));
 
   mockedUseAuth.mockReturnValue({
     status: 'authenticated' as const,
     token: 'tok',
     username: 'chofer1',
     loading: false,
-    api: { post: mockedApiPost, postForm: mockedApiPostForm },
+    api: { post: mockedApiPost },
     login: jest.fn(),
     logout: jest.fn(),
     requireAuthToken: jest.fn(() => 'tok'),
@@ -198,7 +210,7 @@ describe('LoadManifestScreen/photo (optional)', () => {
         screen.getByText('Permiso de galeria requerido para adjuntar la foto del remito.'),
       ).toBeTruthy(),
     );
-    expect(mockedApiPostForm).not.toHaveBeenCalled();
+    expect(mockUpload).not.toHaveBeenCalled();
   });
 
   it('does not attempt an upload when the gallery picker is canceled', async () => {
@@ -208,38 +220,48 @@ describe('LoadManifestScreen/photo (optional)', () => {
     await fireEvent.press(screen.getByTestId('load-manifest-pick-gallery'));
 
     await waitFor(() => expect(mockedLaunchImageLibraryAsync).toHaveBeenCalledTimes(1));
-    expect(mockedApiPostForm).not.toHaveBeenCalled();
+    expect(mockUpload).not.toHaveBeenCalled();
     expect(screen.queryByTestId('load-manifest-photo-preview')).toBeNull();
   });
 
-  it('uploads the picked image via api.postForm and stores the resulting reference', async () => {
-    mockedApiPostForm.mockResolvedValue({ url: 'https://cdn.test/manifest-1.jpg' });
+  it('uploads the picked image via File.upload() and stores the resulting reference', async () => {
+    mockUpload.mockResolvedValue(successUpload('https://cdn.test/manifest-1.jpg'));
 
     await render(<LoadManifestScreen />);
     await fireEvent.press(screen.getByTestId('load-manifest-pick-gallery'));
 
-    await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(1));
-    expect(mockedApiPostForm).toHaveBeenCalledWith('/uploads/receipt', expect.any(FormData));
+    await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
+    // Uses expo-file-system's File.upload() (native multipart task) -- the RN
+    // {uri,name,type} FormData shorthand throws "Unsupported FormDataPart
+    // implementation", and rebuilding a Blob from the file's bytes throws
+    // "Creating blobs from 'ArrayBuffer' ... are not supported" on this
+    // RN/Expo version. File.upload() bypasses both.
+    expect(mockedFile).toHaveBeenCalledWith('file://fake.jpg');
+    expect(mockUpload).toHaveBeenCalledWith(
+      'http://localhost:4000/uploads/receipt',
+      expect.objectContaining({ fieldName: 'file', mimeType: 'image/jpeg' }),
+    );
     expect(screen.getByTestId('load-manifest-photo-preview').props.source).toEqual({
       uri: 'https://cdn.test/manifest-1.jpg',
     });
   });
 
   it('uploads a captured photo via the camera the same way', async () => {
-    mockedApiPostForm.mockResolvedValue({ url: 'https://cdn.test/manifest-2.jpg' });
+    mockUpload.mockResolvedValue(successUpload('https://cdn.test/manifest-2.jpg'));
 
     await render(<LoadManifestScreen />);
     await fireEvent.press(screen.getByTestId('load-manifest-capture-camera'));
 
-    await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
+    expect(mockedFile).toHaveBeenCalledWith('file://fake.jpg');
     expect(screen.getByTestId('load-manifest-photo-preview').props.source).toEqual({
       uri: 'https://cdn.test/manifest-2.jpg',
     });
   });
 
   it('shows a distinct error when the upload fails, without losing retry ability', async () => {
-    mockedApiPostForm.mockRejectedValueOnce(new Error('Network request failed'));
-    mockedApiPostForm.mockResolvedValueOnce({ url: 'https://cdn.test/manifest-3.jpg' });
+    mockUpload.mockRejectedValueOnce(new Error('Network request failed'));
+    mockUpload.mockResolvedValueOnce(successUpload('https://cdn.test/manifest-3.jpg'));
 
     await render(<LoadManifestScreen />);
     await fireEvent.press(screen.getByTestId('load-manifest-pick-gallery'));
@@ -251,14 +273,14 @@ describe('LoadManifestScreen/photo (optional)', () => {
 
     await fireEvent.press(screen.getByTestId('load-manifest-pick-gallery'));
 
-    await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(2));
     expect(screen.getByTestId('load-manifest-photo-preview').props.source).toEqual({
       uri: 'https://cdn.test/manifest-3.jpg',
     });
   });
 
   it('does not render a hand-editable text field for the photo reference', async () => {
-    mockedApiPostForm.mockResolvedValue({ url: 'https://cdn.test/manifest-4.jpg' });
+    mockUpload.mockResolvedValue(successUpload('https://cdn.test/manifest-4.jpg'));
 
     await render(<LoadManifestScreen />);
 
@@ -266,7 +288,7 @@ describe('LoadManifestScreen/photo (optional)', () => {
 
     await fireEvent.press(screen.getByTestId('load-manifest-pick-gallery'));
 
-    await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId('load-manifest-photo-ref')).toBeNull();
   });
 });

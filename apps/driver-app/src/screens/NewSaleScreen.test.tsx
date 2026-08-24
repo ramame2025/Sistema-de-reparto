@@ -46,6 +46,7 @@ jest.mock('@react-navigation/native', () => {
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
+import * as ExpoFileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { NewSaleScreen } from './NewSaleScreen';
@@ -58,6 +59,10 @@ const mockedUseSync = useSync as jest.Mock;
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseTruck = useTruck as jest.Mock;
 const mockedLaunchImageLibraryAsync = ImagePicker.launchImageLibraryAsync as jest.Mock;
+const mockedFile = ExpoFileSystem.File as unknown as jest.Mock;
+// mockUpload is a manual-mock-only export not present in the real module's
+// types; see __mocks__/expo-file-system.ts.
+const mockUpload = (ExpoFileSystem as unknown as { mockUpload: jest.Mock }).mockUpload;
 const mockedRequestForegroundPermissionsAsync =
   Location.requestForegroundPermissionsAsync as jest.Mock;
 const mockedGetCurrentPositionAsync = Location.getCurrentPositionAsync as jest.Mock;
@@ -101,11 +106,17 @@ const baseAuthValue = {
   token: 'tok',
   username: 'chofer1',
   loading: false,
-  api: { patch: jest.fn(), postForm: jest.fn() },
+  api: { patch: jest.fn() },
   login: jest.fn(),
   logout: jest.fn(),
   requireAuthToken: jest.fn(() => 'tok'),
 };
+
+const successUpload = (url: string) => ({
+  body: JSON.stringify({ url }),
+  status: 200,
+  headers: {},
+});
 
 let mockedTrySendSale: jest.Mock;
 let mockedEnqueueSale: jest.Mock;
@@ -113,7 +124,6 @@ let mockedTrySendEmptyVisit: jest.Mock;
 let mockedEnqueueEmptyVisit: jest.Mock;
 let mockedRefreshDaySummary: jest.Mock;
 let mockedApiPatch: jest.Mock;
-let mockedApiPostForm: jest.Mock;
 
 beforeEach(() => {
   mockedRouteParams = undefined;
@@ -124,7 +134,9 @@ beforeEach(() => {
   mockedEnqueueEmptyVisit = jest.fn().mockResolvedValue(1);
   mockedRefreshDaySummary = jest.fn().mockResolvedValue(undefined);
   mockedApiPatch = jest.fn();
-  mockedApiPostForm = jest.fn();
+  mockedFile.mockClear();
+  mockUpload.mockClear();
+  mockUpload.mockResolvedValue(successUpload('https://cdn.test/mock-upload.jpg'));
 
   mockedUseSync.mockReturnValue({
     ...baseSyncValue,
@@ -137,7 +149,7 @@ beforeEach(() => {
   mockedUseTruck.mockReturnValue(baseTruckValue);
   mockedUseAuth.mockReturnValue({
     ...baseAuthValue,
-    api: { patch: mockedApiPatch, postForm: mockedApiPostForm },
+    api: { patch: mockedApiPatch },
   });
 
   mockedLaunchImageLibraryAsync.mockClear();
@@ -482,15 +494,24 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
   });
 
   it('uploads a picked photo and includes paymentProofRef in the Guardar venta payload', async () => {
-    mockedApiPostForm.mockResolvedValue({ url: 'https://cdn.test/proof-1.jpg' });
+    mockUpload.mockResolvedValue(successUpload('https://cdn.test/proof-1.jpg'));
     mockedTrySendSale.mockResolvedValue('sale-123');
 
     await renderSaleScreen();
     await fireEvent.press(screen.getByText('transferencia'));
     await fireEvent.press(screen.getByTestId('new-sale-payment-proof-pick-gallery'));
 
-    await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(1));
-    expect(mockedApiPostForm).toHaveBeenCalledWith('/uploads/receipt', expect.any(FormData));
+    await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
+    // Uses expo-file-system's File.upload() (native multipart task) -- the RN
+    // {uri,name,type} FormData shorthand throws "Unsupported FormDataPart
+    // implementation", and rebuilding a Blob from the file's bytes throws
+    // "Creating blobs from 'ArrayBuffer' ... are not supported" on this
+    // RN/Expo version. File.upload() bypasses both.
+    expect(mockedFile).toHaveBeenCalledWith('file://fake.jpg');
+    expect(mockUpload).toHaveBeenCalledWith(
+      'http://localhost:4000/uploads/receipt',
+      expect.objectContaining({ fieldName: 'file', mimeType: 'image/jpeg' }),
+    );
 
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     await fireEvent.press(screen.getByText('Guardar venta'));

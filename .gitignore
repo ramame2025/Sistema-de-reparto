@@ -12,6 +12,7 @@ apps/driver-app/dist/
 # NestJS
 apps/api/dist/
 apps/api/coverage/
+apps/api/uploads/
 
 # Shared
 packages/shared/dist/
