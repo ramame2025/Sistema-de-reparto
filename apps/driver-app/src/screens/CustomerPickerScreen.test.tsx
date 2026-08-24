@@ -25,10 +25,12 @@ jest.mock('@react-navigation/native', () => {
 
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import type { CustomerRecord } from '@distribuidor/shared';
 import { CustomerPickerScreen } from './CustomerPickerScreen';
 import { useAuth } from '../context/AuthContext';
 import { captureDeviceLocation } from '../services/location';
+import { MIN_TOUCH_TARGET } from '../theme/spacing';
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedCaptureDeviceLocation = captureDeviceLocation as jest.Mock;
@@ -150,6 +152,37 @@ describe('CustomerPickerScreen/seleccion', () => {
     expect(mockedNavigate).toHaveBeenCalledWith('Sale', {
       pickedCustomer: { id: 'customer-1', name: 'Kiosco Sur', customerType: 'comercio' },
     });
+  });
+});
+
+describe('CustomerPickerScreen/accesibilidad', () => {
+  it('enforces a minimum touch target height on each customer row', async () => {
+    await render(<CustomerPickerScreen />);
+    await waitFor(() => expect(screen.getByText('Kiosco Sur')).toBeTruthy());
+
+    const row = screen.getByTestId('customer-picker-item-customer-1');
+    const flatStyle = StyleSheet.flatten(row.props.style);
+    expect(flatStyle.minHeight).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+  });
+
+  it('shows a loading indicator while the customer list fetch is in flight', async () => {
+    let resolveFetch: (value: unknown) => void = () => {};
+    mockedApiGet.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    await render(<CustomerPickerScreen />);
+
+    const loadingRow = screen.getByTestId('customer-picker-loading');
+    const hasActivityIndicator = loadingRow.children.some(
+      (child) => typeof child !== 'string' && child.type === 'ActivityIndicator',
+    );
+    expect(hasActivityIndicator).toBe(true);
+
+    resolveFetch(customers);
+    await waitFor(() => expect(screen.queryByTestId('customer-picker-loading')).toBeNull());
   });
 });
 

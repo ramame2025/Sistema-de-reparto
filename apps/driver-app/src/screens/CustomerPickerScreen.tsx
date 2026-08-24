@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
@@ -19,7 +19,7 @@ import { ApiError } from '../services/apiClient';
 import { captureDeviceLocation, type CapturedLocation } from '../services/location';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { colors } from '../theme/colors';
-import { spacing } from '../theme/spacing';
+import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
 type CustomerPickerNavigationProp = NativeStackNavigationProp<
@@ -201,9 +201,10 @@ export function CustomerPickerScreen() {
       {error && <FeedbackBanner message={error} tone="error" />}
 
       {loading ? (
-        <Text style={styles.apiHint} testID="customer-picker-loading">
-          Cargando clientes...
-        </Text>
+        <View style={styles.loadingRow} testID="customer-picker-loading">
+          <ActivityIndicator color={colors.primary} />
+          <Text style={styles.loadingText}>Cargando clientes...</Text>
+        </View>
       ) : visibleCustomers.length === 0 ? (
         <EmptyState
           title="Sin resultados"
@@ -279,10 +280,15 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: spacing.sm,
   },
-  apiHint: {
-    fontSize: typography.sizes.xs,
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  loadingText: {
     color: colors.textSecondary,
-    padding: spacing.md,
+    fontSize: typography.sizes.sm,
   },
   input: {
     borderWidth: 1,
@@ -300,6 +306,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
   },
   customerInfo: {
     flexShrink: 1,

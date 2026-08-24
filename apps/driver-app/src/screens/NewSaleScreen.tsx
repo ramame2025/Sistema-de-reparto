@@ -15,6 +15,10 @@ import {
   type ProductCode,
   type RecordEmptyVisitInput,
   type SaleRecord,
+  type UpdateSaleInput,
+  validateCreateSaleInput,
+  validateRecordEmptyVisitInput,
+  validateUpdateSaleInput,
 } from '@distribuidor/shared';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
@@ -71,7 +75,7 @@ export function NewSaleScreen() {
 
   const [customerType, setCustomerType] = useState<CustomerType>('final');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
-  const [customerName, setCustomerName] = useState('Cliente de prueba');
+  const [customerName, setCustomerName] = useState('');
   // Set only when a customer was picked via CustomerPickerScreen (Phase 6
   // PR2, docs/plans/customer-picker-proximity.md design decision #7: params
   // returned via navigation.navigate, no shared Context). Cleared the
@@ -272,6 +276,16 @@ export function NewSaleScreen() {
       ...(customerId ? { customerId } : {}),
     };
 
+    // Reuses the shared validator instead of hand-rolling a customerName
+    // check: catches a blank/whitespace-only name client-side, before it
+    // either hits the API (400) or, worse, gets stuck forever in the
+    // offline sync queue with no remediation UI.
+    const validationErrors = validateCreateSaleInput(payload);
+    if (validationErrors.length > 0) {
+      showMessage(validationErrors[0], 'error');
+      return;
+    }
+
     try {
       setSaving(true);
       const saleId = await trySendSale(payload);
@@ -325,7 +339,7 @@ export function NewSaleScreen() {
       return;
     }
 
-    const payload = {
+    const payload: UpdateSaleInput = {
       driverName: username,
       truckId: truck?.truckId,
       truckCode: truck?.code,
@@ -334,10 +348,22 @@ export function NewSaleScreen() {
       paymentMethod,
       items: currentItems,
       reason: editReason,
+      // Bug fix (driver-ux-polish): saveSale's payload already spreads
+      // customerId conditionally -- this one didn't, so editing a sale
+      // linked to a Customer silently dropped that link on every edit
+      // (the API's resolveCustomerAndTruck treats customerId === undefined
+      // as "clear the link").
+      ...(customerId ? { customerId } : {}),
     };
 
     if (payload.items.length === 0) {
       showMessage('Agrega al menos un producto para editar la venta.', 'error');
+      return;
+    }
+
+    const validationErrors = validateUpdateSaleInput(payload);
+    if (validationErrors.length > 0) {
+      showMessage(validationErrors[0], 'error');
       return;
     }
 
@@ -378,6 +404,12 @@ export function NewSaleScreen() {
       customerName,
       customerType,
     };
+
+    const validationErrors = validateRecordEmptyVisitInput(payload);
+    if (validationErrors.length > 0) {
+      showMessage(validationErrors[0], 'error');
+      return;
+    }
 
     try {
       setRecordingVisit(true);
@@ -563,6 +595,7 @@ export function NewSaleScreen() {
         />
         <Button
           label={updating ? 'Actualizando...' : 'Editar ultima venta'}
+          variant="secondary"
           onPress={() => void updateLastSale()}
           disabled={updating}
           testID="new-sale-edit-button"
@@ -582,6 +615,7 @@ export function NewSaleScreen() {
         />
         <Button
           label={canceling ? 'Anulando...' : 'Anular ultima venta'}
+          variant="secondary"
           onPress={() => void cancelLastSale()}
           disabled={canceling}
           testID="new-sale-cancel-button"

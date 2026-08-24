@@ -71,6 +71,7 @@ describe('ExpensesScreen/save expense', () => {
     );
     expect(screen.getByText('Gasto guardado correctamente.')).toBeTruthy();
     expect(screen.getByTestId('expense-amount').props.value).toBe('0');
+    expect(screen.queryByTestId('expense-receipt-ref')).toBeNull();
   });
 
   it('shows distinct failure feedback when api.post rejects, without enqueueing offline', async () => {
@@ -106,9 +107,9 @@ describe('ExpensesScreen/pick receipt from gallery', () => {
 
     await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(1));
     expect(mockedApiPostForm).toHaveBeenCalledWith('/uploads/receipt', expect.any(FormData));
-    expect(screen.getByTestId('expense-receipt-ref').props.value).toBe(
-      'https://cdn.test/receipt-1.jpg',
-    );
+    expect(screen.getByTestId('expense-receipt-preview').props.source).toEqual({
+      uri: 'https://cdn.test/receipt-1.jpg',
+    });
     expect(screen.getByText('Comprobante cargado correctamente.')).toBeTruthy();
   });
 
@@ -120,7 +121,7 @@ describe('ExpensesScreen/pick receipt from gallery', () => {
 
     await waitFor(() => expect(mockedLaunchImageLibraryAsync).toHaveBeenCalledTimes(1));
     expect(mockedApiPostForm).not.toHaveBeenCalled();
-    expect(screen.getByTestId('expense-receipt-ref').props.value).toBe('');
+    expect(screen.queryByTestId('expense-receipt-preview')).toBeNull();
   });
 });
 
@@ -133,9 +134,9 @@ describe('ExpensesScreen/capture receipt from camera', () => {
 
     await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(1));
     expect(mockedApiPostForm).toHaveBeenCalledWith('/uploads/receipt', expect.any(FormData));
-    expect(screen.getByTestId('expense-receipt-ref').props.value).toBe(
-      'https://cdn.test/receipt-2.jpg',
-    );
+    expect(screen.getByTestId('expense-receipt-preview').props.source).toEqual({
+      uri: 'https://cdn.test/receipt-2.jpg',
+    });
     expect(screen.getByText('Comprobante capturado y cargado correctamente.')).toBeTruthy();
   });
 
@@ -159,7 +160,7 @@ describe('ExpensesScreen/upload failure', () => {
     await fireEvent.press(screen.getByTestId('expense-pick-gallery'));
 
     await waitFor(() => expect(screen.getByText('No se pudo subir el comprobante.')).toBeTruthy());
-    expect(screen.getByTestId('expense-receipt-ref').props.value).toBe('');
+    expect(screen.queryByTestId('expense-receipt-preview')).toBeNull();
     expect(screen.getByTestId('expense-pick-gallery').props.accessibilityState.disabled).toBe(
       false,
     );
@@ -168,8 +169,8 @@ describe('ExpensesScreen/upload failure', () => {
 
     await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(2));
     expect(screen.getByText('Comprobante cargado correctamente.')).toBeTruthy();
-    expect(screen.getByTestId('expense-receipt-ref').props.value).toBe(
-      'https://cdn.test/receipt-3.jpg',
-    );
+    expect(screen.getByTestId('expense-receipt-preview').props.source).toEqual({
+      uri: 'https://cdn.test/receipt-3.jpg',
+    });
   });
 });

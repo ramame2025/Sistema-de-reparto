@@ -209,7 +209,7 @@ describe('LoadManifestScreen/photo (optional)', () => {
 
     await waitFor(() => expect(mockedLaunchImageLibraryAsync).toHaveBeenCalledTimes(1));
     expect(mockedApiPostForm).not.toHaveBeenCalled();
-    expect(screen.getByTestId('load-manifest-photo-ref').props.value).toBe('');
+    expect(screen.queryByTestId('load-manifest-photo-preview')).toBeNull();
   });
 
   it('uploads the picked image via api.postForm and stores the resulting reference', async () => {
@@ -220,9 +220,9 @@ describe('LoadManifestScreen/photo (optional)', () => {
 
     await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(1));
     expect(mockedApiPostForm).toHaveBeenCalledWith('/uploads/receipt', expect.any(FormData));
-    expect(screen.getByTestId('load-manifest-photo-ref').props.value).toBe(
-      'https://cdn.test/manifest-1.jpg',
-    );
+    expect(screen.getByTestId('load-manifest-photo-preview').props.source).toEqual({
+      uri: 'https://cdn.test/manifest-1.jpg',
+    });
   });
 
   it('uploads a captured photo via the camera the same way', async () => {
@@ -232,9 +232,9 @@ describe('LoadManifestScreen/photo (optional)', () => {
     await fireEvent.press(screen.getByTestId('load-manifest-capture-camera'));
 
     await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(1));
-    expect(screen.getByTestId('load-manifest-photo-ref').props.value).toBe(
-      'https://cdn.test/manifest-2.jpg',
-    );
+    expect(screen.getByTestId('load-manifest-photo-preview').props.source).toEqual({
+      uri: 'https://cdn.test/manifest-2.jpg',
+    });
   });
 
   it('shows a distinct error when the upload fails, without losing retry ability', async () => {
@@ -247,14 +247,27 @@ describe('LoadManifestScreen/photo (optional)', () => {
     await waitFor(() =>
       expect(screen.getByText('No se pudo subir la foto del remito.')).toBeTruthy(),
     );
-    expect(screen.getByTestId('load-manifest-photo-ref').props.value).toBe('');
+    expect(screen.queryByTestId('load-manifest-photo-preview')).toBeNull();
 
     await fireEvent.press(screen.getByTestId('load-manifest-pick-gallery'));
 
     await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(2));
-    expect(screen.getByTestId('load-manifest-photo-ref').props.value).toBe(
-      'https://cdn.test/manifest-3.jpg',
-    );
+    expect(screen.getByTestId('load-manifest-photo-preview').props.source).toEqual({
+      uri: 'https://cdn.test/manifest-3.jpg',
+    });
+  });
+
+  it('does not render a hand-editable text field for the photo reference', async () => {
+    mockedApiPostForm.mockResolvedValue({ url: 'https://cdn.test/manifest-4.jpg' });
+
+    await render(<LoadManifestScreen />);
+
+    expect(screen.queryByTestId('load-manifest-photo-ref')).toBeNull();
+
+    await fireEvent.press(screen.getByTestId('load-manifest-pick-gallery'));
+
+    await waitFor(() => expect(mockedApiPostForm).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('load-manifest-photo-ref')).toBeNull();
   });
 });
 

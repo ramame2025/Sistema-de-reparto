@@ -180,14 +180,6 @@ export function ExpensesScreen() {
           onChangeText={setNote}
           placeholder="Descripcion (opcional)"
         />
-        <TextInput
-          style={styles.input}
-          value={receiptRef}
-          onChangeText={setReceiptRef}
-          placeholder="Referencia comprobante (opcional)"
-          testID="expense-receipt-ref"
-        />
-
         <Button
           label={uploadingReceipt ? 'Subiendo comprobante...' : 'Adjuntar desde galeria'}
           variant="secondary"
@@ -207,7 +199,12 @@ export function ExpensesScreen() {
         {receiptRef.length > 0 && (
           <View style={styles.receiptPreviewWrap}>
             <Text style={styles.apiHint}>Comprobante adjunto:</Text>
-            <Image source={{ uri: receiptRef }} style={styles.receiptPreview} resizeMode="cover" />
+            <Image
+              source={{ uri: receiptRef }}
+              style={styles.receiptPreview}
+              resizeMode="cover"
+              testID="expense-receipt-preview"
+            />
           </View>
         )}
 

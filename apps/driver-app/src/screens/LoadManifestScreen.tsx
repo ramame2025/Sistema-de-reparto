@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
   PRODUCT_CODES,
@@ -232,13 +232,6 @@ export function LoadManifestScreen() {
 
       <Card style={styles.card}>
         <Text style={styles.fieldLabel}>Foto del remito (opcional)</Text>
-        <TextInput
-          style={styles.input}
-          value={photoRef}
-          onChangeText={setPhotoRef}
-          placeholder="Referencia foto (opcional)"
-          testID="load-manifest-photo-ref"
-        />
         <Button
           label={uploadingPhoto ? 'Subiendo foto...' : 'Adjuntar desde galeria'}
           variant="secondary"
@@ -253,6 +246,17 @@ export function LoadManifestScreen() {
           disabled={uploadingPhoto}
           testID="load-manifest-capture-camera"
         />
+        {photoRef.length > 0 && (
+          <View style={styles.photoPreviewWrap}>
+            <Text style={styles.apiHint}>Foto adjunta:</Text>
+            <Image
+              source={{ uri: photoRef }}
+              style={styles.photoPreview}
+              resizeMode="cover"
+              testID="load-manifest-photo-preview"
+            />
+          </View>
+        )}
       </Card>
 
       <Card style={styles.card}>
@@ -315,6 +319,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     backgroundColor: colors.surface,
+  },
+  photoPreviewWrap: {
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  photoPreview: {
+    width: '100%',
+    height: 160,
+    borderRadius: 10,
+    marginTop: spacing.xs,
   },
   productRow: {
     flexDirection: 'row',

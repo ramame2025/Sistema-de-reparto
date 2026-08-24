@@ -45,12 +45,14 @@ jest.mock('@react-navigation/native', () => {
 
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { NewSaleScreen } from './NewSaleScreen';
 import { useSync } from '../context/SyncContext';
 import { useAuth } from '../context/AuthContext';
 import { useTruck } from '../context/TruckContext';
+import { colors } from '../theme/colors';
 
 const mockedUseSync = useSync as jest.Mock;
 const mockedUseAuth = useAuth as jest.Mock;
@@ -152,6 +154,16 @@ beforeEach(() => {
   });
 });
 
+// Extracted so every test gets a non-blank customerName by default (matching
+// the pre-fix 'Cliente de prueba' literal that used to live inside the
+// component's initial state) -- the blank-guard tests below opt out of this
+// helper (or clear the field afterward) to exercise the new validation path.
+const renderSaleScreen = async (customerName = 'Cliente de prueba') => {
+  const result = await render(<NewSaleScreen />);
+  await fireEvent.changeText(screen.getByPlaceholderText('Nombre del cliente'), customerName);
+  return result;
+};
+
 const saveOneSale = async (saleId: string) => {
   mockedTrySendSale.mockResolvedValueOnce(saleId);
   await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
@@ -163,7 +175,7 @@ describe('NewSaleScreen/online success', () => {
   it('submits, resets the form, refreshes the summary, and shows success feedback', async () => {
     mockedTrySendSale.mockResolvedValue('sale-123');
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     await fireEvent.press(screen.getByText('Guardar venta'));
 
@@ -179,7 +191,7 @@ describe('NewSaleScreen/offline fallback', () => {
   it('falls back to enqueueSale with a cause when trySendSale fails, showing distinct feedback', async () => {
     mockedTrySendSale.mockRejectedValue(new Error('Network request failed'));
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G15'));
     await fireEvent.press(screen.getByText('Guardar venta'));
 
@@ -195,7 +207,7 @@ describe('NewSaleScreen/offline fallback', () => {
 
 describe('NewSaleScreen/product quantities', () => {
   it('updates the derived total via calculateSaleTotal as steppers change', async () => {
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
 
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     expect(screen.getByText('Total: $8.500')).toBeTruthy();
@@ -210,7 +222,7 @@ describe('NewSaleScreen/product quantities', () => {
 
 describe('NewSaleScreen/camion asignado', () => {
   it('shows the assigned truck read-only, with no free-text input to type it', async () => {
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
 
     expect(screen.getByTestId('new-sale-assigned-truck')).toBeTruthy();
     expect(screen.getByText(/CAMION-07/)).toBeTruthy();
@@ -219,7 +231,7 @@ describe('NewSaleScreen/camion asignado', () => {
   });
 
   it('sends truckId and truckCode from the assignment, not from anything the driver typed', async () => {
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
 
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     await fireEvent.press(screen.getByText('Guardar venta'));
@@ -235,7 +247,7 @@ describe('NewSaleScreen/camion asignado', () => {
     // Sin camion no se puede cargar una venta: quedaria sin unidad asignada.
     mockedUseTruck.mockReturnValue({ ...baseTruckValue, truck: null });
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
 
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     await fireEvent.press(screen.getByText('Guardar venta'));
@@ -255,7 +267,7 @@ describe('NewSaleScreen/camion asignado', () => {
       error: 'No se pudo consultar tu camion asignado.',
     });
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
 
     expect(screen.getByTestId('new-sale-truck-error')).toBeTruthy();
     expect(screen.queryByTestId('new-sale-no-truck')).toBeNull();
@@ -264,7 +276,7 @@ describe('NewSaleScreen/camion asignado', () => {
 
 describe('NewSaleScreen/cancel last sale', () => {
   it('requires a non-empty cancelReason before calling the cancel endpoint', async () => {
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await saveOneSale('sale-123');
 
     await fireEvent.press(screen.getByTestId('new-sale-cancel-button'));
@@ -280,7 +292,7 @@ describe('NewSaleScreen/cancel last sale', () => {
   it('calls the cancel endpoint via api and shows success feedback', async () => {
     mockedApiPatch.mockResolvedValue({});
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await saveOneSale('sale-123');
 
     await fireEvent.changeText(
@@ -301,7 +313,7 @@ describe('NewSaleScreen/cancel last sale', () => {
 
 describe('NewSaleScreen/edit last sale', () => {
   it('requires a non-empty editReason before calling the update endpoint', async () => {
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await saveOneSale('sale-123');
 
     await fireEvent.changeText(screen.getByPlaceholderText('Motivo de edicion'), '');
@@ -318,7 +330,7 @@ describe('NewSaleScreen/edit last sale', () => {
   it('calls the update endpoint via api and shows success feedback', async () => {
     mockedApiPatch.mockResolvedValue({});
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await saveOneSale('sale-123');
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
 
@@ -336,7 +348,7 @@ describe('NewSaleScreen/edit last sale', () => {
 
 describe('NewSaleScreen/envase devuelto toggle (visit-container-model Unit 4)', () => {
   it('renders unmarked by default and flips state when pressed', async () => {
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
 
     const toggle = screen.getByTestId('new-sale-container-returned-toggle');
     expect(toggle).toBeTruthy();
@@ -352,7 +364,7 @@ describe('NewSaleScreen/envase devuelto toggle (visit-container-model Unit 4)', 
   it('omits containerReturned from the Guardar venta payload when never touched', async () => {
     mockedTrySendSale.mockResolvedValue('sale-123');
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     await fireEvent.press(screen.getByText('Guardar venta'));
 
@@ -364,7 +376,7 @@ describe('NewSaleScreen/envase devuelto toggle (visit-container-model Unit 4)', 
   it('includes containerReturned:true in the Guardar venta payload once toggled on', async () => {
     mockedTrySendSale.mockResolvedValue('sale-123');
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-container-returned-toggle'));
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     await fireEvent.press(screen.getByText('Guardar venta'));
@@ -376,7 +388,7 @@ describe('NewSaleScreen/envase devuelto toggle (visit-container-model Unit 4)', 
 
 describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model Unit 4)', () => {
   it('renders as a distinct, separately labeled action from Guardar venta', async () => {
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
 
     expect(screen.getByTestId('new-sale-record-visit-button')).toBeTruthy();
     expect(screen.getByText('Registrar visita sin venta')).toBeTruthy();
@@ -385,7 +397,7 @@ describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model
   it('does not require any items loaded, unlike Guardar venta', async () => {
     mockedTrySendEmptyVisit.mockResolvedValue('visit-1');
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     // No qty increment pressed -- zero items in the cart.
     await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
 
@@ -396,7 +408,7 @@ describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model
   it('calls trySendEmptyVisit with an items/paymentMethod-free payload and shows a distinct confirmation', async () => {
     mockedTrySendEmptyVisit.mockResolvedValue('visit-1');
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
 
     await waitFor(() => expect(mockedTrySendEmptyVisit).toHaveBeenCalledTimes(1));
@@ -414,7 +426,7 @@ describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model
     mockedTrySendEmptyVisit.mockRejectedValue(new Error('Network request failed'));
     mockedEnqueueEmptyVisit.mockResolvedValue(1);
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
 
     await waitFor(() => expect(mockedEnqueueEmptyVisit).toHaveBeenCalledTimes(1));
@@ -430,7 +442,7 @@ describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model
   it('blocks the visit and explains why when the driver has no truck today, same guard as saveSale', async () => {
     mockedUseTruck.mockReturnValue({ ...baseTruckValue, truck: null });
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
 
     expect(mockedTrySendEmptyVisit).not.toHaveBeenCalled();
@@ -441,7 +453,7 @@ describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model
 
 describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
   it('does not render the payment proof control when paymentMethod is efectivo (default)', async () => {
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
 
     expect(screen.queryByTestId('new-sale-payment-proof-pick-gallery')).toBeNull();
     expect(screen.queryByTestId('new-sale-payment-proof-capture-camera')).toBeNull();
@@ -450,7 +462,7 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
   it.each(['transferencia', 'qr', 'tarjeta'])(
     'renders the payment proof control when paymentMethod is %s',
     async (method) => {
-      await render(<NewSaleScreen />);
+      await renderSaleScreen();
 
       await fireEvent.press(screen.getByText(method));
 
@@ -460,7 +472,7 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
   );
 
   it('hides the payment proof control again when switching back to efectivo', async () => {
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
 
     await fireEvent.press(screen.getByText('transferencia'));
     expect(screen.getByTestId('new-sale-payment-proof-pick-gallery')).toBeTruthy();
@@ -473,7 +485,7 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
     mockedApiPostForm.mockResolvedValue({ url: 'https://cdn.test/proof-1.jpg' });
     mockedTrySendSale.mockResolvedValue('sale-123');
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByText('transferencia'));
     await fireEvent.press(screen.getByTestId('new-sale-payment-proof-pick-gallery'));
 
@@ -492,7 +504,7 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
   it('omits paymentProofRef from the Guardar venta payload when no photo was ever picked', async () => {
     mockedTrySendSale.mockResolvedValue('sale-123');
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     await fireEvent.press(screen.getByText('Guardar venta'));
 
@@ -506,7 +518,7 @@ describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geol
   it('includes latitude/longitude in the Guardar venta payload when permission is granted and the read succeeds', async () => {
     mockedTrySendSale.mockResolvedValue('sale-123');
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     await fireEvent.press(screen.getByText('Guardar venta'));
 
@@ -521,7 +533,7 @@ describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geol
     mockedRequestForegroundPermissionsAsync.mockResolvedValue({ granted: false });
     mockedTrySendSale.mockResolvedValue('sale-123');
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     await fireEvent.press(screen.getByText('Guardar venta'));
 
@@ -538,7 +550,7 @@ describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geol
       mockedGetCurrentPositionAsync.mockReturnValue(new Promise(() => {}));
       mockedTrySendSale.mockResolvedValue('sale-123');
 
-      await render(<NewSaleScreen />);
+      await renderSaleScreen();
       await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
       await fireEvent.press(screen.getByText('Guardar venta'));
 
@@ -556,7 +568,7 @@ describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geol
 
 describe('NewSaleScreen/elegir cliente (customer-picker-proximity PR2)', () => {
   it('renders an "Elegir cliente" button that navigates to CustomerPicker', async () => {
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
 
     await fireEvent.press(screen.getByTestId('new-sale-pick-customer-button'));
 
@@ -569,6 +581,10 @@ describe('NewSaleScreen/elegir cliente (customer-picker-proximity PR2)', () => {
     };
     mockedTrySendSale.mockResolvedValue('sale-123');
 
+    // Not renderSaleScreen(): the route-params effect already populates a
+    // valid, non-blank customerName from the picked customer. Running the
+    // helper's auto-fill afterward would fire onChangeCustomerName and wipe
+    // the customerId this test exists to verify.
     await render(<NewSaleScreen />);
 
     expect(screen.getByDisplayValue('Kiosco Sur')).toBeTruthy();
@@ -590,6 +606,9 @@ describe('NewSaleScreen/elegir cliente (customer-picker-proximity PR2)', () => {
     };
     mockedTrySendSale.mockResolvedValue('sale-123');
 
+    // Same reason as above: renderSaleScreen()'s auto-fill would race the
+    // route-params effect and clobber the picked customerId before this
+    // test gets to hand-edit the name itself.
     await render(<NewSaleScreen />);
 
     await fireEvent.changeText(
@@ -608,12 +627,153 @@ describe('NewSaleScreen/elegir cliente (customer-picker-proximity PR2)', () => {
   it('omits customerId from the payload when no customer was ever picked', async () => {
     mockedTrySendSale.mockResolvedValue('sale-123');
 
-    await render(<NewSaleScreen />);
+    await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
     await fireEvent.press(screen.getByText('Guardar venta'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
     const payload = mockedTrySendSale.mock.calls[0][0];
     expect(Object.prototype.hasOwnProperty.call(payload, 'customerId')).toBe(false);
+  });
+});
+
+// driver-ux-polish (phase 9, Unit 1): a blank customerName used to only be
+// caught server-side (400) or, worse, could get stuck forever in the
+// offline sync queue with no remediation UI. These tests pin a client-side
+// guard -- reusing validateCreateSaleInput/validateUpdateSaleInput/
+// validateRecordEmptyVisitInput from @distribuidor/shared, same convention
+// as LoadManifestScreen.saveManifest -- in front of every network/
+// offline-queue call this screen makes.
+describe('NewSaleScreen/blank customerName guard (driver-ux-polish)', () => {
+  it('blocks saveSale when customerName is blank, without calling trySendSale/enqueueSale', async () => {
+    await renderSaleScreen('');
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() =>
+      expect(screen.getByText('customerName must have at least 2 characters')).toBeTruthy(),
+    );
+    expect(mockedTrySendSale).not.toHaveBeenCalled();
+    expect(mockedEnqueueSale).not.toHaveBeenCalled();
+  });
+
+  it('treats a whitespace-only customerName as blank and blocks saveSale the same way', async () => {
+    await renderSaleScreen('   ');
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() =>
+      expect(screen.getByText('customerName must have at least 2 characters')).toBeTruthy(),
+    );
+    expect(mockedTrySendSale).not.toHaveBeenCalled();
+    expect(mockedEnqueueSale).not.toHaveBeenCalled();
+  });
+
+  it('lets saveSale proceed normally with a typed, valid customerName (happy path unaffected)', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-999');
+
+    await renderSaleScreen('Juan Perez');
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({ customerName: 'Juan Perez' });
+  });
+
+  it('blocks updateLastSale when customerName is blank, without calling api.patch', async () => {
+    await renderSaleScreen();
+    await saveOneSale('sale-123');
+    // saveOneSale's success path resets quantities to zero -- re-add an item
+    // so the pre-existing "Agrega al menos un producto" guard does not fire
+    // first and mask the customerName guard this test targets.
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.changeText(screen.getByPlaceholderText('Nombre del cliente'), '');
+
+    await fireEvent.press(screen.getByTestId('new-sale-edit-button'));
+
+    await waitFor(() =>
+      expect(screen.getByText('customerName must have at least 2 characters')).toBeTruthy(),
+    );
+    expect(mockedApiPatch).not.toHaveBeenCalled();
+  });
+
+  it('blocks recordVisit when customerName is blank, without calling trySendEmptyVisit/enqueueEmptyVisit', async () => {
+    await renderSaleScreen('');
+    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+
+    await waitFor(() =>
+      expect(screen.getByText('customerName must have at least 2 characters')).toBeTruthy(),
+    );
+    expect(mockedTrySendEmptyVisit).not.toHaveBeenCalled();
+    expect(mockedEnqueueEmptyVisit).not.toHaveBeenCalled();
+  });
+});
+
+// driver-ux-polish (phase 9, Unit 1): updateLastSale's payload never
+// conditionally included customerId, unlike saveSale's payload
+// (...(customerId ? { customerId } : {})). Editing a sale that was linked
+// to a Customer via the picker silently dropped that link on every edit,
+// because the API's resolveCustomerAndTruck treats customerId === undefined
+// as "clear the link."
+describe('NewSaleScreen/updateLastSale preserves customerId (driver-ux-polish bug fix)', () => {
+  it('includes customerId in the PATCH payload when the edited sale is linked to a picked customer', async () => {
+    mockedRouteParams = {
+      pickedCustomer: { id: 'c1', name: 'Kiosco Sur', customerType: 'comercio' },
+    };
+    mockedApiPatch.mockResolvedValue({});
+
+    // Not renderSaleScreen(): the route-params effect already supplies a
+    // valid customerName, and the helper's auto-fill would clear customerId
+    // via onChangeCustomerName before we ever get to edit.
+    await render(<NewSaleScreen />);
+    await saveOneSale('sale-123');
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+
+    await fireEvent.press(screen.getByTestId('new-sale-edit-button'));
+
+    await waitFor(() =>
+      expect(mockedApiPatch).toHaveBeenCalledWith(
+        '/sales/sale-123',
+        expect.objectContaining({ customerId: 'c1' }),
+      ),
+    );
+  });
+
+  it('omits customerId from the PATCH payload when the edited sale was never linked to a customer', async () => {
+    mockedApiPatch.mockResolvedValue({});
+
+    await renderSaleScreen();
+    await saveOneSale('sale-123');
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+
+    await fireEvent.press(screen.getByTestId('new-sale-edit-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const payload = mockedApiPatch.mock.calls[0][1];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'customerId')).toBe(false);
+  });
+});
+
+// driver-ux-polish (phase 9, Unit 1): "Editar ultima venta" and "Anular
+// ultima venta" used to render with no `variant`, defaulting to 'primary'
+// same as "Guardar venta" -- three primary-colored action buttons with no
+// visual hierarchy. This scopes the check to the three action-card buttons
+// rather than every Button on screen: the segmented "Tipo de cliente"/
+// "Forma de pago" controls and the "Envase devuelto" toggle intentionally
+// reuse variant="primary" to indicate an *active selection*, an unrelated
+// and pre-existing pattern this unit does not touch.
+describe('NewSaleScreen/button hierarchy (driver-ux-polish)', () => {
+  it('gives "Guardar venta" the only primary-colored button among the three action buttons', async () => {
+    await renderSaleScreen();
+    await saveOneSale('sale-123');
+
+    const actionLabels = ['Guardar venta', 'Editar ultima venta', 'Anular ultima venta'];
+    const primaryButtons = actionLabels.filter((name) => {
+      const button = screen.getByRole('button', { name });
+      const flatStyle = StyleSheet.flatten(button.props.style);
+      return flatStyle.backgroundColor === colors.primary;
+    });
+
+    expect(primaryButtons).toEqual(['Guardar venta']);
   });
 });
