@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { LoadManifestRecord, MyAssignedCustomersResponse } from '@distribuidor/shared';
@@ -30,8 +30,36 @@ type HomeScreenNavigationProp = NativeStackNavigationProp<HomeStackParamList, 'H
 export function HomeScreen() {
   const { daySummary, summaryLoading, summaryError, refreshDaySummary, pendingSales } = useSync();
   const { truck } = useTruck();
-  const { api } = useAuth();
+  const { api, username, logout } = useAuth();
   const navigation = useNavigation<HomeScreenNavigationProp>();
+
+  // Logout is fully implemented in AuthContext (clears the token, flips
+  // `status` to 'anonymous', RootNavigator unmounts MainTabs on its own —
+  // load-manifest.md design decision #2). It just never had a button. The
+  // offline queue lives under a SEPARATE AsyncStorage key that `logout()`
+  // does NOT touch, so queued sales survive a logout — but they will not
+  // sync again until the driver signs back in on this phone, which is worth
+  // warning about before an accidental tap.
+  const handleLogout = useCallback(() => {
+    const pendingCount = pendingSales.length;
+    const message =
+      pendingCount > 0
+        ? `Tenés ${pendingCount} ${
+            pendingCount === 1 ? 'venta' : 'ventas'
+          } sin sincronizar. No se van a enviar hasta que vuelvas a iniciar sesión en este teléfono.`
+        : '¿Seguro que querés cerrar la sesión?';
+
+    Alert.alert('Cerrar sesión', message, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Cerrar sesión',
+        style: 'destructive',
+        onPress: () => {
+          void logout();
+        },
+      },
+    ]);
+  }, [logout, pendingSales.length]);
 
   // Manifest status: fetched once on mount alongside refreshDaySummary, per
   // the design's HomeScreen consumer contract (docs/plans/load-manifest.md
@@ -133,6 +161,12 @@ export function HomeScreen() {
         <Text style={styles.apiHint}>Pendientes de sincronizar: {pendingSales.length}</Text>
 
         <Button label="Actualizar resumen" onPress={() => void refreshDaySummary()} />
+        <Button
+          label="Ver historial de ventas"
+          variant="secondary"
+          onPress={() => navigation.navigate('SalesHistory')}
+          testID="home-sales-history-cta"
+        />
       </Card>
 
       <Card style={styles.card}>
@@ -158,6 +192,12 @@ export function HomeScreen() {
           onPress={() => navigation.navigate('LoadManifest')}
           testID="home-manifest-cta"
         />
+        <Button
+          label="Ver remitos"
+          variant="secondary"
+          onPress={() => navigation.navigate('ManifestHistory')}
+          testID="home-manifest-history-cta"
+        />
       </Card>
 
       <Card style={styles.card}>
@@ -182,6 +222,19 @@ export function HomeScreen() {
           variant="secondary"
           onPress={() => navigation.navigate('AssignedCustomers')}
           testID="home-assigned-customers-cta"
+        />
+      </Card>
+
+      <Card style={styles.card}>
+        <Text style={styles.fieldLabel}>Cuenta</Text>
+        <Text style={styles.sessionLine} testID="home-session-user">
+          Sesión de {username}
+        </Text>
+        <Button
+          label="Cerrar sesión"
+          variant="secondary"
+          onPress={handleLogout}
+          testID="home-logout-button"
         />
       </Card>
     </ScreenContainer>
@@ -212,6 +265,11 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     color: colors.textPrimary,
     fontWeight: typography.weights.medium,
+    marginBottom: spacing.sm,
+  },
+  sessionLine: {
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
     marginBottom: spacing.sm,
   },
   fieldLabel: {

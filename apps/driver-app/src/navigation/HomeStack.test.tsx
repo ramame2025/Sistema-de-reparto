@@ -26,6 +26,18 @@ jest.mock('../screens/HomeScreen', () => {
           >
             <Text>Ir a clientes de hoy</Text>
           </Pressable>
+          <Pressable
+            testID="home-stack-go-to-sales-history"
+            onPress={() => navigation.navigate('SalesHistory')}
+          >
+            <Text>Ir a historial de ventas</Text>
+          </Pressable>
+          <Pressable
+            testID="home-stack-go-to-manifest-history"
+            onPress={() => navigation.navigate('ManifestHistory')}
+          >
+            <Text>Ir a historial de remitos</Text>
+          </Pressable>
         </>
       );
     },
@@ -64,6 +76,45 @@ jest.mock('../screens/AssignedCustomersScreen', () => {
         <>
           <Text testID="home-stack-fake-assigned-customers">Assigned customers fake</Text>
           <Pressable testID="home-stack-go-back-from-assigned" onPress={() => navigation.goBack()}>
+            <Text>Volver</Text>
+          </Pressable>
+        </>
+      );
+    },
+  };
+});
+
+jest.mock('../screens/SalesHistoryScreen', () => {
+  const { useNavigation } = require('@react-navigation/native');
+  const { Text, Pressable } = require('react-native');
+  return {
+    SalesHistoryScreen: () => {
+      const navigation = useNavigation();
+      return (
+        <>
+          <Text testID="home-stack-fake-sales-history">Sales history fake</Text>
+          <Pressable testID="home-stack-go-back-from-sales-history" onPress={() => navigation.goBack()}>
+            <Text>Volver</Text>
+          </Pressable>
+        </>
+      );
+    },
+  };
+});
+
+jest.mock('../screens/ManifestHistoryScreen', () => {
+  const { useNavigation } = require('@react-navigation/native');
+  const { Text, Pressable } = require('react-native');
+  return {
+    ManifestHistoryScreen: () => {
+      const navigation = useNavigation();
+      return (
+        <>
+          <Text testID="home-stack-fake-manifest-history">Manifest history fake</Text>
+          <Pressable
+            testID="home-stack-go-back-from-manifest-history"
+            onPress={() => navigation.goBack()}
+          >
             <Text>Volver</Text>
           </Pressable>
         </>
@@ -118,5 +169,45 @@ describe('HomeStack', () => {
 
     await waitFor(() => expect(screen.getByTestId('home-stack-fake-home')).toBeTruthy());
     expect(screen.queryByTestId('home-stack-fake-assigned-customers')).toBeNull();
+  });
+
+  it('registers SalesHistory as a route, reachable and navigable back to Home', async () => {
+    await render(
+      <NavigationContainer>
+        <HomeStack />
+      </NavigationContainer>,
+    );
+
+    expect(screen.queryByTestId('home-stack-fake-sales-history')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('home-stack-go-to-sales-history'));
+
+    await waitFor(() => expect(screen.getByTestId('home-stack-fake-sales-history')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('home-stack-go-back-from-sales-history'));
+
+    await waitFor(() => expect(screen.getByTestId('home-stack-fake-home')).toBeTruthy());
+    expect(screen.queryByTestId('home-stack-fake-sales-history')).toBeNull();
+  });
+
+  it('registers ManifestHistory as a route, reachable and navigable back to Home', async () => {
+    await render(
+      <NavigationContainer>
+        <HomeStack />
+      </NavigationContainer>,
+    );
+
+    expect(screen.queryByTestId('home-stack-fake-manifest-history')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('home-stack-go-to-manifest-history'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-stack-fake-manifest-history')).toBeTruthy(),
+    );
+
+    fireEvent.press(screen.getByTestId('home-stack-go-back-from-manifest-history'));
+
+    await waitFor(() => expect(screen.getByTestId('home-stack-fake-home')).toBeTruthy());
+    expect(screen.queryByTestId('home-stack-fake-manifest-history')).toBeNull();
   });
 });

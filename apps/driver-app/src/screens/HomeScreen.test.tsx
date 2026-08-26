@@ -41,6 +41,7 @@ jest.mock('@react-navigation/native', () => {
 });
 
 import React from 'react';
+import { Alert } from 'react-native';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { HomeScreen } from './HomeScreen';
 import { useAuth } from '../context/AuthContext';
@@ -388,5 +389,128 @@ describe('HomeScreen/clientes de hoy card (PR4)', () => {
     fireEvent.press(screen.getByTestId('home-assigned-customers-cta'));
 
     expect(mockedNavigate).toHaveBeenCalledWith('AssignedCustomers');
+  });
+});
+
+describe('HomeScreen/history CTAs', () => {
+  beforeEach(() => {
+    mockedUseSync.mockReturnValue(baseSyncValue);
+  });
+
+  it('navigates to SalesHistory when the sales-history CTA is pressed', async () => {
+    await render(<HomeScreen />);
+
+    fireEvent.press(screen.getByTestId('home-sales-history-cta'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('SalesHistory');
+  });
+
+  it('navigates to ManifestHistory when the manifest-history CTA is pressed', async () => {
+    mockedApiGet.mockResolvedValue([]);
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('home-manifest-history-cta'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('ManifestHistory');
+  });
+});
+
+describe('HomeScreen/logout', () => {
+  const useAuthWith = (overrides: Record<string, unknown>) => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated' as const,
+      token: 'tok',
+      username: 'chofer1',
+      loading: false,
+      api: { get: mockedApiGet },
+      login: jest.fn(),
+      logout: jest.fn(),
+      requireAuthToken: jest.fn(() => 'tok'),
+      ...overrides,
+    });
+  };
+
+  beforeEach(() => {
+    mockedUseSync.mockReturnValue(baseSyncValue);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('shows a logout control tied to the current username', async () => {
+    await render(<HomeScreen />);
+
+    expect(screen.getByText('Sesión de chofer1')).toBeTruthy();
+    expect(screen.getByTestId('home-logout-button')).toBeTruthy();
+  });
+
+  it('asks for confirmation and only calls logout() once the user confirms', async () => {
+    const logout = jest.fn().mockResolvedValue(undefined);
+    useAuthWith({ logout });
+    const alertSpy = jest.spyOn(Alert, 'alert');
+
+    await render(<HomeScreen />);
+
+    fireEvent.press(screen.getByTestId('home-logout-button'));
+
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    expect(logout).not.toHaveBeenCalled();
+
+    const buttons = alertSpy.mock.calls[0][2] as Array<{
+      text?: string;
+      style?: string;
+      onPress?: () => void;
+    }>;
+    const confirm = buttons.find((button) => button.style === 'destructive');
+    expect(confirm).toBeDefined();
+    confirm?.onPress?.();
+
+    expect(logout).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call logout() when the confirmation is dismissed', async () => {
+    const logout = jest.fn().mockResolvedValue(undefined);
+    useAuthWith({ logout });
+    const alertSpy = jest.spyOn(Alert, 'alert');
+
+    await render(<HomeScreen />);
+
+    fireEvent.press(screen.getByTestId('home-logout-button'));
+
+    const buttons = alertSpy.mock.calls[0][2] as Array<{ style?: string }>;
+    expect(buttons.some((button) => button.style === 'cancel')).toBe(true);
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it('warns about unsynced sales in the confirmation when the queue is not empty', async () => {
+    mockedUseSync.mockReturnValue({
+      ...baseSyncValue,
+      pendingSales: [{ queueId: 'q1' }, { queueId: 'q2' }],
+    });
+    const alertSpy = jest.spyOn(Alert, 'alert');
+
+    await render(<HomeScreen />);
+
+    fireEvent.press(screen.getByTestId('home-logout-button'));
+
+    const message = alertSpy.mock.calls[0][1] as string;
+    expect(message).toContain('2');
+    expect(message).toMatch(/sin sincronizar/i);
+  });
+
+  it('does not mention unsynced sales when the queue is empty', async () => {
+    mockedUseSync.mockReturnValue({ ...baseSyncValue, pendingSales: [] });
+    const alertSpy = jest.spyOn(Alert, 'alert');
+
+    await render(<HomeScreen />);
+
+    fireEvent.press(screen.getByTestId('home-logout-button'));
+
+    const message = alertSpy.mock.calls[0][1] as string;
+    expect(message).not.toMatch(/sin sincronizar/i);
   });
 });

@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -7,6 +9,7 @@ import {
   type CreateExpenseInput,
   type ExpenseCategory,
 } from '@distribuidor/shared';
+import type { ExpensesStackParamList } from '../navigation/ExpensesStack';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner';
@@ -29,8 +32,14 @@ import { typography } from '../theme/typography';
  * expo-file-system's `File.upload()` (a native multipart task) rather than
  * `AuthContext.api.postForm` -- see `uploadReceipt` below for why.
  */
+type ExpensesScreenNavigationProp = NativeStackNavigationProp<
+  ExpensesStackParamList,
+  'Expenses'
+>;
+
 export function ExpensesScreen() {
   const { api, username, requireAuthToken } = useAuth();
+  const navigation = useNavigation<ExpensesScreenNavigationProp>();
 
   const [category, setCategory] = useState<ExpenseCategory>('combustible');
   const [amount, setAmount] = useState('0');
@@ -226,6 +235,16 @@ export function ExpensesScreen() {
           testID="expense-save-button"
         />
         <FeedbackBanner message={message} tone={messageTone} />
+      </Card>
+
+      <Card style={styles.card}>
+        <Text style={styles.fieldLabel}>Historial</Text>
+        <Button
+          label="Ver historial de gastos"
+          variant="secondary"
+          onPress={() => navigation.navigate('ExpensesHistory')}
+          testID="expenses-history-cta"
+        />
       </Card>
     </ScreenContainer>
   );

@@ -10,6 +10,15 @@ jest.mock('../context/AuthContext', () => {
   };
 });
 
+const mockedNavigate = jest.fn();
+jest.mock('@react-navigation/native', () => {
+  const actual = jest.requireActual('@react-navigation/native');
+  return {
+    ...actual,
+    useNavigation: () => ({ navigate: mockedNavigate }),
+  };
+});
+
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import * as ExpoFileSystem from 'expo-file-system';
@@ -60,6 +69,17 @@ beforeEach(() => {
   mockedLaunchCameraAsync.mockResolvedValue({
     canceled: false,
     assets: [{ uri: 'file://fake.jpg' }],
+  });
+  mockedNavigate.mockClear();
+});
+
+describe('ExpensesScreen/history CTA', () => {
+  it('navigates to ExpensesHistory when the history CTA is pressed', async () => {
+    await render(<ExpensesScreen />);
+
+    fireEvent.press(screen.getByTestId('expenses-history-cta'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('ExpensesHistory');
   });
 });
 

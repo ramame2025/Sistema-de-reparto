@@ -2,11 +2,15 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AssignedCustomersScreen } from '../screens/AssignedCustomersScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { LoadManifestScreen } from '../screens/LoadManifestScreen';
+import { ManifestHistoryScreen } from '../screens/ManifestHistoryScreen';
+import { SalesHistoryScreen } from '../screens/SalesHistoryScreen';
 
 export type HomeStackParamList = {
   Home: undefined;
   LoadManifest: undefined;
   AssignedCustomers: undefined;
+  SalesHistory: undefined;
+  ManifestHistory: undefined;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -31,6 +35,12 @@ const Stack = createNativeStackNavigator<HomeStackParamList>();
  * `LoadManifest`: a plain pushed screen, own header — not a modal, since
  * this is a read-only view opened a few times a day, not a picker invoked
  * on every sale (phase 6's `CustomerPicker` precedent doesn't apply here).
+ *
+ * `SalesHistory` / `ManifestHistory` are two more read-only pushed screens
+ * cut from the same cloth: each lists a driver-scoped `/mine` endpoint that
+ * already existed but was only ever consumed as an aggregate (day summary)
+ * or a boolean (loaded-today?), never as a browsable list. Reached from
+ * secondary buttons on HomeScreen's existing summary/manifest cards.
  */
 export function HomeStack() {
   return (
@@ -45,6 +55,16 @@ export function HomeStack() {
         name="AssignedCustomers"
         component={AssignedCustomersScreen}
         options={{ headerShown: true, title: 'Clientes de hoy' }}
+      />
+      <Stack.Screen
+        name="SalesHistory"
+        component={SalesHistoryScreen}
+        options={{ headerShown: true, title: 'Historial de ventas' }}
+      />
+      <Stack.Screen
+        name="ManifestHistory"
+        component={ManifestHistoryScreen}
+        options={{ headerShown: true, title: 'Historial de remitos' }}
       />
     </Stack.Navigator>
   );

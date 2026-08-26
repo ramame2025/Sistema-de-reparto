@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { ExpensesScreen } from '../screens/ExpensesScreen';
 import { SyncScreen } from '../screens/SyncScreen';
+import { ExpensesStack } from './ExpensesStack';
 import { HomeStack } from './HomeStack';
 import { NewSaleStack } from './NewSaleStack';
 import { colors } from '../theme/colors';
@@ -61,7 +61,7 @@ export function MainTabs() {
       />
       <Tab.Screen
         name="Gastos"
-        component={ExpensesScreen}
+        component={ExpensesStack}
         options={{
           tabBarIcon: makeTabIcon('wallet-outline', 'tab-icon-gastos'),
         }}
