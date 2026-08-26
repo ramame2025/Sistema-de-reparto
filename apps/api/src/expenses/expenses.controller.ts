@@ -1,10 +1,25 @@
-import { BadRequestException, Body, Controller, Get, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  UnauthorizedException,
+} from '@nestjs/common';
 import {
   type CreateExpenseInput,
   validateCreateExpenseInput,
 } from '@distribuidor/shared';
 import { ExpensesService } from './expenses.service';
 import { Roles } from '../auth/roles.decorator';
+import type { Request } from 'express';
+
+type AuthRequest = Request & {
+  user?: {
+    username?: string;
+  };
+};
 
 @Controller('expenses')
 export class ExpensesController {
@@ -14,6 +29,18 @@ export class ExpensesController {
   @Get()
   async listExpenses() {
     return this.expensesService.listExpenses();
+  }
+
+  @Roles('admin', 'chofer')
+  @Get('mine')
+  async listMyExpenses(@Req() req: AuthRequest) {
+    const username = req.user?.username?.trim();
+
+    if (!username) {
+      throw new UnauthorizedException();
+    }
+
+    return this.expensesService.listExpensesByDriver(username);
   }
 
   @Roles('admin', 'chofer')

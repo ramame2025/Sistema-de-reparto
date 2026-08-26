@@ -15,6 +15,15 @@ export class ExpensesService {
     return expenses.map((expense) => this.toRecord(expense));
   }
 
+  async listExpensesByDriver(driverName: string): Promise<ExpenseRecord[]> {
+    const expenses = await this.prisma.driverExpense.findMany({
+      where: { driverName },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return expenses.map((expense) => this.toRecord(expense));
+  }
+
   async createExpense(input: CreateExpenseInput): Promise<ExpenseRecord> {
     const expense = await this.prisma.driverExpense.create({
       data: {
