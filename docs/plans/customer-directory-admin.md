@@ -178,11 +178,26 @@ Shipped: `address` column + migration; `UpdateCustomerInput`,
 `PATCH /customers/:id` (admin-only); 409 duplicate detection with
 `?allowDuplicate=true`. API suite 322 tests, 19 suites.
 
-**Phase 2 — `/admin/clientes` without the map.** Full list, search,
-create, edit, deactivate, address, sidebar entry. Coordinates are not
-editable yet. Ships a usable admin screen with zero new dependencies —
-and keeps the map's dependency and SSR risk out of a PR that already
+**Phase 2 — `/admin/clientes` without the map. ✅ DONE.** Full list,
+search, create, edit, deactivate, address, sidebar entry. Coordinates are
+not editable yet. Ships a usable admin screen with zero new dependencies
+— and keeps the map's dependency and SSR risk out of a PR that already
 carries the CRUD surface.
+
+Shipped: the screen, the 409 duplicate affordance ("edit that one" vs
+"create anyway"), the "sin ubicación" counter (pulled forward from
+Phase 4, since the screen is where it belongs), and a guard test for the
+`/admin/clientes` vs `/admin/clientes-asignados` prefix collision in the
+sidebar. Dashboard suite 51 tests, 8 suites.
+
+Two incidental fixes this phase forced, both worth knowing:
+- `ApiError` discarded the response body, keeping only the status. The
+  409's conflicting-customer payload was unreachable, which would have
+  made D5's whole affordance impossible. It now carries `body`.
+- The dashboard's jest could not load `@distribuidor/shared` at runtime —
+  it is published as compiled ESM. Every previous dashboard import from
+  that package was type-only, so the gap had never surfaced. `jest.config.ts`
+  now maps the package to its TS sources.
 
 **Phase 3 — the map pin.** Add `react-leaflet`, the dynamically imported
 picker component, wire it into the Phase 2 form. Isolated, so if the map
