@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { spacing, MIN_TOUCH_TARGET } from '../theme/spacing';
-import { typography } from '../theme/typography';
+
+const ICON_SIZE = 22;
 
 export type PasswordInputProps = {
   value: string;
@@ -50,7 +52,12 @@ export function PasswordInput({
         testID={testID ? `${testID}-toggle` : undefined}
         style={styles.toggle}
       >
-        <Text style={styles.icon}>{visible ? '🙈' : '👁️'}</Text>
+        <Ionicons
+          name={visible ? 'eye-off-outline' : 'eye-outline'}
+          size={ICON_SIZE}
+          color={colors.textSecondary}
+          testID={testID ? `${testID}-toggle-icon` : undefined}
+        />
       </Pressable>
     </View>
   );
@@ -76,8 +83,5 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  icon: {
-    fontSize: typography.sizes.md,
   },
 });

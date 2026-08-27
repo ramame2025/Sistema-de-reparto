@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react-native';
 import { PasswordInput } from './PasswordInput';
+import { colors } from '../theme/colors';
 
 const renderInput = (props: Partial<React.ComponentProps<typeof PasswordInput>> = {}) =>
   render(
@@ -79,5 +80,23 @@ describe('PasswordInput', () => {
     await fireEvent(screen.getByTestId('pwd'), 'submitEditing');
 
     expect(onSubmitEditing).toHaveBeenCalled();
+  });
+
+  it('uses a monochrome eye icon that flips to a crossed-out eye', async () => {
+    // Ionicons, la misma familia que ya usan las tabs. Nada de emojis: el emoji
+    // lo dibuja el sistema operativo y se ve distinto en cada telefono.
+    await renderInput();
+
+    expect(screen.getByTestId('pwd-toggle-icon').props.name).toBe('eye-outline');
+
+    await fireEvent.press(screen.getByTestId('pwd-toggle'));
+
+    expect(screen.getByTestId('pwd-toggle-icon').props.name).toBe('eye-off-outline');
+  });
+
+  it('tints the icon with the theme color instead of a hardcoded value', async () => {
+    await renderInput();
+
+    expect(screen.getByTestId('pwd-toggle-icon').props.color).toBe(colors.textSecondary);
   });
 });
