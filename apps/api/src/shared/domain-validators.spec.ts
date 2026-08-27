@@ -7,9 +7,11 @@ import {
   type CreateTruckInput,
   type RecordEmptyVisitInput,
   type UpdatePriceInput,
+  type UpdateCustomerInput,
   type UpdateSaleInput,
   type UpdateTruckInput,
   validateCreateAssignmentInput,
+  normalizeCustomerName,
   validateCreateCustomerInput,
   validateCreateDriverCustomerAssignmentInput,
   validateCreateLoadManifestInput,
@@ -18,6 +20,7 @@ import {
   validateRecordEmptyVisitInput,
   validateUpdatePriceInput,
   validateUpdateSaleInput,
+  validateUpdateCustomerInput,
   validateUpdateTruckInput,
 } from '@distribuidor/shared';
 
@@ -57,6 +60,132 @@ describe('validateCreateCustomerInput', () => {
   it('rejects an out-of-range latitude', () => {
     const errors = validateCreateCustomerInput({ ...base, latitude: 200 });
     expect(errors).toContain('latitude must be between -90 and 90');
+  });
+});
+
+describe('validateCreateCustomerInput — address', () => {
+  const base: CreateCustomerInput = {
+    name: 'Kiosco Sur',
+    customerType: 'final',
+    zone: 'Sur',
+  };
+
+  it('accepts a payload with no address at all (address is optional)', () => {
+    expect(validateCreateCustomerInput(base)).toEqual([]);
+  });
+
+  it('accepts a payload carrying a street address', () => {
+    const input: CreateCustomerInput = { ...base, address: 'Av. Mitre 1234' };
+    expect(validateCreateCustomerInput(input)).toEqual([]);
+  });
+
+  it('rejects an address that is present but blank', () => {
+    const errors = validateCreateCustomerInput({ ...base, address: '   ' });
+    expect(errors).toContain('address must not be empty when provided');
+  });
+
+  it('accepts an address with no coordinates, and coordinates with no address', () => {
+    expect(validateCreateCustomerInput({ ...base, address: 'Av. Mitre 1234' })).toEqual([]);
+    expect(
+      validateCreateCustomerInput({ ...base, latitude: -34.6, longitude: -58.4 }),
+    ).toEqual([]);
+  });
+
+  it('rejects a latitude supplied without its longitude', () => {
+    const errors = validateCreateCustomerInput({ ...base, latitude: -34.6 });
+    expect(errors).toContain('latitude and longitude must be provided together');
+  });
+
+  it('rejects a longitude supplied without its latitude', () => {
+    const errors = validateCreateCustomerInput({ ...base, longitude: -58.4 });
+    expect(errors).toContain('latitude and longitude must be provided together');
+  });
+});
+
+describe('validateUpdateCustomerInput', () => {
+  it('accepts a patch touching a single field', () => {
+    expect(validateUpdateCustomerInput({ name: 'Kiosco Norte' })).toEqual([]);
+  });
+
+  it('rejects an empty patch', () => {
+    const errors = validateUpdateCustomerInput({});
+    expect(errors).toContain('at least one field must be provided');
+  });
+
+  it('rejects a name shorter than 2 characters', () => {
+    const errors = validateUpdateCustomerInput({ name: 'K' });
+    expect(errors).toContain('name must have at least 2 characters');
+  });
+
+  it('rejects an invalid customerType', () => {
+    const errors = validateUpdateCustomerInput({
+      customerType: 'mayorista' as UpdateCustomerInput['customerType'],
+    });
+    expect(errors).toContain('customerType is invalid');
+  });
+
+  it('rejects out-of-range coordinates', () => {
+    expect(
+      validateUpdateCustomerInput({ latitude: 200, longitude: -58.4 }),
+    ).toContain('latitude must be between -90 and 90');
+    expect(
+      validateUpdateCustomerInput({ latitude: -34.6, longitude: 400 }),
+    ).toContain('longitude must be between -180 and 180');
+  });
+
+  // A half-set pair is the one input that would silently drop a customer out
+  // of sortByProximity: the record looks located but cannot be ranked.
+  it('rejects moving only one half of the coordinate pair', () => {
+    expect(validateUpdateCustomerInput({ latitude: -34.6 })).toContain(
+      'latitude and longitude must be provided together',
+    );
+    expect(validateUpdateCustomerInput({ longitude: -58.4 })).toContain(
+      'latitude and longitude must be provided together',
+    );
+  });
+
+  it('accepts clearing both coordinates at once with null', () => {
+    expect(
+      validateUpdateCustomerInput({ latitude: null, longitude: null }),
+    ).toEqual([]);
+  });
+
+  it('rejects a blank name, zone or address when explicitly provided', () => {
+    expect(validateUpdateCustomerInput({ zone: '  ' })).toContain(
+      'zone must not be empty when provided',
+    );
+    expect(validateUpdateCustomerInput({ address: '  ' })).toContain(
+      'address must not be empty when provided',
+    );
+  });
+
+  it('rejects a non-boolean isActive', () => {
+    const errors = validateUpdateCustomerInput({
+      isActive: 'yes' as unknown as boolean,
+    });
+    expect(errors).toContain('isActive must be a boolean');
+  });
+});
+
+describe('normalizeCustomerName', () => {
+  it('trims and lowercases', () => {
+    expect(normalizeCustomerName('  Kiosco Sur  ')).toBe('kiosco sur');
+  });
+
+  // Without accent folding, "José" and "Jose" defeat duplicate detection on
+  // the very first try (plan risk R4).
+  it('folds accents so Jose and José collide', () => {
+    expect(normalizeCustomerName('Don José')).toBe(normalizeCustomerName('Don Jose'));
+  });
+
+  it('collapses runs of internal whitespace', () => {
+    expect(normalizeCustomerName('Kiosco   del  Sur')).toBe('kiosco del sur');
+  });
+
+  it('keeps genuinely different names apart', () => {
+    expect(normalizeCustomerName('Kiosco Sur')).not.toBe(
+      normalizeCustomerName('Kiosco Norte'),
+    );
   });
 });
 
