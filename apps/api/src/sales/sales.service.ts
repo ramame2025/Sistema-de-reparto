@@ -13,7 +13,6 @@ import {
 import {
   CustomerType as PrismaCustomerType,
   PaymentMethod as PrismaPaymentMethod,
-  ProductCode as PrismaProductCode,
   SaleAuditAction as PrismaSaleAuditAction,
   SaleKind as PrismaSaleKind,
   type SaleAudit,
@@ -149,7 +148,7 @@ export class SalesService {
         longitude: input.longitude ?? null,
         items: {
           create: input.items.map((item) => ({
-            productCode: item.productCode as PrismaProductCode,
+            productCode: item.productCode,
             quantity: item.quantity,
           })),
         },
@@ -264,7 +263,7 @@ export class SalesService {
     const resolvedItems = isChurn
       ? []
       : input.items.map((item) => ({
-          productCode: item.productCode as PrismaProductCode,
+          productCode: item.productCode,
           quantity: item.quantity,
         }));
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();

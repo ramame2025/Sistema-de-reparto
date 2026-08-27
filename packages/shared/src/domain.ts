@@ -1,3 +1,13 @@
+/**
+ * Los cuatro productos con los que arranco el sistema, hoy sembrados como las
+ * primeras filas de la tabla `Product`.
+ *
+ * YA NO ES EL CATALOGO: el admin crea y da de baja productos, asi que esta
+ * lista no es exhaustiva ni autoritativa. Sobrevive como fuente del seed y
+ * como lista de fallback de las pantallas que todavia no consumen el catalogo
+ * de la API. Validar contra ella rechazaria productos nuevos y legitimos: la
+ * pertenencia se verifica contra la base, del lado del servidor.
+ */
 export const PRODUCT_CODES = [
   "G10",
   "G15",
@@ -5,7 +15,27 @@ export const PRODUCT_CODES = [
   "G15_AUTO",
 ] as const;
 
-export type ProductCode = (typeof PRODUCT_CODES)[number];
+/**
+ * Codigo de producto tal como viaja por la API. Es un string abierto, no una
+ * union cerrada: el catalogo lo define el admin en runtime. El codigo es
+ * estable e inmutable una vez creado, porque ya viaja dentro de los payloads
+ * encolados offline en los telefonos de los choferes.
+ */
+export type ProductCode = string;
+
+/**
+ * TEMPORAL. Comprueba pertenencia contra la lista sembrada, que es exactamente
+ * lo que se validaba antes de que el catalogo fuera una tabla.
+ *
+ * Sigue siendo correcto SOLO mientras no exista forma de crear productos: en
+ * cuanto el admin pueda darlos de alta, esto rechazaria productos nuevos y
+ * legitimos, y la comprobacion tiene que pasar a hacerse contra la tabla
+ * `Product`, del lado del servidor, que es el unico lugar que conoce el
+ * catalogo real.
+ */
+export function isSeededProductCode(code: string): boolean {
+  return (PRODUCT_CODES as readonly string[]).includes(code);
+}
 
 export const CUSTOMER_TYPES = ["final", "comercio", "distribuidor"] as const;
 
@@ -382,7 +412,7 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
 
   if (Array.isArray(input.items)) {
     input.items.forEach((item, index) => {
-      if (!PRODUCT_CODES.includes(item.productCode)) {
+      if (!isSeededProductCode(item.productCode)) {
         errors.push(`items[${index}].productCode is invalid`);
       }
 
@@ -552,7 +582,7 @@ export function validateCreateLoadManifestInput(input: CreateLoadManifestInput):
 
   if (Array.isArray(input.items)) {
     input.items.forEach((item, index) => {
-      if (!PRODUCT_CODES.includes(item.productCode)) {
+      if (!isSeededProductCode(item.productCode)) {
         errors.push(`items[${index}].productCode is invalid`);
       }
 

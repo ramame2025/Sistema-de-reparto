@@ -7,7 +7,7 @@ import {
   type TruckStockLine,
   type TruckStockSummary,
 } from '@distribuidor/shared';
-import { ProductCode as PrismaProductCode, type LoadManifest, type LoadManifestItem } from '@prisma/client';
+import { type LoadManifest, type LoadManifestItem } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -56,7 +56,7 @@ export class LoadManifestsService {
         note: input.note?.trim() || null,
         items: {
           create: input.items.map((item) => ({
-            productCode: item.productCode as PrismaProductCode,
+            productCode: item.productCode,
             quantity: item.quantity,
           })),
         },

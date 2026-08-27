@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Param, Put } from '@nestjs/
 import {
   CUSTOMER_TYPES,
   PRODUCT_CODES,
+  isSeededProductCode,
   type CustomerType,
   type ProductCode,
   type UpdatePriceInput,
@@ -31,7 +32,7 @@ export class PricesController {
     @Param('customerType') customerType: string,
     @Body() input: UpdatePriceInput,
   ) {
-    if (!PRODUCT_CODES.includes(productCode as ProductCode)) {
+    if (!isSeededProductCode(productCode)) {
       throw new BadRequestException({
         message: 'Invalid productCode',
         errors: [`productCode must be one of ${PRODUCT_CODES.join(', ')}`],
