@@ -10,6 +10,7 @@ import {
   type UpdateCustomerInput,
 } from "@distribuidor/shared";
 import { useApiClient } from "../../../context/AuthContext";
+import { LocationPicker, type LocationValue } from "../../../components/LocationPicker";
 import { ApiError } from "../../../lib/api-client";
 
 type CreateForm = {
@@ -17,6 +18,8 @@ type CreateForm = {
   customerType: CustomerType;
   zone: string;
   address: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 const EMPTY_FORM: CreateForm = {
@@ -25,6 +28,22 @@ const EMPTY_FORM: CreateForm = {
   zone: "",
   address: "",
 };
+
+/**
+ * El par de coordenadas se aplica entero o no se aplica: la API rechaza una
+ * mitad suelta, porque un registro con una sola coordenada parece ubicado
+ * pero no se puede ordenar por cercania.
+ */
+function applyLocation<T extends { latitude?: number; longitude?: number }>(
+  target: T,
+  value: LocationValue,
+): T {
+  return {
+    ...target,
+    latitude: value.latitude ?? undefined,
+    longitude: value.longitude ?? undefined,
+  };
+}
 
 /** El 409 de POST /customers viaja con el cliente que ya existe. */
 type DuplicateConflict = { customer: CustomerRecord };
@@ -89,6 +108,9 @@ export default function ClientesPage() {
     customerType: form.customerType,
     ...(optionalText(form.zone) ? { zone: optionalText(form.zone) } : {}),
     ...(optionalText(form.address) ? { address: optionalText(form.address) } : {}),
+    ...(form.latitude !== undefined && form.longitude !== undefined
+      ? { latitude: form.latitude, longitude: form.longitude }
+      : {}),
   });
 
   const submitCreate = async (allowDuplicate: boolean) => {
@@ -213,6 +235,15 @@ export default function ClientesPage() {
             />
           </label>
         </div>
+
+        <div className="mt-4">
+          <LocationPicker
+            latitude={form.latitude}
+            longitude={form.longitude}
+            onChange={(value) => setForm(applyLocation(form, value))}
+          />
+        </div>
+
         <button
           type="button"
           onClick={() => void submitCreate(false)}
@@ -340,8 +371,14 @@ function CustomerRow({
   const [customerType, setCustomerType] = useState<CustomerType>(customer.customerType);
   const [zone, setZone] = useState(customer.zone ?? "");
   const [address, setAddress] = useState(customer.address ?? "");
+  // `undefined` significa "no se toco el pin"; un LocationValue significa que
+  // el admin lo movio o lo saco, incluso si vuelve a coincidir con lo guardado.
+  const [pin, setPin] = useState<LocationValue | undefined>(undefined);
 
   const located = customer.latitude !== undefined && customer.longitude !== undefined;
+
+  const editedLatitude = pin ? (pin.latitude ?? undefined) : customer.latitude;
+  const editedLongitude = pin ? (pin.longitude ?? undefined) : customer.longitude;
 
   const buildPatch = (): UpdateCustomerInput => {
     const patch: UpdateCustomerInput = {};
@@ -359,6 +396,10 @@ function CustomerRow({
     }
     if (address.trim() !== (customer.address ?? "")) {
       patch.address = address.trim().length > 0 ? address.trim() : null;
+    }
+    if (pin) {
+      patch.latitude = pin.latitude;
+      patch.longitude = pin.longitude;
     }
 
     return patch;
@@ -456,6 +497,13 @@ function CustomerRow({
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1"
           />
         </label>
+        <div className="mt-3">
+          <LocationPicker
+            latitude={editedLatitude}
+            longitude={editedLongitude}
+            onChange={setPin}
+          />
+        </div>
       </td>
       <td className="py-2 pr-4">
         <div className="flex flex-wrap gap-2">

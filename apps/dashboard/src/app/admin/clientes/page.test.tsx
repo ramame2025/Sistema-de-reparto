@@ -13,6 +13,40 @@ jest.mock("../../../context/AuthContext", () => ({
   useApiClient: jest.fn(),
 }));
 
+// The map itself is exercised in LocationPicker.test.tsx; here only the
+// coordinates it hands back matter.
+jest.mock("../../../components/LocationPicker", () => ({
+  LocationPicker: ({
+    latitude,
+    longitude,
+    onChange,
+  }: {
+    latitude?: number;
+    longitude?: number;
+    onChange: (value: { latitude: number | null; longitude: number | null }) => void;
+  }) => (
+    <div>
+      <span data-testid="picker-value">
+        {latitude !== undefined && longitude !== undefined
+          ? `${latitude},${longitude}`
+          : "sin pin"}
+      </span>
+      <button
+        type="button"
+        onClick={() => onChange({ latitude: -34.61, longitude: -58.38 })}
+      >
+        poner pin
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange({ latitude: null, longitude: null })}
+      >
+        sacar pin
+      </button>
+    </div>
+  ),
+}));
+
 const mockedUseSWR = useSWR as unknown as jest.Mock;
 const mockedUseApiClient = useApiClient as unknown as jest.Mock;
 
@@ -260,6 +294,106 @@ describe("ClientesPage", () => {
     fireEvent.click(screen.getByTestId("deactivate-c1"));
 
     await waitFor(() => expect(remove).toHaveBeenCalledWith("/customers/c1"));
+  });
+
+  describe("map pin", () => {
+    it("sends both coordinates when the admin drops a pin before creating", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.change(screen.getByLabelText("Nombre"), {
+        target: { value: "Kiosco Nuevo" },
+      });
+      fireEvent.click(screen.getAllByRole("button", { name: "poner pin" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "Crear cliente" }));
+
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(post).toHaveBeenCalledWith("/customers", {
+        name: "Kiosco Nuevo",
+        customerType: "final",
+        latitude: -34.61,
+        longitude: -58.38,
+      });
+    });
+
+    it("creates without coordinates when no pin was dropped", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.change(screen.getByLabelText("Nombre"), {
+        target: { value: "Kiosco Nuevo" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Crear cliente" }));
+
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      const [, payload] = post.mock.calls[0];
+      expect(payload).not.toHaveProperty("latitude");
+      expect(payload).not.toHaveProperty("longitude");
+    });
+
+    it("resets the pin after a successful create, so it does not leak into the next customer", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.change(screen.getByLabelText("Nombre"), {
+        target: { value: "Kiosco Nuevo" },
+      });
+      fireEvent.click(screen.getAllByRole("button", { name: "poner pin" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "Crear cliente" }));
+
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(screen.getAllByTestId("picker-value")[0]).toHaveTextContent("sin pin");
+    });
+
+    it("moves an existing customer pin through PATCH", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+      fireEvent.click(screen.getAllByRole("button", { name: "poner pin" })[1]);
+      fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      expect(patch).toHaveBeenCalledWith("/customers/c1", {
+        latitude: -34.61,
+        longitude: -58.38,
+      });
+    });
+
+    it("clears an existing pin with both halves null", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+      fireEvent.click(screen.getAllByRole("button", { name: "sacar pin" })[1]);
+      fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      expect(patch).toHaveBeenCalledWith("/customers/c1", {
+        latitude: null,
+        longitude: null,
+      });
+    });
+
+    it("leaves coordinates out of the patch when the pin was not touched", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+      fireEvent.change(screen.getByLabelText("Nombre del cliente"), {
+        target: { value: "Almacen Norte SRL" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      const [, payload] = patch.mock.calls[0];
+      expect(payload).not.toHaveProperty("latitude");
+      expect(payload).not.toHaveProperty("longitude");
+    });
+
+    it("loads the editing row with the customer stored pin", () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+
+      expect(screen.getAllByTestId("picker-value")[1]).toHaveTextContent(
+        "-34.6,-58.4",
+      );
+    });
   });
 
   it("shows an empty state when the directory has no customers", () => {

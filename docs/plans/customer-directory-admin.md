@@ -199,9 +199,25 @@ Two incidental fixes this phase forced, both worth knowing:
   that package was type-only, so the gap had never surfaced. `jest.config.ts`
   now maps the package to its TS sources.
 
-**Phase 3 — the map pin.** Add `react-leaflet`, the dynamically imported
-picker component, wire it into the Phase 2 form. Isolated, so if the map
-library disappoints, only this PR is reverted.
+**Phase 3 — the map pin. ✅ DONE.** Add `react-leaflet`, the dynamically
+imported picker component, wire it into the Phase 2 form. Isolated, so if
+the map library disappoints, only this PR is reverted.
+
+Shipped: `react-leaflet` 5.0.0 + `leaflet` 1.9.4 (peer range `react ^19`,
+satisfied by 19.2.8). `LocationMap.tsx` holds every Leaflet import and is
+reached only through `next/dynamic` with `ssr: false`; `LocationPicker.tsx`
+wraps it behind a coordinates-in/coordinates-out contract, so the page and
+its tests never load Leaflet. Click to drop, drag to correct, "Quitar
+ubicacion" to clear — always both halves together. Dashboard suite 64
+tests, 9 suites.
+
+R2 is now proven rather than merely mitigated: `pnpm build` still emits
+`/admin/clientes` as a **static prerender**, which it could not do if
+Leaflet reached the server render.
+
+Detail worth keeping: Leaflet's default marker icon resolves its image
+through CSS-relative URLs that bundlers rewrite, and the classic symptom
+is an invisible marker. `LocationMap` uses an inline `divIcon` instead.
 
 **Phase 4 — directory hygiene.** "Sin ubicación" counter and filter in
 the admin; `address` on the driver picker rows; 409 handling in
