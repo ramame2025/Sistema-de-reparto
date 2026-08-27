@@ -18,6 +18,11 @@ of the `DEFAULT_PRICE_TABLE` divergence still stands and is carried over.
 4. **A sale keeps the prices in force when it happened.** A later price
    change applies only to later sales.
 
+**Operational context, from the owner:** drivers sync and close their
+sales the same day, before ending their shift. A sale surviving overnight
+into a price change is therefore unlikely — the price snapshot is wanted
+as insurance, not as a routine path.
+
 ## Current State (verified against the code and the live database)
 
 ### Already built
@@ -103,6 +108,16 @@ To keep a wrong or malicious device clock from buying old prices,
 `occurredAt` is clamped server-side: never in the future, never older than
 30 days, falling back to `now()` outside that window.
 
+> **Justification revised by the owner.** Drivers sync before closing
+> their shift, so a sale outliving a price change is rare to the point of
+> hypothetical, and `occurredAt` cannot be defended on price drift alone.
+> It earns its place on a duller case instead: **midnight**. A sale made
+> at 23:50 and synced at 00:05 is otherwise recorded on the following
+> day, which corrupts the day's takings and the driver's own cash count
+> even when no price has ever changed. `unitPrice` (D4) stays regardless
+> — the owner wants the price recorded on the sale "just in case", and it
+> costs one column.
+
 **D6 — Editing a sale reprices at that sale's own `occurredAt`,** never
 at today's. Requirement 4 applies to corrections too.
 
@@ -169,6 +184,31 @@ which is worse for the business.
 **R4 — `getPriceTable()` throws 500 when any product lacks a price.** D7
 closes the creation path. A test must pin the invariant, because the
 failure mode is total: no sale can be recorded.
+
+## Deferred: driver's daily close
+
+The owner raised a "close the day" action for the driver, which would
+notify the admin. **Deliberately not in this change**, and nothing here
+depends on it, so deferring costs no rework.
+
+Why it waits:
+
+- **The integrity half is largely built.** `HomeScreen` already shows a
+  pending count and warns on logout with the exact number and its
+  consequence; `SyncScreen` lists each stuck sale with a manual retry. The
+  driver is already told.
+- **The real gap is admin visibility**, which is a supervision feature
+  with a different audience and a different screen — not a data-integrity
+  fix, and not part of pricing.
+- **A button cannot force a sync.** With no signal, "close the day" sends
+  nothing. Its actual value is to *refuse to close* and make the gap
+  visible to the admin — accountability and a record, not delivery. Worth
+  designing with that framing rather than the one the name suggests.
+
+Open questions to settle before it becomes a plan of its own: may a driver
+keep selling after closing; what happens to a sale that arrives after the
+close; does closing require zero pending sales or close anyway and report
+the gap; and how the admin is notified.
 
 ## Success Criteria
 
