@@ -2,11 +2,18 @@ import { API_URL } from "./config";
 
 export class ApiError extends Error {
   readonly status: number;
+  /**
+   * Parsed error payload, when the response carried one. A 409 from
+   * `POST /customers` puts the conflicting customer here, so the UI can
+   * offer it instead of showing a bare status code.
+   */
+  readonly body?: unknown;
 
-  constructor(status: number) {
+  constructor(status: number, body?: unknown) {
     super(`API ${status}`);
     this.name = "ApiError";
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -51,7 +58,7 @@ export function createApiClient(
 
     if (!response.ok) {
       onAuthFailure(response);
-      throw new ApiError(response.status);
+      throw new ApiError(response.status, await readErrorBody(response));
     }
 
     // Los 204 (baja de usuario, cambio de password) no traen cuerpo que parsear.
@@ -68,6 +75,19 @@ export function createApiClient(
       await request("DELETE", path);
     },
   };
+}
+
+/**
+ * Un cuerpo de error que no sea JSON (un HTML de proxy, una respuesta vacia)
+ * no debe tapar el status, que es el dato que siempre sirve.
+ */
+async function readErrorBody(response: Response): Promise<unknown> {
+  try {
+    const text = await response.text();
+    return text.length > 0 ? JSON.parse(text) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Los comprobantes llegan como URL absoluta o como path servido por la API. */
