@@ -4,6 +4,12 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /**
+     * Cuerpo de error ya parseado, cuando la respuesta trajo JSON. El 409 de
+     * POST /customers pone ahi el cliente en conflicto, para poder ofrecerlo
+     * en vez de mostrar un error y nada mas.
+     */
+    public body?: unknown,
   ) {
     super(message);
   }
@@ -32,10 +38,40 @@ const buildAuthHeader = (
   return { Authorization: `Bearer ${token}` };
 };
 
+/**
+ * Nest serializa sus excepciones como JSON. Sin parsearlo, ese JSON crudo
+ * termina siendo el `message` -- y las pantallas lo muestran tal cual al
+ * chofer, que se comeria una llave en medio del reparto.
+ */
+const parseErrorBody = (text: string): unknown => {
+  try {
+    return text.length > 0 ? JSON.parse(text) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** El `message` legible que Nest pone dentro del cuerpo, si hay alguno. */
+const messageFrom = (body: unknown): string | undefined => {
+  if (typeof body !== 'object' || body === null || !('message' in body)) {
+    return undefined;
+  }
+
+  const { message } = body as { message: unknown };
+  return typeof message === 'string' ? message : undefined;
+};
+
 const handleResponse = async <T>(response: Response): Promise<T> => {
   if (!response.ok) {
     const text = await response.text();
-    throw new ApiError(response.status, text || `API ${response.status}`);
+    const body = parseErrorBody(text);
+
+    throw new ApiError(
+      response.status,
+      // `??` no alcanza: un cuerpo vacio es cadena vacia, no null.
+      messageFrom(body) ?? (text || `API ${response.status}`),
+      body,
+    );
   }
 
   return response.json() as Promise<T>;

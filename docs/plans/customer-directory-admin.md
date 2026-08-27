@@ -219,9 +219,21 @@ Detail worth keeping: Leaflet's default marker icon resolves its image
 through CSS-relative URLs that bundlers rewrite, and the classic symptom
 is an invisible marker. `LocationMap` uses an inline `divIcon` instead.
 
-**Phase 4 — directory hygiene.** "Sin ubicación" counter and filter in
-the admin; `address` on the driver picker rows; 409 handling in
+**Phase 4 — directory hygiene. ✅ DONE.** "Sin ubicación" counter and
+filter in the admin; `address` on the driver picker rows; 409 handling in
 quick-create.
+
+Shipped: the filter (the counter landed in Phase 2), the address line on
+each picker row, and the driver-side duplicate affordance — "Usar el
+existente" picks the conflicting customer in one tap and continues the
+sale, "Crear igual" retries with `?allowDuplicate=true`.
+
+The suspicion carried over from Phase 2 was correct, and worse than
+expected. The driver app's `ApiError` kept the **raw response text** as
+`message`, and ten screens render `err.message` directly. A 409 would
+therefore have shown a driver a wall of raw JSON mid-round. `ApiError`
+now parses the body, exposes it as `body`, and prefers the body's own
+`message` for display. Driver-app suite 278 tests, 30 suites.
 
 ## Success Criteria
 

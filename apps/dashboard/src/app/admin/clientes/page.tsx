@@ -57,6 +57,11 @@ function conflictFrom(error: unknown): DuplicateConflict | null {
   return body?.customer ? { customer: body.customer } : null;
 }
 
+/** Ubicado es tener el par completo: media coordenada no sirve para ordenar. */
+function isLocated(customer: CustomerRecord): boolean {
+  return customer.latitude !== undefined && customer.longitude !== undefined;
+}
+
 /** Un campo de texto vacio se omite del alta; nunca se manda cadena vacia. */
 function optionalText(value: string): string | undefined {
   const trimmed = value.trim();
@@ -68,6 +73,7 @@ export default function ClientesPage() {
 
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM);
   const [search, setSearch] = useState("");
+  const [onlyWithoutLocation, setOnlyWithoutLocation] = useState(false);
   const [creating, setCreating] = useState(false);
   const [duplicate, setDuplicate] = useState<DuplicateConflict | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -85,21 +91,23 @@ export default function ClientesPage() {
 
   const visibleCustomers = useMemo(() => {
     const needle = normalizeCustomerName(search);
-    if (needle.length === 0) {
-      return customers;
-    }
-    return customers.filter((customer) =>
-      normalizeCustomerName(customer.name).includes(needle),
-    );
-  }, [customers, search]);
+
+    // Los dos filtros se combinan; el de ubicacion no reemplaza al buscador.
+    return customers.filter((customer) => {
+      if (onlyWithoutLocation && isLocated(customer)) {
+        return false;
+      }
+      if (needle.length === 0) {
+        return true;
+      }
+      return normalizeCustomerName(customer.name).includes(needle);
+    });
+  }, [customers, search, onlyWithoutLocation]);
 
   // Un cliente sin pin no aparece en "Cerca tuyo" para el chofer. Contarlos
   // evita que el padron se degrade en silencio.
   const withoutLocation = useMemo(
-    () =>
-      customers.filter(
-        (customer) => customer.latitude === undefined || customer.longitude === undefined,
-      ).length,
+    () => customers.filter((customer) => !isLocated(customer)).length,
     [customers],
   );
 
@@ -296,6 +304,14 @@ export default function ClientesPage() {
             >
               Sin ubicacion: {withoutLocation}
             </span>
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={onlyWithoutLocation}
+                onChange={(event) => setOnlyWithoutLocation(event.target.checked)}
+              />
+              Solo sin ubicacion
+            </label>
             <label className="text-sm text-slate-600">
               Buscar
               <input
@@ -375,7 +391,7 @@ function CustomerRow({
   // el admin lo movio o lo saco, incluso si vuelve a coincidir con lo guardado.
   const [pin, setPin] = useState<LocationValue | undefined>(undefined);
 
-  const located = customer.latitude !== undefined && customer.longitude !== undefined;
+  const located = isLocated(customer);
 
   const editedLatitude = pin ? (pin.latitude ?? undefined) : customer.latitude;
   const editedLongitude = pin ? (pin.longitude ?? undefined) : customer.longitude;

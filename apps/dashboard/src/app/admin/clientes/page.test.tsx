@@ -396,6 +396,39 @@ describe("ClientesPage", () => {
     });
   });
 
+  describe("sin ubicacion filter", () => {
+    it("shows only the customers with no pin when the filter is on", () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByLabelText("Solo sin ubicacion"));
+
+      expect(screen.queryByText("Almacen Norte")).not.toBeInTheDocument();
+      expect(screen.getByText("Kiosco Sur")).toBeInTheDocument();
+    });
+
+    it("restores the full directory when the filter is turned off", () => {
+      render(<ClientesPage />);
+      const filter = screen.getByLabelText("Solo sin ubicacion");
+
+      fireEvent.click(filter);
+      fireEvent.click(filter);
+
+      expect(screen.getByText("Almacen Norte")).toBeInTheDocument();
+      expect(screen.getByText("Kiosco Sur")).toBeInTheDocument();
+    });
+
+    it("combines with the search box instead of replacing it", () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByLabelText("Solo sin ubicacion"));
+      fireEvent.change(screen.getByLabelText("Buscar"), {
+        target: { value: "almacen" },
+      });
+
+      expect(screen.getByTestId("customers-empty")).toBeInTheDocument();
+    });
+  });
+
   it("shows an empty state when the directory has no customers", () => {
     mockedUseSWR.mockReturnValue({
       data: [],
