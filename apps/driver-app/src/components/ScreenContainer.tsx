@@ -2,10 +2,14 @@ import React from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
 } from 'react-native';
+// React Native's own SafeAreaView is iOS-only: on Android it renders a plain
+// View with no insets, leaving content behind the system status bar. This one
+// resolves real insets on both platforms through the SafeAreaProvider mounted
+// in App.tsx.
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 
