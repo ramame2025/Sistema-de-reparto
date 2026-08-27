@@ -24,17 +24,16 @@ export const PRODUCT_CODES = [
 export type ProductCode = string;
 
 /**
- * TEMPORAL. Comprueba pertenencia contra la lista sembrada, que es exactamente
- * lo que se validaba antes de que el catalogo fuera una tabla.
+ * Valida la FORMA de un codigo de producto, no su pertenencia al catalogo.
  *
- * Sigue siendo correcto SOLO mientras no exista forma de crear productos: en
- * cuanto el admin pueda darlos de alta, esto rechazaria productos nuevos y
- * legitimos, y la comprobacion tiene que pasar a hacerse contra la tabla
- * `Product`, del lado del servidor, que es el unico lugar que conoce el
- * catalogo real.
+ * `packages/shared` corre en el telefono y en el navegador, y ninguno de los
+ * dos conoce el catalogo: lo define el admin en runtime. Comprobar pertenencia
+ * aca rechazaria todo producto nuevo y legitimo. Que el codigo EXISTA se
+ * verifica contra la tabla `Product`, del lado del servidor, que es el unico
+ * lugar que tiene la respuesta.
  */
-export function isSeededProductCode(code: string): boolean {
-  return (PRODUCT_CODES as readonly string[]).includes(code);
+export function isWellFormedProductCode(code: unknown): boolean {
+  return typeof code === "string" && code.trim().length > 0;
 }
 
 export const CUSTOMER_TYPES = ["final", "comercio", "distribuidor"] as const;
@@ -283,6 +282,41 @@ export type CustomerRecord = {
   updatedAt: string;
 };
 
+export type ProductRecord = {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Un producto nace CON sus tres precios, en la misma transaccion. No es una
+ * comodidad: `getPriceTable` falla entera si a cualquier producto le falta el
+ * precio de cualquier tipo de cliente, y eso no rompe la venta de ese producto
+ * sino TODAS las ventas del sistema. Un producto sin precios no puede existir
+ * jamas, ni por un instante.
+ */
+export type CreateProductInput = {
+  code: string;
+  name: string;
+  sortOrder?: number;
+  prices: Record<CustomerType, number>;
+};
+
+/**
+ * El `code` no se puede cambiar, y por eso no esta aca. Ya viaja dentro de los
+ * payloads de venta encolados en los telefonos de los choferes: renombrarlo
+ * dejaria esas ventas apuntando a un producto inexistente.
+ */
+export type UpdateProductInput = {
+  name?: string;
+  isActive?: boolean;
+  sortOrder?: number;
+};
+
 export type CreateTruckInput = {
   code: string;
   plate: string;
@@ -412,7 +446,7 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
 
   if (Array.isArray(input.items)) {
     input.items.forEach((item, index) => {
-      if (!isSeededProductCode(item.productCode)) {
+      if (!isWellFormedProductCode(item.productCode)) {
         errors.push(`items[${index}].productCode is invalid`);
       }
 
@@ -582,7 +616,7 @@ export function validateCreateLoadManifestInput(input: CreateLoadManifestInput):
 
   if (Array.isArray(input.items)) {
     input.items.forEach((item, index) => {
-      if (!isSeededProductCode(item.productCode)) {
+      if (!isWellFormedProductCode(item.productCode)) {
         errors.push(`items[${index}].productCode is invalid`);
       }
 
@@ -803,6 +837,87 @@ export function validateCreateDriverCustomerAssignmentInput(
   const uniqueCount = new Set(input.customerIds).size;
   if (uniqueCount !== input.customerIds.length) {
     errors.push('duplicate customerId');
+  }
+
+  return errors;
+}
+
+const PRODUCT_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_]*$/;
+const PRODUCT_CODE_MAX_LENGTH = 20;
+
+function validateProductPrice(
+  prices: Record<CustomerType, number>,
+  customerType: CustomerType,
+  errors: string[],
+): void {
+  const amount = prices[customerType];
+
+  if (amount === undefined || amount === null) {
+    errors.push(`prices.${customerType} is required`);
+    return;
+  }
+
+  if (!Number.isInteger(amount) || amount < 0) {
+    errors.push(`prices.${customerType} must be a non-negative integer`);
+  }
+}
+
+export function validateCreateProductInput(input: CreateProductInput): string[] {
+  const errors: string[] = [];
+  const code = input.code?.trim() ?? "";
+
+  if (code.length === 0) {
+    errors.push("code is required");
+  } else {
+    if (code.length > PRODUCT_CODE_MAX_LENGTH) {
+      errors.push(`code must be at most ${PRODUCT_CODE_MAX_LENGTH} characters`);
+    }
+    if (!PRODUCT_CODE_PATTERN.test(code)) {
+      errors.push("code must be uppercase letters, digits or underscore");
+    }
+  }
+
+  if (!input.name || input.name.trim().length < 2) {
+    errors.push("name must have at least 2 characters");
+  }
+
+  if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+    errors.push("sortOrder must be an integer");
+  }
+
+  if (!input.prices) {
+    errors.push("prices is required");
+  } else {
+    for (const customerType of CUSTOMER_TYPES) {
+      validateProductPrice(input.prices, customerType, errors);
+    }
+  }
+
+  return errors;
+}
+
+export function validateUpdateProductInput(input: UpdateProductInput): string[] {
+  const errors: string[] = [];
+
+  const touched =
+    input.name !== undefined ||
+    input.isActive !== undefined ||
+    input.sortOrder !== undefined;
+
+  if (!touched) {
+    errors.push("at least one field must be provided");
+  }
+
+  if (input.name !== undefined && input.name.trim().length < 2) {
+    errors.push("name must have at least 2 characters");
+  }
+
+  if (input.isActive !== undefined && typeof input.isActive !== "boolean") {
+    errors.push("isActive must be a boolean");
+  }
+
+  if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+    errors.push("sortOrder must be an integer");
   }
 
   return errors;

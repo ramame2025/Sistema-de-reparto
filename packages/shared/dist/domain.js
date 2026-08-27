@@ -15,17 +15,16 @@ export const PRODUCT_CODES = [
     "G15_AUTO",
 ];
 /**
- * TEMPORAL. Comprueba pertenencia contra la lista sembrada, que es exactamente
- * lo que se validaba antes de que el catalogo fuera una tabla.
+ * Valida la FORMA de un codigo de producto, no su pertenencia al catalogo.
  *
- * Sigue siendo correcto SOLO mientras no exista forma de crear productos: en
- * cuanto el admin pueda darlos de alta, esto rechazaria productos nuevos y
- * legitimos, y la comprobacion tiene que pasar a hacerse contra la tabla
- * `Product`, del lado del servidor, que es el unico lugar que conoce el
- * catalogo real.
+ * `packages/shared` corre en el telefono y en el navegador, y ninguno de los
+ * dos conoce el catalogo: lo define el admin en runtime. Comprobar pertenencia
+ * aca rechazaria todo producto nuevo y legitimo. Que el codigo EXISTA se
+ * verifica contra la tabla `Product`, del lado del servidor, que es el unico
+ * lugar que tiene la respuesta.
  */
-export function isSeededProductCode(code) {
-    return PRODUCT_CODES.includes(code);
+export function isWellFormedProductCode(code) {
+    return typeof code === "string" && code.trim().length > 0;
 }
 export const CUSTOMER_TYPES = ["final", "comercio", "distribuidor"];
 export const PAYMENT_METHODS = [
@@ -87,7 +86,7 @@ export function validateCreateSaleInput(input) {
     }
     if (Array.isArray(input.items)) {
         input.items.forEach((item, index) => {
-            if (!isSeededProductCode(item.productCode)) {
+            if (!isWellFormedProductCode(item.productCode)) {
                 errors.push(`items[${index}].productCode is invalid`);
             }
             if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
@@ -208,7 +207,7 @@ export function validateCreateLoadManifestInput(input) {
     }
     if (Array.isArray(input.items)) {
         input.items.forEach((item, index) => {
-            if (!isSeededProductCode(item.productCode)) {
+            if (!isWellFormedProductCode(item.productCode)) {
                 errors.push(`items[${index}].productCode is invalid`);
             }
             if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
@@ -369,6 +368,67 @@ export function validateCreateDriverCustomerAssignmentInput(input) {
     const uniqueCount = new Set(input.customerIds).size;
     if (uniqueCount !== input.customerIds.length) {
         errors.push('duplicate customerId');
+    }
+    return errors;
+}
+const PRODUCT_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_]*$/;
+const PRODUCT_CODE_MAX_LENGTH = 20;
+function validateProductPrice(prices, customerType, errors) {
+    const amount = prices[customerType];
+    if (amount === undefined || amount === null) {
+        errors.push(`prices.${customerType} is required`);
+        return;
+    }
+    if (!Number.isInteger(amount) || amount < 0) {
+        errors.push(`prices.${customerType} must be a non-negative integer`);
+    }
+}
+export function validateCreateProductInput(input) {
+    const errors = [];
+    const code = input.code?.trim() ?? "";
+    if (code.length === 0) {
+        errors.push("code is required");
+    }
+    else {
+        if (code.length > PRODUCT_CODE_MAX_LENGTH) {
+            errors.push(`code must be at most ${PRODUCT_CODE_MAX_LENGTH} characters`);
+        }
+        if (!PRODUCT_CODE_PATTERN.test(code)) {
+            errors.push("code must be uppercase letters, digits or underscore");
+        }
+    }
+    if (!input.name || input.name.trim().length < 2) {
+        errors.push("name must have at least 2 characters");
+    }
+    if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+        errors.push("sortOrder must be an integer");
+    }
+    if (!input.prices) {
+        errors.push("prices is required");
+    }
+    else {
+        for (const customerType of CUSTOMER_TYPES) {
+            validateProductPrice(input.prices, customerType, errors);
+        }
+    }
+    return errors;
+}
+export function validateUpdateProductInput(input) {
+    const errors = [];
+    const touched = input.name !== undefined ||
+        input.isActive !== undefined ||
+        input.sortOrder !== undefined;
+    if (!touched) {
+        errors.push("at least one field must be provided");
+    }
+    if (input.name !== undefined && input.name.trim().length < 2) {
+        errors.push("name must have at least 2 characters");
+    }
+    if (input.isActive !== undefined && typeof input.isActive !== "boolean") {
+        errors.push("isActive must be a boolean");
+    }
+    if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+        errors.push("sortOrder must be an integer");
     }
     return errors;
 }

@@ -17,16 +17,15 @@ export declare const PRODUCT_CODES: readonly ["G10", "G15", "G45", "G15_AUTO"];
  */
 export type ProductCode = string;
 /**
- * TEMPORAL. Comprueba pertenencia contra la lista sembrada, que es exactamente
- * lo que se validaba antes de que el catalogo fuera una tabla.
+ * Valida la FORMA de un codigo de producto, no su pertenencia al catalogo.
  *
- * Sigue siendo correcto SOLO mientras no exista forma de crear productos: en
- * cuanto el admin pueda darlos de alta, esto rechazaria productos nuevos y
- * legitimos, y la comprobacion tiene que pasar a hacerse contra la tabla
- * `Product`, del lado del servidor, que es el unico lugar que conoce el
- * catalogo real.
+ * `packages/shared` corre en el telefono y en el navegador, y ninguno de los
+ * dos conoce el catalogo: lo define el admin en runtime. Comprobar pertenencia
+ * aca rechazaria todo producto nuevo y legitimo. Que el codigo EXISTA se
+ * verifica contra la tabla `Product`, del lado del servidor, que es el unico
+ * lugar que tiene la respuesta.
  */
-export declare function isSeededProductCode(code: string): boolean;
+export declare function isWellFormedProductCode(code: unknown): boolean;
 export declare const CUSTOMER_TYPES: readonly ["final", "comercio", "distribuidor"];
 export type CustomerType = (typeof CUSTOMER_TYPES)[number];
 export declare const PAYMENT_METHODS: readonly ["efectivo", "transferencia", "qr", "tarjeta"];
@@ -229,6 +228,38 @@ export type CustomerRecord = {
     createdAt: string;
     updatedAt: string;
 };
+export type ProductRecord = {
+    id: string;
+    code: string;
+    name: string;
+    isActive: boolean;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+};
+/**
+ * Un producto nace CON sus tres precios, en la misma transaccion. No es una
+ * comodidad: `getPriceTable` falla entera si a cualquier producto le falta el
+ * precio de cualquier tipo de cliente, y eso no rompe la venta de ese producto
+ * sino TODAS las ventas del sistema. Un producto sin precios no puede existir
+ * jamas, ni por un instante.
+ */
+export type CreateProductInput = {
+    code: string;
+    name: string;
+    sortOrder?: number;
+    prices: Record<CustomerType, number>;
+};
+/**
+ * El `code` no se puede cambiar, y por eso no esta aca. Ya viaja dentro de los
+ * payloads de venta encolados en los telefonos de los choferes: renombrarlo
+ * dejaria esas ventas apuntando a un producto inexistente.
+ */
+export type UpdateProductInput = {
+    name?: string;
+    isActive?: boolean;
+    sortOrder?: number;
+};
 export type CreateTruckInput = {
     code: string;
     plate: string;
@@ -311,3 +342,5 @@ export declare function validateUpdatePriceInput(input: UpdatePriceInput): strin
  * de identidad faltantes/invalidos.
  */
 export declare function validateCreateDriverCustomerAssignmentInput(input: CreateDriverCustomerAssignmentInput): string[];
+export declare function validateCreateProductInput(input: CreateProductInput): string[];
+export declare function validateUpdateProductInput(input: UpdateProductInput): string[];

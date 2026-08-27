@@ -1,6 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  PRODUCT_CODES,
   type CreateLoadManifestInput,
   type LoadManifestRecord,
   type ProductCode,
@@ -9,6 +8,7 @@ import {
 } from '@distribuidor/shared';
 import { type LoadManifest, type LoadManifestItem } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ProductsService } from '../products/products.service';
 
 /**
  * Instante UTC exclusivo del fin del dia `asOf` en horario de negocio
@@ -24,7 +24,10 @@ function endOfBusinessDayUtc(asOf: string): Date {
 
 @Injectable()
 export class LoadManifestsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly productsService: ProductsService,
+  ) {}
 
   private async resolveTruck(truckId: string): Promise<string> {
     const truck = await this.prisma.truck.findUnique({ where: { id: truckId } });
@@ -43,6 +46,12 @@ export class LoadManifestsService {
     input: CreateLoadManifestInput,
     actorUsername?: string,
   ): Promise<LoadManifestRecord> {
+    // Igual que en las ventas: la forma la valida shared, la pertenencia al
+    // catalogo solo la puede saber la base.
+    await this.productsService.assertProductCodesExist(
+      input.items.map((item) => item.productCode),
+    );
+
     const truckId = await this.resolveTruck(input.truckId);
     const resolvedDriverName = (actorUsername ?? '').trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
@@ -120,7 +129,16 @@ export class LoadManifestsService {
       soldByProduct.set(productCode, (soldByProduct.get(productCode) ?? 0) + item.quantity);
     }
 
-    const lines: TruckStockLine[] = PRODUCT_CODES.map((productCode) => {
+    // El catalogo sale de la base, no de una constante: si no, un producto
+    // creado por el admin nunca apareceria en el stock del camion. Se listan
+    // TODOS, tambien los dados de baja, porque un producto discontinuado que
+    // todavia quedo cargado en el camion tiene que poder verse y venderse.
+    const products: { code: string }[] = await this.prisma.product.findMany({
+      select: { code: true },
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+    });
+
+    const lines: TruckStockLine[] = products.map(({ code: productCode }) => {
       const loaded = loadedByProduct.get(productCode) ?? 0;
       const sold = soldByProduct.get(productCode) ?? 0;
       // No se clampea: un remaining negativo es un problema de datos real

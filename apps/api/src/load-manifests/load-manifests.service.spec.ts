@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { CreateLoadManifestInput, LoadManifestRecord } from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { ProductsService } from '../products/products.service';
 import { LoadManifestsService } from './load-manifests.service';
 
 function buildManifestRow(overrides: Record<string, unknown> = {}) {
@@ -33,19 +34,33 @@ describe('LoadManifestsService', () => {
     loadManifest: { create: jest.Mock; findMany: jest.Mock };
     loadManifestItem: { findMany: jest.Mock };
     saleItem: { findMany: jest.Mock };
+    product: { findMany: jest.Mock };
     truck: { findUnique: jest.Mock };
   };
 
+  let productsService: { assertProductCodesExist: jest.Mock };
+
   beforeEach(async () => {
+    productsService = { assertProductCodesExist: jest.fn().mockResolvedValue(undefined) };
     prisma = {
       loadManifest: { create: jest.fn(), findMany: jest.fn() },
       loadManifestItem: { findMany: jest.fn() },
       saleItem: { findMany: jest.fn() },
+      // El catalogo del stock sale de la base, no de PRODUCT_CODES.
+      product: {
+        findMany: jest.fn().mockResolvedValue(
+          ['G10', 'G15', 'G45', 'G15_AUTO'].map((code) => ({ code })),
+        ),
+      },
       truck: { findUnique: jest.fn() },
     };
 
     const moduleRef = await Test.createTestingModule({
-      providers: [LoadManifestsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        LoadManifestsService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: ProductsService, useValue: productsService },
+      ],
     }).compile();
 
     service = moduleRef.get(LoadManifestsService);
@@ -66,6 +81,33 @@ describe('LoadManifestsService', () => {
           data: expect.objectContaining({ driverName: 'juan.perez' }),
         }),
       );
+    });
+
+    // packages/shared valida la forma del codigo pero no puede saber cuales
+    // existen: el catalogo lo define el admin en runtime.
+    it('verifies every productCode against the catalogue before writing', async () => {
+      prisma.loadManifest.create.mockResolvedValue(buildManifestRow());
+
+      await service.createManifest(
+        buildCreateInput({ items: [{ productCode: 'G10', quantity: 3 }] }),
+        'juan.perez',
+      );
+
+      expect(productsService.assertProductCodesExist).toHaveBeenCalledWith(['G10']);
+    });
+
+    it('creates nothing when a productCode is not in the catalogue', async () => {
+      productsService.assertProductCodesExist.mockRejectedValue(
+        new Error('Unknown productCode: G99'),
+      );
+
+      await expect(
+        service.createManifest(
+          buildCreateInput({ items: [{ productCode: 'G99', quantity: 1 }] }),
+          'juan.perez',
+        ),
+      ).rejects.toThrow(/G99/);
+      expect(prisma.loadManifest.create).not.toHaveBeenCalled();
     });
 
     it('trims actorUsername before persisting it as driverName', async () => {

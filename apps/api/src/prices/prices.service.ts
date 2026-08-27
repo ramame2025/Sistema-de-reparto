@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import {
   CUSTOMER_TYPES,
-  PRODUCT_CODES,
   type CustomerType,
   type PriceTable,
   type ProductCode,
@@ -33,9 +32,17 @@ export class PricesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getPriceTable(): Promise<PriceTable> {
-    const rows: PriceRow[] = await this.prisma.productPrice.findMany();
-    const byCustomerType = new Map<CustomerType, Map<ProductCode, number>>();
+    // TODOS los productos, activos y dados de baja. Una venta encolada en el
+    // telefono antes de que el producto se ocultara tiene que poder
+    // sincronizar despues, y para eso necesita su precio.
+    const [products, rows] = await Promise.all([
+      this.prisma.product.findMany({ select: { code: true } }) as Promise<
+        { code: string }[]
+      >,
+      this.prisma.productPrice.findMany() as Promise<PriceRow[]>,
+    ]);
 
+    const byCustomerType = new Map<CustomerType, Map<ProductCode, number>>();
     for (const row of rows) {
       if (!byCustomerType.has(row.customerType)) {
         byCustomerType.set(row.customerType, new Map());
@@ -47,14 +54,17 @@ export class PricesService {
     for (const customerType of CUSTOMER_TYPES) {
       const prices = byCustomerType.get(customerType);
       table[customerType] = {} as Record<ProductCode, number>;
-      for (const productCode of PRODUCT_CODES) {
-        const amount = prices?.get(productCode);
+      for (const { code } of products) {
+        const amount = prices?.get(code);
         if (amount === undefined) {
+          // Un producto sin precio no rompe su propia venta: rompe TODAS.
+          // Por eso `createProduct` escribe producto y precios en la misma
+          // transaccion, y por eso esto sigue siendo un error y no un cero.
           throw new InternalServerErrorException(
-            `Missing price for productCode=${productCode} customerType=${customerType}`,
+            `Missing price for productCode=${code} customerType=${customerType}`,
           );
         }
-        table[customerType][productCode] = amount;
+        table[customerType][code] = amount;
       }
     }
 

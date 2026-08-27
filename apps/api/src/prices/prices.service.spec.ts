@@ -49,6 +49,9 @@ describe('PricesService', () => {
       findUnique: jest.Mock;
       update: jest.Mock;
     };
+    product: {
+      findMany: jest.Mock;
+    };
     sale: {
       findMany: jest.Mock;
       update: jest.Mock;
@@ -58,6 +61,9 @@ describe('PricesService', () => {
 
   beforeEach(async () => {
     prisma = {
+      product: {
+        findMany: jest.fn(),
+      },
       productPrice: {
         findMany: jest.fn(),
         findUnique: jest.fn(),
@@ -75,6 +81,11 @@ describe('PricesService', () => {
     }).compile();
 
     service = moduleRef.get(PricesService);
+    // El catalogo ya no es una constante: la tabla de precios se arma a partir
+    // de los productos que existen en la base.
+    prisma.product.findMany.mockResolvedValue(
+      ALL_PRODUCT_CODES.map((code) => ({ code })),
+    );
   });
 
   describe('getPriceTable', () => {
@@ -112,6 +123,50 @@ describe('PricesService', () => {
       expect(table.final.G15_AUTO).toBe(1300);
       expect(table.comercio.G10).toBe(1400);
       expect(table.distribuidor.G15_AUTO).toBe(2100);
+    });
+
+    it('covers a product added after the seed, without any code change', async () => {
+      prisma.product.findMany.mockResolvedValue(
+        [...ALL_PRODUCT_CODES, 'G20'].map((code) => ({ code })),
+      );
+      prisma.productPrice.findMany.mockResolvedValue([
+        ...buildFullPriceRows(),
+        ...ALL_CUSTOMER_TYPES.map((customerType) => ({
+          id: `price-${customerType}-G20`,
+          productCode: 'G20' as PriceRow['productCode'],
+          customerType,
+          amount: 5000,
+          updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        })),
+      ]);
+
+      const table = await service.getPriceTable();
+
+      expect(table.final.G20).toBe(5000);
+      expect(table.distribuidor.G20).toBe(5000);
+    });
+
+    // Una venta encolada en el telefono antes de dar de baja el producto tiene
+    // que poder sincronizar despues, y para eso necesita su precio.
+    it('keeps deactivated products in the table, so queued sales can still be priced', async () => {
+      prisma.productPrice.findMany.mockResolvedValue(buildFullPriceRows());
+
+      await service.getPriceTable();
+
+      expect(prisma.product.findMany).toHaveBeenCalledWith({
+        select: { code: true },
+      });
+    });
+
+    it('does not throw for a catalogue with no products at all', async () => {
+      prisma.product.findMany.mockResolvedValue([]);
+      prisma.productPrice.findMany.mockResolvedValue([]);
+
+      await expect(service.getPriceTable()).resolves.toEqual({
+        final: {},
+        comercio: {},
+        distribuidor: {},
+      });
     });
   });
 

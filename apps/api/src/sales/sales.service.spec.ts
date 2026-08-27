@@ -9,6 +9,7 @@ import type {
 } from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
+import { ProductsService } from '../products/products.service';
 import { SalesService } from './sales.service';
 
 const CUSTOM_PRICE_TABLE: PriceTable = {
@@ -93,6 +94,7 @@ describe('SalesService', () => {
     $transaction: jest.Mock;
   };
   let pricesService: { getPriceTable: jest.Mock };
+  let productsService: { assertProductCodesExist: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -104,12 +106,14 @@ describe('SalesService', () => {
       $transaction: jest.fn(),
     };
     pricesService = { getPriceTable: jest.fn().mockResolvedValue(CUSTOM_PRICE_TABLE) };
+    productsService = { assertProductCodesExist: jest.fn().mockResolvedValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         SalesService,
         { provide: PrismaService, useValue: prisma },
         { provide: PricesService, useValue: pricesService },
+        { provide: ProductsService, useValue: productsService },
       ],
     }).compile();
 
@@ -218,6 +222,31 @@ describe('SalesService', () => {
       await expect(
         service.createSale(buildCreateInput({ truckId: 'truck-1' })),
       ).rejects.toThrow(ConflictException);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    // packages/shared ya no puede saber que codigos existen -- el catalogo lo
+    // define el admin en runtime -- asi que la pertenencia se verifica aca.
+    // Sin esto un codigo inexistente llegaria hasta la FK y saldria como un
+    // error de Prisma en vez de un 400 legible.
+    it('verifies every productCode against the catalogue before writing', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(
+        buildCreateInput({ items: [{ productCode: 'G10', quantity: 2 }] }),
+      );
+
+      expect(productsService.assertProductCodesExist).toHaveBeenCalledWith(['G10']);
+    });
+
+    it('does not write anything when a productCode is not in the catalogue', async () => {
+      productsService.assertProductCodesExist.mockRejectedValue(
+        new Error('Unknown productCode: G99'),
+      );
+
+      await expect(
+        service.createSale(buildCreateInput({ items: [{ productCode: 'G99', quantity: 1 }] })),
+      ).rejects.toThrow(/G99/);
       expect(prisma.sale.create).not.toHaveBeenCalled();
     });
 

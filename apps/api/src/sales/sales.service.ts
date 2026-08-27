@@ -21,6 +21,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
+import { ProductsService } from '../products/products.service';
 
 type ResolvedSaleLinks = {
   customerType: CustomerType;
@@ -46,6 +47,7 @@ export class SalesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricesService: PricesService,
+    private readonly productsService: ProductsService,
   ) {}
 
   private async resolveCustomerAndTruck(
@@ -122,6 +124,14 @@ export class SalesService {
         return this.toSaleRecord(existing);
       }
     }
+
+    // `packages/shared` valida la forma del codigo pero no puede saber cuales
+    // existen: el catalogo lo define el admin en runtime. La pertenencia se
+    // verifica aca, antes de escribir, para que un codigo desconocido salga
+    // como un 400 legible y no como un error de FK de Prisma.
+    await this.productsService.assertProductCodesExist(
+      input.items.map((item) => item.productCode),
+    );
 
     const priceTable = await this.pricesService.getPriceTable();
     const { customerType, customerName, customerId, truckId } =
@@ -251,6 +261,12 @@ export class SalesService {
     }
 
     const isChurn = existingKind === 'churn';
+
+    if (!isChurn) {
+      await this.productsService.assertProductCodesExist(
+        input.items.map((item) => item.productCode),
+      );
+    }
 
     const priceTable = await this.pricesService.getPriceTable();
     const { customerType, customerName, customerId, truckId } =
