@@ -159,6 +159,19 @@ export function SaleDetailScreen() {
       // del padron. Mandarlo cuando existe es lo que evita que la edicion le
       // borre el vinculo: la API reescribe `customerId` con lo que reciba.
       ...(sale.customerId ? { customerId: sale.customerId } : {}),
+      // Los tres campos de abajo van por el mismo motivo, no por simetria.
+      // `updateSale` resuelve `paymentProofRef` como `input.paymentProofRef
+      // ?.trim() || null`, `containerReturned` como `input.containerReturned
+      // ?? null` y `note` como `input.note?.trim() || null`: lo que la
+      // edicion no manda, la API lo borra. Sin esto, corregir una cantidad
+      // borraba el comprobante de la transferencia y la respuesta del envase.
+      ...(sale.paymentProofRef ? { paymentProofRef: sale.paymentProofRef } : {}),
+      // `false` es una respuesta ("no lo devolvio"), no una ausencia: solo se
+      // omite cuando nunca se pregunto.
+      ...(sale.containerReturned !== undefined
+        ? { containerReturned: sale.containerReturned }
+        : {}),
+      ...(sale.note ? { note: sale.note } : {}),
     };
 
     const validationErrors = validateUpdateSaleInput(payload);

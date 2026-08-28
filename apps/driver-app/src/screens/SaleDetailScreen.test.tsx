@@ -242,3 +242,68 @@ describe('SaleDetailScreen/edit', () => {
     expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$22.500');
   });
 });
+
+// updateSale resuelve `paymentProofRef` como `input.paymentProofRef?.trim() ||
+// null` y `containerReturned` como `input.containerReturned ?? null`: lo que la
+// edicion no manda, la API lo borra. Es la misma forma del agujero de
+// customerId. Sin estos campos en el payload, corregir una cantidad borraba el
+// comprobante de la transferencia y el envase devuelto de esa venta.
+describe('SaleDetailScreen/edit preserves fields the payload would otherwise wipe', () => {
+  it('sends back the payment proof of the sale being edited', async () => {
+    mockedRouteSale = buildSale({ paymentProofRef: 'https://cdn.test/proof.jpg' });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    expect(mockedApiPatch.mock.calls[0][1].paymentProofRef).toBe('https://cdn.test/proof.jpg');
+  });
+
+  it('omits the payment proof entirely when the sale never had one', async () => {
+    mockedRouteSale = buildSale({ paymentProofRef: undefined });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const payload = mockedApiPatch.mock.calls[0][1];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'paymentProofRef')).toBe(false);
+  });
+
+  it('sends back the container-returned answer, including an explicit no', async () => {
+    mockedRouteSale = buildSale({ containerReturned: false });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    // `false` es una respuesta, no una ausencia: no puede colapsar a "no preguntado".
+    expect(mockedApiPatch.mock.calls[0][1].containerReturned).toBe(false);
+  });
+
+  it('leaves container-returned unasked when it was never answered', async () => {
+    mockedRouteSale = buildSale({ containerReturned: undefined });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const payload = mockedApiPatch.mock.calls[0][1];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'containerReturned')).toBe(false);
+  });
+
+  it('carries the note across an edit instead of dropping it', async () => {
+    mockedRouteSale = buildSale({ note: 'Dejar en el porton' });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    expect(mockedApiPatch.mock.calls[0][1].note).toBe('Dejar en el porton');
+  });
+});
