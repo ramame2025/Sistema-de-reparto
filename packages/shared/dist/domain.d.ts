@@ -117,6 +117,15 @@ export type SaleRecord = {
     customerName: string;
     customerType: CustomerType;
     /**
+     * Cliente del padron al que quedo enganchada la venta, si hubo uno.
+     * Devolverlo no es cosmetico: `updateSale` reescribe el vinculo con lo que
+     * venga en el payload, y `resolveCustomerAndTruck` interpreta la ausencia
+     * de `customerId` como "desenganchar". Sin este campo en la respuesta, un
+     * cliente que edita una venta no tiene forma de conservar el vinculo, y
+     * cada edicion lo borraria en silencio.
+     */
+    customerId?: string;
+    /**
      * `null` para una fila de churn (`kind === 'churn'`): no hubo pago, es el
      * hecho de negocio real, no un dato faltante. Toda fila `kind === 'sale'`
      * sigue teniendo un `PaymentMethod` valido.
