@@ -144,15 +144,29 @@ Each phase is a reviewable slice. The ordering is deliberate: **the
 correctness fixes ship before the admin screen that would otherwise
 weaponise them.**
 
-**Phase 1 — `Product` table and data migration.** Enum to table, FKs on
+**Phase 1 — `Product` table and data migration. ✅ DONE.** Enum to table, FKs on
 the three referencing tables, four seeded products, `products` module with
 admin-only writes and a catalogue readable by both roles. `packages/shared`
 loses `PRODUCT_CODES` as a closed set. No visible behaviour change.
 
-**Phase 2 — Historical pricing.** `validFrom` on `ProductPrice` (D3),
-`unitPrice` on `SaleItem` (D4), `occurredAt` on `Sale` (D5), pricing at a
-date, repricing an edit at its own date (D6). This is the phase that
+**Phase 2 — Historical pricing. ✅ DONE.** `validFrom` on `ProductPrice`
+(D3), `unitPrice` on `SaleItem` (D4), `occurredAt` on `Sale` (D5), pricing
+at a date, repricing an edit at its own date (D6). This is the phase that
 actually satisfies requirement 4.
+
+Verified over HTTP against a clone of the live database: a sale at 8500
+stays at 17000 with `unitPrice` 8500 after the price moves to 12000; a new
+sale takes 24000; a sale carrying an `occurredAt` 30 hours old is recorded
+at 8500; editing the old sale's quantity yields 25500 rather than 36000;
+and an `occurredAt` two years old is clamped to now and pays 12000. API
+suite 352 tests, 21 suites.
+
+The `unitPrice` backfill is honest about its limit — that figure was never
+recorded, so existing rows are *reconstructed* from the price in force.
+The migration verifies the premise instead of assuming it, aborting if any
+row is left without a price or if any pair already had more than one
+version. On the live data the five reconstructed lines sum to the stored
+totals exactly.
 
 **Phase 3 — The driver app consumes the catalogue.** Fetch and cache
 products and prices, render the product list from the catalogue instead of
