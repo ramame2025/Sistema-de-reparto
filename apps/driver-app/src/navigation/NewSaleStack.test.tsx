@@ -18,6 +18,7 @@ import React from 'react';
 import { NewSaleStack, type NewSaleStackParamList } from './NewSaleStack';
 import { NewSaleScreen } from '../screens/NewSaleScreen';
 import { CustomerPickerScreen } from '../screens/CustomerPickerScreen';
+import { SaleResultScreen } from '../screens/SaleResultScreen';
 
 describe('NewSaleStack', () => {
   it('registers Sale as the initial route, rendering NewSaleScreen', () => {
@@ -57,5 +58,23 @@ describe('NewSaleStack', () => {
       headerShown: true,
       title: 'Elegir cliente',
     });
+  });
+
+  it('registers SaleResult as a plain pushed screen with no header of its own', () => {
+    const element = NewSaleStack() as React.ReactElement<{
+      children: React.ReactElement[];
+    }>;
+
+    const children = React.Children.toArray(element.props.children) as React.ReactElement<{
+      name: keyof NewSaleStackParamList;
+      component: unknown;
+      options?: { headerShown?: boolean };
+    }>[];
+    const resultScreen = children.find((child) => child.props.name === 'SaleResult');
+
+    expect(resultScreen).toBeTruthy();
+    expect(resultScreen?.props.component).toBe(SaleResultScreen);
+    // Sin header: la pantalla ya dice que paso y ofrece su propia salida.
+    expect(resultScreen?.props.options).toMatchObject({ headerShown: false });
   });
 });

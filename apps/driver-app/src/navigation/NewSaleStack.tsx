@@ -1,11 +1,23 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import type { CustomerType } from '@distribuidor/shared';
+import type { CustomerType, PaymentMethod } from '@distribuidor/shared';
 import { NewSaleScreen } from '../screens/NewSaleScreen';
 import { CustomerPickerScreen } from '../screens/CustomerPickerScreen';
+import { SaleResultScreen } from '../screens/SaleResultScreen';
 
 export type NewSaleStackParamList = {
   Sale: { pickedCustomer?: { id: string; name: string; customerType: CustomerType } } | undefined;
   CustomerPicker: undefined;
+  /**
+   * `outcome` es la unica diferencia que le importa al chofer: 'sent' significa
+   * que el servidor ya tiene la venta, 'queued' que todavia esta en el
+   * telefono. Confundirlas lleva a cargar la misma venta dos veces.
+   */
+  SaleResult: {
+    outcome: 'sent' | 'queued';
+    customerName: string;
+    total: number;
+    paymentMethod: PaymentMethod;
+  };
 };
 
 const Stack = createNativeStackNavigator<NewSaleStackParamList>();
@@ -28,6 +40,11 @@ export function NewSaleStack() {
   return (
     <Stack.Navigator initialRouteName="Sale" screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Sale" component={NewSaleScreen} />
+      <Stack.Screen
+        name="SaleResult"
+        component={SaleResultScreen}
+        options={{ headerShown: false }}
+      />
       <Stack.Screen
         name="CustomerPicker"
         component={CustomerPickerScreen}
