@@ -11,11 +11,11 @@ import { formatPaymentMethod } from "../../../lib/format";
 import {
   EXPENSE_CATEGORIES,
   PAYMENT_METHODS,
-  PRODUCT_CODES,
   type ExpenseCategory,
   type ExpenseRecord,
   type PaymentMethod,
   type ProductCode,
+  type ProductRecord,
   type SaleAuditRecord,
   type SaleRecord,
 } from "@distribuidor/shared";
@@ -44,6 +44,12 @@ export default function ReportesPage() {
     error: salesLoadError,
     mutate: reloadSales,
   } = useSWR<SaleRecord[]>("/sales");
+
+  // Incluye los dados de baja: sus ventas viejas siguen existiendo, y son
+  // justamente las que alguien puede querer filtrar.
+  const { data: filterProducts = [] } = useSWR<ProductRecord[]>(
+    "/products?includeInactive=true",
+  );
   const {
     data: expenses = [],
     isLoading: expensesLoading,
@@ -353,9 +359,13 @@ export default function ReportesPage() {
               className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
             >
               <option value="all">Todos</option>
-              {PRODUCT_CODES.map((code) => (
-                <option key={code} value={code}>
-                  {code}
+              {/* Del catalogo, no de una lista fija: si no, un producto creado
+                  por el admin seria imposible de filtrar. Se incluyen los
+                  dados de baja, porque sus ventas viejas siguen existiendo y
+                  son justo las que alguien puede querer mirar. */}
+              {filterProducts.map((product) => (
+                <option key={product.code} value={product.code}>
+                  {product.name}
                 </option>
               ))}
             </select>

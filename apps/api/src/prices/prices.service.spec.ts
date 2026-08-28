@@ -339,3 +339,44 @@ describe('PricesService — historical pricing', () => {
     });
   });
 });
+
+describe('PricesService — listPrices with history', () => {
+  let service: PricesService;
+  let prisma: { productPrice: { findMany: jest.Mock }; product: { findMany: jest.Mock } };
+
+  beforeEach(async () => {
+    prisma = {
+      productPrice: { findMany: jest.fn() },
+      product: { findMany: jest.fn().mockResolvedValue([{ code: 'G10' }]) },
+    };
+    const moduleRef = await Test.createTestingModule({
+      providers: [PricesService, { provide: PrismaService, useValue: prisma }],
+    }).compile();
+    service = moduleRef.get(PricesService);
+  });
+
+  // Con ProductPrice append-only, un findMany crudo devuelve TODAS las
+  // versiones. Una pantalla que las liste tal cual mostraria el mismo producto
+  // repetido, con precios distintos y sin decir cual rige.
+  it('returns one current row per product and customer type, not every version', async () => {
+    const row = (amount: number, validFrom: string, customerType = 'final') => ({
+      id: `p-${customerType}-${amount}`,
+      productCode: 'G10',
+      customerType,
+      amount,
+      validFrom: new Date(validFrom),
+      updatedAt: new Date(validFrom),
+    });
+    prisma.productPrice.findMany.mockResolvedValue([
+      row(8500, '1970-01-01T00:00:00.000Z'),
+      row(9500, '2026-08-20T00:00:00.000Z'),
+      row(8200, '1970-01-01T00:00:00.000Z', 'comercio'),
+    ]);
+
+    const result = await service.listPrices();
+
+    expect(result).toHaveLength(2);
+    const final = result.find((r) => r.customerType === 'final');
+    expect(final?.amount).toBe(9500);
+  });
+});

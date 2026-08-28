@@ -90,12 +90,29 @@ export class PricesService {
     return table;
   }
 
+  /**
+   * Los precios VIGENTES, uno por producto y tipo de cliente.
+   *
+   * Con `ProductPrice` append-only, un findMany crudo devuelve todas las
+   * versiones: listarlas tal cual mostraria el mismo producto repetido, con
+   * precios distintos y sin decir cual rige. El historial completo es un
+   * pedido distinto, y todavia no esta expuesto.
+   */
   async listPrices(): Promise<ProductPriceRecord[]> {
+    const now = new Date();
     const rows: PriceRow[] = await this.prisma.productPrice.findMany({
-      orderBy: [{ customerType: 'asc' }, { productCode: 'asc' }],
+      where: { validFrom: { lte: now } },
+      orderBy: [{ customerType: 'asc' }, { productCode: 'asc' }, { validFrom: 'asc' }],
     });
 
-    return rows.map((row) => this.toRecord(row));
+    // Ordenadas ascendente por validFrom, la ultima que se escribe de cada
+    // combinacion es la vigente.
+    const current = new Map<string, PriceRow>();
+    for (const row of rows) {
+      current.set(`${row.customerType}|${row.productCode}`, row);
+    }
+
+    return [...current.values()].map((row) => this.toRecord(row));
   }
 
   /**
