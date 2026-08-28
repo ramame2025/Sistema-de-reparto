@@ -168,11 +168,19 @@ row is left without a price or if any pair already had more than one
 version. On the live data the five reconstructed lines sum to the stored
 totals exactly.
 
-**Phase 3 — The driver app consumes the catalogue.** Fetch and cache
-products and prices, render the product list from the catalogue instead of
-a constant, send `occurredAt`, show the staleness warning, block with no
-cache (D8). After this phase the number the driver sees and the number the
-API records cannot disagree.
+**Phase 3 — The driver app consumes the catalogue. ✅ DONE.** Fetch and
+cache products and prices, render the product list from the catalogue
+instead of a constant, send `occurredAt`, show the staleness warning, block
+with no cache (D8). After this phase the number the driver sees and the
+number the API records cannot disagree.
+
+Shipped: `GET /prices/table` opened to `chofer` (reads only — writes stay
+admin-only); `services/catalog.ts` caching products and prices as one
+entry; `CatalogContext` exposing `stale` and `canSell`; both `NewSaleScreen`
+and `LoadManifestScreen` rendering from the catalogue; `occurredAt` stamped
+on sales and empty visits. `DEFAULT_PRICE_TABLE` and `PRODUCT_CODES` no
+longer appear anywhere in the driver app's runtime code. Driver-app suite
+274 tests, 31 suites.
 
 **Phase 4 — Admin screens.** `/admin/productos`: create a product with its
 three prices, rename, reorder, activate/deactivate, and edit prices. The
