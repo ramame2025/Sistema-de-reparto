@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   CUSTOMER_TYPES,
+  distanceKm,
   sortByProximity,
   type CustomerRecord,
   type CustomerType,
@@ -18,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../services/apiClient';
 import { captureDeviceLocation, type CapturedLocation } from '../services/location';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
+import { formatDistance } from '../utils/distance';
 import { colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
@@ -157,6 +160,20 @@ export function CustomerPickerScreen() {
     );
   }, [visibleCustomers, location]);
 
+  // El alta rapida arranca cerrada: la accion normal es elegir de la lista,
+  // y un formulario siempre abierto empujaba la lista fuera de la pantalla.
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+
+  const subtitleFor = (customer: CustomerRecord): string => {
+    const type = CUSTOMER_TYPE_LABELS[customer.customerType] ?? customer.customerType;
+    if (!location || customer.latitude === undefined || customer.longitude === undefined) {
+      return type;
+    }
+    return `${type} · ${formatDistance(
+      distanceKm(location, { latitude: customer.latitude, longitude: customer.longitude }),
+    )}`;
+  };
+
   const pickCustomer = (customer: CustomerRecord) => {
     navigation.navigate('Sale', {
       pickedCustomer: {
@@ -210,16 +227,13 @@ export function CustomerPickerScreen() {
 
   return (
     <ScreenContainer testID="customer-picker-screen" scroll>
-      <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Buscar cliente</Text>
-        <TextInput
-          style={styles.input}
-          value={searchText}
-          onChangeText={setSearchText}
-          placeholder="Nombre del cliente"
-          testID="customer-picker-search"
-        />
-      </Card>
+      <TextInput
+        style={styles.search}
+        value={searchText}
+        onChangeText={setSearchText}
+        placeholder="Buscar por nombre"
+        testID="customer-picker-search"
+      />
 
       {error && <FeedbackBanner message={error} tone="error" />}
 
@@ -246,7 +260,9 @@ export function CustomerPickerScreen() {
             >
               <View style={styles.customerInfo}>
                 <Text style={styles.customerName}>{item.name}</Text>
-                <Text style={styles.customerType}>{item.customerType}</Text>
+                <Text style={styles.customerType} testID={`customer-picker-subtitle-${item.id}`}>
+                  {subtitleFor(item)}
+                </Text>
                 {item.address && (
                   <Text
                     style={styles.customerAddress}
@@ -263,13 +279,24 @@ export function CustomerPickerScreen() {
                   testID={`customer-picker-near-badge-${item.id}`}
                 />
               )}
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
             </Pressable>
           )}
         />
       )}
 
+      {!quickCreateOpen && (
+        <Button
+          label="Cliente nuevo"
+          variant="secondary"
+          onPress={() => setQuickCreateOpen(true)}
+          testID="customer-picker-quick-create-open"
+        />
+      )}
+
+      {quickCreateOpen && (
       <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Crear cliente rapido</Text>
+        <Text style={styles.fieldLabel}>Cliente nuevo</Text>
         <TextInput
           style={styles.input}
           value={quickCreateName}
@@ -322,11 +349,27 @@ export function CustomerPickerScreen() {
 
         <FeedbackBanner message={quickCreateError} tone="error" />
       </Card>
+      )}
     </ScreenContainer>
   );
 }
 
+const CUSTOMER_TYPE_LABELS: Record<string, string> = {
+  final: 'Final',
+  comercio: 'Comercio',
+  distribuidor: 'Distribuidor',
+};
+
 const styles = StyleSheet.create({
+  search: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
+    marginBottom: spacing.md,
+  },
   card: {
     gap: spacing.sm,
     marginBottom: spacing.md,
