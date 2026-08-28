@@ -1,27 +1,29 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
-  CUSTOMER_TYPES,
   PAYMENT_METHODS,
   type CreateSaleInput,
   type CustomerType,
   type PaymentMethod,
   type ProductCode,
   type RecordEmptyVisitInput,
-  type SaleRecord,
-  type UpdateSaleInput,
   validateCreateSaleInput,
   validateRecordEmptyVisitInput,
-  validateUpdateSaleInput,
 } from '@distribuidor/shared';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
+import { CustomerCard } from '../components/CustomerCard';
 import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner';
+import { ProductRow } from '../components/ProductRow';
+import { SaleFooterBar } from '../components/SaleFooterBar';
+import { SaleHeader } from '../components/SaleHeader';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SegmentedPills } from '../components/SegmentedPills';
+import { ToggleRow } from '../components/ToggleRow';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
@@ -33,6 +35,7 @@ import { captureDeviceLocation } from '../services/location';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
+import { formatArs } from '../utils/currency';
 
 type NewSaleScreenNavigationProp = NativeStackNavigationProp<NewSaleStackParamList, 'Sale'>;
 
@@ -42,48 +45,63 @@ type NewSaleScreenNavigationProp = NativeStackNavigationProp<NewSaleStackParamLi
  */
 const EMPTY_QUANTITIES: Record<ProductCode, number> = {};
 
+const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
+  final: 'Final',
+  comercio: 'Comercio',
+  distribuidor: 'Distribuidor',
+};
+
+const PAYMENT_LABELS: Record<PaymentMethod, string> = {
+  efectivo: 'Efectivo',
+  transferencia: 'Transf.',
+  qr: 'QR',
+  tarjeta: 'Tarjeta',
+};
+
+const PAYMENT_OPTIONS = PAYMENT_METHODS.map((method) => ({
+  value: method,
+  label: PAYMENT_LABELS[method],
+}));
+
 const buildClientGeneratedId = () =>
   `m_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-type SegmentButtonProps<T extends string> = {
-  label: T;
-  active: boolean;
-  onPress: () => void;
-};
-
-function SegmentButton<T extends string>({ label, active, onPress }: SegmentButtonProps<T>) {
-  return <Button label={label} variant={active ? 'primary' : 'secondary'} onPress={onPress} />;
-}
-
 /**
- * Relocated verbatim from the pre-PR5 App.tsx "Cliente"/"Productos"/save/
- * "Editar ultima venta"/"Anular ultima venta" cards. El camion ya no se tipea:
- * sale de `TruckContext`, que resuelve la asignacion vigente del chofer para
- * hoy, y sin camion la pantalla no deja cargar ventas. Cancel/edit now go through
- * `AuthContext.api` directly (design's NewSaleScreen consumer contract)
- * instead of raw `fetch`. No field/validation/copy redesign — only the
- * transport (context hooks + shared components) changed.
+ * Carga de una venta, en una sola pantalla con una sola accion.
+ *
+ * Dos cosas que antes eran campos de este formulario ya no lo son. El nombre
+ * del cliente y su tipo salen del padron que administra el admin, nunca de lo
+ * que el chofer tipee: el tipo es lo que elige la lista de precios, asi que
+ * dejarlo a mano ponia el precio en manos del chofer. Y editar/anular se
+ * fueron al historial, donde aplican a la venta que el chofer elige y no a la
+ * ultima que quedo en memoria de esta pantalla.
+ *
+ * La visita sin venta (churn) sobrevive, pero como estado del boton del pie en
+ * lugar de una tarjeta aparte: sin productos y con el envase marcado, la unica
+ * accion de la pantalla pasa a ser "Registrar devolucion". Sigue siendo el
+ * endpoint distinto que siempre fue.
  */
 export function NewSaleScreen() {
-  const { trySendSale, enqueueSale, trySendEmptyVisit, enqueueEmptyVisit, refreshDaySummary } =
-    useSync();
-  const { api, username, requireAuthToken } = useAuth();
+  const {
+    trySendSale,
+    enqueueSale,
+    trySendEmptyVisit,
+    enqueueEmptyVisit,
+    refreshDaySummary,
+    daySummary,
+    pendingSales,
+  } = useSync();
+  const { username, requireAuthToken } = useAuth();
   const { truck, status: truckStatus, error: truckError } = useTruck();
   const navigation = useNavigation<NewSaleScreenNavigationProp>();
   const route = useRoute<RouteProp<NewSaleStackParamList, 'Sale'>>();
 
-  const [customerType, setCustomerType] = useState<CustomerType>('final');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
+  // `undefined` hasta que el chofer elige un cliente del padron. Sin tipo no
+  // hay lista de precios, y por eso tampoco hay total ni venta que guardar.
+  const [customerType, setCustomerType] = useState<CustomerType | undefined>(undefined);
   const [customerName, setCustomerName] = useState('');
-  // Set only when a customer was picked via CustomerPickerScreen (Phase 6
-  // PR2, docs/plans/customer-picker-proximity.md design decision #7: params
-  // returned via navigation.navigate, no shared Context). Cleared the
-  // instant customerName is hand-edited afterward (design decision #9) --
-  // resolveCustomerAndTruck (apps/api/src/sales/sales.service.ts) silently
-  // overrides customerName/customerType from the stored Customer row
-  // whenever customerId is present, so an un-cleared customerId here would
-  // discard the driver's edit server-side without any visible error.
   const [customerId, setCustomerId] = useState<string | undefined>(undefined);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const { products, prices, stale: pricesAreStale, canSell } = useCatalog();
   const [quantities, setQuantities] = useState<Record<ProductCode, number>>(EMPTY_QUANTITIES);
   // `undefined` = nunca tocado (se omite del payload, "no preguntado" en el
@@ -94,14 +112,10 @@ export function NewSaleScreen() {
   const [paymentProofRef, setPaymentProofRef] = useState('');
   const [uploadingProof, setUploadingProof] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [recordingVisit, setRecordingVisit] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<FeedbackTone>('info');
-  const [lastSaleId, setLastSaleId] = useState<string | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
-  const [editReason, setEditReason] = useState('Correccion de carga');
-  const [canceling, setCanceling] = useState(false);
-  const [updating, setUpdating] = useState(false);
-  const [recordingVisit, setRecordingVisit] = useState(false);
+  const [lastSale, setLastSale] = useState<{ customerName: string; total: number } | null>(null);
 
   // Syncs a customer picked in CustomerPickerScreen back into local state
   // (Phase 6 PR2, docs/plans/customer-picker-proximity.md, "Data Flow"):
@@ -118,15 +132,6 @@ export function NewSaleScreen() {
     setCustomerType(pickedCustomer.customerType);
   }, [route.params?.pickedCustomer]);
 
-  const onChangeCustomerName = (value: string) => {
-    setCustomerName(value);
-    // Closes the silent-discard trap documented above: an edit made after a
-    // pick must not still carry the stale customerId into the payload.
-    if (customerId) {
-      setCustomerId(undefined);
-    }
-  };
-
   const currentItems = useMemo(
     () =>
       products
@@ -142,7 +147,7 @@ export function NewSaleScreen() {
   // de la app. Este era el numero que podia diferir del que grababa el
   // servidor, y con precios editables esa diferencia es plata.
   const total = useMemo(() => {
-    if (!prices) {
+    if (!prices || !customerType) {
       return 0;
     }
     return currentItems.reduce(
@@ -150,6 +155,13 @@ export function NewSaleScreen() {
       0,
     );
   }, [customerType, currentItems, prices]);
+
+  const unitPriceOf = (productCode: ProductCode): number | undefined => {
+    if (!prices || !customerType) {
+      return undefined;
+    }
+    return prices[customerType][productCode];
+  };
 
   const changeQty = (productCode: ProductCode, delta: number) => {
     setQuantities((previous) => ({
@@ -167,7 +179,7 @@ export function NewSaleScreen() {
    * Adaptado de ExpensesScreen.pickReceiptImage/captureReceiptImage/
    * uploadReceipt: mismo mecanismo (`/uploads/receipt`, reusado sin cambios
    * por decision del roadmap), mismo patron de estado local. Solo se
-   * renderiza cuando paymentMethod !== 'efectivo' (Open Question 2).
+   * renderiza cuando paymentMethod !== 'efectivo'.
    */
   const uploadPaymentProof = async (uri: string) => {
     // Uses expo-file-system's File.upload() (native multipart task) instead
@@ -251,6 +263,13 @@ export function NewSaleScreen() {
     }
   };
 
+  /** Deja la pantalla lista para la proxima venta sin perder el cliente. */
+  const resetAfterSale = () => {
+    setQuantities(EMPTY_QUANTITIES);
+    setContainerReturned(undefined);
+    setPaymentProofRef('');
+  };
+
   const saveSale = async () => {
     setMessage(null);
 
@@ -262,6 +281,11 @@ export function NewSaleScreen() {
       return;
     }
 
+    if (!customerType) {
+      showMessage('Elegi un cliente antes de guardar la venta.', 'error');
+      return;
+    }
+
     if (currentItems.length === 0) {
       showMessage('Agrega al menos un producto antes de guardar.', 'error');
       return;
@@ -269,9 +293,7 @@ export function NewSaleScreen() {
 
     // Punto en el tiempo (point-in-time-geolocation): se captura aca, justo
     // antes de armar el payload final, no al montar la pantalla -- ver el
-    // comentario de captureDeviceLocation (services/location.ts). Fase 6 PR3
-    // extrajo esta funcion de aca (era inline, captureSaleLocation) para que
-    // CustomerPickerScreen tambien pueda usarla sin duplicar la logica.
+    // comentario de captureDeviceLocation (services/location.ts).
     const location = await captureDeviceLocation();
 
     const payload: CreateSaleInput = {
@@ -288,7 +310,7 @@ export function NewSaleScreen() {
       paymentMethod,
       items: currentItems,
       // Omitido (no la key) si el chofer nunca toco el control -- "no
-      // preguntado" segun Open Question 1 del plan, no "false".
+      // preguntado", no "false".
       ...(containerReturned !== undefined ? { containerReturned } : {}),
       // Omitido (no la key) si nunca se subio una foto -- mismo criterio que
       // containerReturned, no un string vacio.
@@ -296,9 +318,7 @@ export function NewSaleScreen() {
       // Omitido (no las keys) si no hubo lectura exitosa -- permiso denegado,
       // sin fix de GPS, o timeout, mismo criterio que arriba.
       ...(location ? { latitude: location.latitude, longitude: location.longitude } : {}),
-      // Omitido (no la key) si nunca se eligio un cliente del picker, o si
-      // customerId se limpio por una edicion manual posterior -- mismo
-      // criterio condicional que los campos de arriba.
+      // Omitido (no la key) si no hay cliente del padron detras.
       ...(customerId ? { customerId } : {}),
     };
 
@@ -312,97 +332,37 @@ export function NewSaleScreen() {
       return;
     }
 
+    const soldTotal = total;
+
     try {
       setSaving(true);
-      const saleId = await trySendSale(payload);
-      setLastSaleId(saleId);
-      showMessage(`Venta guardada correctamente. ID: ${saleId}`, 'success');
-      setQuantities(EMPTY_QUANTITIES);
+      await trySendSale(payload);
+      setLastSale({ customerName, total: soldTotal });
+      resetAfterSale();
       await refreshDaySummary();
+      // El resultado se cuenta en su propia pantalla, no en una linea de
+      // banner: "el servidor la tiene" y "sigue en el telefono" son dos
+      // desenlaces distintos, y confundirlos hace que el chofer cargue la
+      // misma venta dos veces.
+      navigation.navigate('SaleResult', {
+        outcome: 'sent',
+        customerName,
+        total: soldTotal,
+        paymentMethod,
+      });
     } catch (error) {
       const cause = error instanceof Error ? error.message : 'No se pudo guardar en API';
-      const queueLength = await enqueueSale(payload, cause);
-      showMessage(`Sin conexion. Venta en cola offline (${queueLength} pendientes).`, 'warning');
-      setQuantities(EMPTY_QUANTITIES);
+      await enqueueSale(payload, cause);
+      setLastSale({ customerName, total: soldTotal });
+      resetAfterSale();
+      navigation.navigate('SaleResult', {
+        outcome: 'queued',
+        customerName,
+        total: soldTotal,
+        paymentMethod,
+      });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const cancelLastSale = async () => {
-    if (!lastSaleId) {
-      showMessage('Todavia no hay una venta para anular.', 'error');
-      return;
-    }
-
-    if (!cancelReason || cancelReason.trim().length < 3) {
-      showMessage('El motivo de anulacion debe tener al menos 3 caracteres.', 'error');
-      return;
-    }
-
-    try {
-      setCanceling(true);
-      await api.patch<SaleRecord>(`/sales/${lastSaleId}/cancel`, { reason: cancelReason });
-      showMessage('Venta anulada correctamente.', 'success');
-      setCancelReason('');
-      await refreshDaySummary();
-    } catch (error) {
-      const cause = error instanceof ApiError ? error.message : 'No se pudo anular la venta.';
-      showMessage(cause, 'error');
-    } finally {
-      setCanceling(false);
-    }
-  };
-
-  const updateLastSale = async () => {
-    if (!lastSaleId) {
-      showMessage('Todavia no hay una venta para editar.', 'error');
-      return;
-    }
-
-    if (!editReason || editReason.trim().length < 3) {
-      showMessage('El motivo de edicion debe tener al menos 3 caracteres.', 'error');
-      return;
-    }
-
-    const payload: UpdateSaleInput = {
-      driverName: username,
-      truckId: truck?.truckId,
-      truckCode: truck?.code,
-      customerName,
-      customerType,
-      paymentMethod,
-      items: currentItems,
-      reason: editReason,
-      // Bug fix (driver-ux-polish): saveSale's payload already spreads
-      // customerId conditionally -- this one didn't, so editing a sale
-      // linked to a Customer silently dropped that link on every edit
-      // (the API's resolveCustomerAndTruck treats customerId === undefined
-      // as "clear the link").
-      ...(customerId ? { customerId } : {}),
-    };
-
-    if (payload.items.length === 0) {
-      showMessage('Agrega al menos un producto para editar la venta.', 'error');
-      return;
-    }
-
-    const validationErrors = validateUpdateSaleInput(payload);
-    if (validationErrors.length > 0) {
-      showMessage(validationErrors[0], 'error');
-      return;
-    }
-
-    try {
-      setUpdating(true);
-      await api.patch<SaleRecord>(`/sales/${lastSaleId}`, payload);
-      showMessage('Venta editada correctamente.', 'success');
-      await refreshDaySummary();
-    } catch (error) {
-      const cause = error instanceof ApiError ? error.message : 'No se pudo editar la venta.';
-      showMessage(cause, 'error');
-    } finally {
-      setUpdating(false);
     }
   };
 
@@ -422,14 +382,20 @@ export function NewSaleScreen() {
       return;
     }
 
+    if (!customerType) {
+      showMessage('Elegi un cliente antes de registrar la visita.', 'error');
+      return;
+    }
+
     const payload: RecordEmptyVisitInput = {
       clientGeneratedId: buildClientGeneratedId(),
       occurredAt: new Date().toISOString(),
       driverName: username,
-      truckId: truck?.truckId,
-      truckCode: truck?.code,
+      truckId: truck.truckId,
+      truckCode: truck.code,
       customerName,
       customerType,
+      ...(customerId ? { customerId } : {}),
     };
 
     const validationErrors = validateRecordEmptyVisitInput(payload);
@@ -444,6 +410,7 @@ export function NewSaleScreen() {
       // Copia deliberadamente distinta de la de una venta normal: el chofer
       // no debe confundir esto con "vendi algo".
       showMessage(`Visita sin venta registrada. ID: ${visitId}`, 'success');
+      resetAfterSale();
       await refreshDaySummary();
     } catch (error) {
       const cause = error instanceof Error ? error.message : 'No se pudo registrar la visita';
@@ -452,272 +419,226 @@ export function NewSaleScreen() {
         `Sin conexion. Visita sin venta en cola offline (${queueLength} pendientes).`,
         'warning',
       );
+      resetAfterSale();
     } finally {
       setRecordingVisit(false);
     }
   };
 
+  /**
+   * La pantalla tiene una sola accion, y su texto es lo que explica por que
+   * no esta disponible. Un boton gris sin motivo deja al chofer sin saber que
+   * le falta; cada rama de aca nombra exactamente lo que hay que resolver.
+   */
+  const footerAction = useMemo(() => {
+    if (saving) {
+      return { label: 'Guardando...', disabled: true, run: () => {} };
+    }
+    if (recordingVisit) {
+      return { label: 'Registrando...', disabled: true, run: () => {} };
+    }
+    if (!canSell) {
+      return { label: 'Sin precios — sincronizá', disabled: true, run: () => {} };
+    }
+    if (!truck) {
+      return { label: 'Sin camión asignado', disabled: true, run: () => {} };
+    }
+    if (!customerName) {
+      return { label: 'Elegí un cliente', disabled: true, run: () => {} };
+    }
+    if (currentItems.length === 0) {
+      // Envase marcado y nada vendido es exactamente una visita sin venta:
+      // el chofer paso, le devolvieron el envase, no compro. Fila churn, no
+      // una venta en cero.
+      if (containerReturned === true) {
+        return {
+          label: 'Registrar devolución',
+          disabled: false,
+          run: () => void recordVisit(),
+        };
+      }
+      return { label: 'Agregá productos', disabled: true, run: () => {} };
+    }
+    return { label: 'Guardar venta', disabled: false, run: () => void saveSale() };
+  }, [
+    saving,
+    recordingVisit,
+    canSell,
+    truck,
+    customerName,
+    currentItems.length,
+    containerReturned,
+    saveSale,
+    recordVisit,
+  ]);
+
+  const containerSubtitle =
+    containerReturned === undefined ? 'Sin marcar' : containerReturned ? 'Devuelto' : 'No devolvió';
+
   return (
-    <ScreenContainer testID="new-sale-screen" scroll>
-      <Text style={styles.tag}>Distribuidor · App chofer</Text>
-
-      <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Cliente</Text>
-        <Text style={styles.apiHint}>Chofer: {username}</Text>
-        {truck && (
-          <Text style={styles.assignedTruck} testID="new-sale-assigned-truck">
-            Camion: {truck.code} · {truck.plate} · {truck.capacity} u.
-            {truck.kind === 'cobertura' ? ' (cobertura)' : ''}
-          </Text>
-        )}
-        {!truck && truckStatus === 'error' && (
-          <Text style={styles.truckProblem} testID="new-sale-truck-error">
-            {truckError} Revisa la conexion y volve a intentar.
-          </Text>
-        )}
-        {!truck && truckStatus !== 'error' && truckStatus !== 'loading' && (
-          <Text style={styles.truckProblem} testID="new-sale-no-truck">
-            Hoy no tenes un camion asignado. Hablá con el administrador antes de
-            cargar ventas.
-          </Text>
-        )}
-        <TextInput
-          style={styles.input}
-          value={customerName}
-          onChangeText={onChangeCustomerName}
-          placeholder="Nombre del cliente"
+    <ScreenContainer
+      testID="new-sale-screen"
+      scroll
+      footer={
+        <SaleFooterBar
+          total={total}
+          actionLabel={footerAction.label}
+          onPress={footerAction.run}
+          disabled={footerAction.disabled}
         />
-        <Button
-          label="Elegir cliente"
-          variant="secondary"
-          onPress={() => navigation.navigate('CustomerPicker')}
-          testID="new-sale-pick-customer-button"
+      }
+    >
+      <SaleHeader
+        testID="new-sale-header"
+        saleNumber={daySummary.activeCount + 1}
+        truckCode={truck?.code}
+        queuedCount={pendingSales.length}
+      />
+
+      {!truck && truckStatus === 'error' && (
+        <FeedbackBanner
+          testID="new-sale-truck-error"
+          message={`${truckError} Revisa la conexion y volve a intentar.`}
+          tone="error"
         />
-
-        <Text style={styles.fieldLabel}>Tipo de cliente</Text>
-        <View style={styles.segmentRow}>
-          {CUSTOMER_TYPES.map((type) => (
-            <SegmentButton
-              key={type}
-              label={type}
-              active={customerType === type}
-              onPress={() => setCustomerType(type)}
-            />
-          ))}
-        </View>
-
-        <Text style={styles.fieldLabel}>Forma de pago</Text>
-        <View style={styles.segmentRow}>
-          {PAYMENT_METHODS.map((method) => (
-            <SegmentButton
-              key={method}
-              label={method}
-              active={paymentMethod === method}
-              onPress={() => setPaymentMethod(method)}
-            />
-          ))}
-        </View>
-
-        {paymentMethod !== 'efectivo' && (
-          <View style={styles.paymentProofWrap}>
-            <Text style={styles.fieldLabel}>Comprobante de pago (opcional)</Text>
-            <Button
-              label={uploadingProof ? 'Subiendo comprobante...' : 'Adjuntar desde galeria'}
-              variant="secondary"
-              onPress={() => void pickPaymentProofImage()}
-              disabled={uploadingProof}
-              testID="new-sale-payment-proof-pick-gallery"
-            />
-            <Button
-              label={uploadingProof ? 'Subiendo comprobante...' : 'Sacar foto comprobante'}
-              variant="secondary"
-              onPress={() => void capturePaymentProofImage()}
-              disabled={uploadingProof}
-              testID="new-sale-payment-proof-capture-camera"
-            />
-            {paymentProofRef.length > 0 && (
-              <View style={styles.receiptPreviewWrap}>
-                <Text style={styles.apiHint}>Comprobante adjunto:</Text>
-                <Image
-                  source={{ uri: paymentProofRef }}
-                  style={styles.receiptPreview}
-                  resizeMode="cover"
-                />
-              </View>
-            )}
-          </View>
-        )}
-
-        <Text style={styles.fieldLabel}>Envase</Text>
-        <Button
-          label={`Envase devuelto: ${
-            containerReturned === undefined ? 'sin marcar' : containerReturned ? 'si' : 'no'
-          }`}
-          variant={containerReturned ? 'primary' : 'secondary'}
-          onPress={() => setContainerReturned((previous) => !(previous ?? false))}
-          testID="new-sale-container-returned-toggle"
+      )}
+      {!truck && truckStatus !== 'error' && truckStatus !== 'loading' && (
+        <FeedbackBanner
+          testID="new-sale-no-truck"
+          message="Hoy no tenes un camion asignado. Hablá con el administrador antes de cargar ventas."
+          tone="error"
         />
-      </Card>
+      )}
+      {pricesAreStale && (
+        <FeedbackBanner
+          testID="new-sale-stale-prices"
+          message="Sin conexion: precios de la ultima vez que sincronizaste. Pueden estar desactualizados."
+          tone="warning"
+        />
+      )}
 
-      <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Productos</Text>
+      <CustomerCard
+        testID="new-sale-customer-card"
+        name={customerName || undefined}
+        subtitle={customerType ? CUSTOMER_TYPE_LABELS[customerType] : undefined}
+        onPress={() => navigation.navigate('CustomerPicker')}
+      />
+
+      <View style={styles.products}>
         {products.map((product) => (
-          <View key={product.code} style={styles.productRow}>
-            <Text style={styles.productName}>{product.name}</Text>
-            <View style={styles.qtyRow}>
+          <ProductRow
+            key={product.code}
+            code={product.code}
+            name={product.name}
+            unitPrice={unitPriceOf(product.code)}
+            quantity={quantities[product.code] ?? 0}
+            onIncrement={() => changeQty(product.code, 1)}
+            onDecrement={() => changeQty(product.code, -1)}
+          />
+        ))}
+      </View>
+
+      <Text style={styles.sectionLabel}>COBRO</Text>
+      <SegmentedPills
+        options={PAYMENT_OPTIONS}
+        value={paymentMethod}
+        onChange={setPaymentMethod}
+        testID="new-sale-payment"
+      />
+
+      {paymentMethod !== 'efectivo' && (
+        <View style={styles.proof}>
+          <View style={styles.sectionRow}>
+            <Text style={styles.sectionLabel}>COMPROBANTE</Text>
+            <Text style={styles.optional}>opcional</Text>
+          </View>
+          <View style={styles.proofButtons}>
+            <View style={styles.proofButton}>
               <Button
-                label="-"
+                label={uploadingProof ? 'Subiendo...' : 'Sacar foto'}
                 variant="secondary"
-                onPress={() => changeQty(product.code, -1)}
-                testID={`new-sale-qty-decrement-${product.code}`}
+                onPress={() => void capturePaymentProofImage()}
+                disabled={uploadingProof}
+                testID="new-sale-payment-proof-capture-camera"
               />
-              <Text style={styles.qtyValue}>{quantities[product.code] ?? 0}</Text>
+            </View>
+            <View style={styles.proofButton}>
               <Button
-                label="+"
+                label={uploadingProof ? 'Subiendo...' : 'Galería'}
                 variant="secondary"
-                onPress={() => changeQty(product.code, 1)}
-                testID={`new-sale-qty-increment-${product.code}`}
+                onPress={() => void pickPaymentProofImage()}
+                disabled={uploadingProof}
+                testID="new-sale-payment-proof-pick-gallery"
               />
             </View>
           </View>
-        ))}
-      </Card>
+          {paymentProofRef.length > 0 && (
+            <Card>
+              <Text style={styles.hint}>Comprobante adjunto:</Text>
+              <Image
+                source={{ uri: paymentProofRef }}
+                style={styles.receiptPreview}
+                resizeMode="cover"
+              />
+            </Card>
+          )}
+        </View>
+      )}
 
-      <Card style={styles.card}>
-        <Text style={styles.total} testID="new-sale-total">
-          Total: ${total.toLocaleString('es-AR')}
-        </Text>
-        {pricesAreStale && (
-          <FeedbackBanner
-            testID="new-sale-stale-prices"
-            message="Sin conexion: precios de la ultima vez que sincronizaste. Pueden estar desactualizados."
-            tone="warning"
-          />
-        )}
-        {canSell ? (
-          <Button
-            label={saving ? 'Guardando...' : 'Guardar venta'}
-            onPress={() => void saveSale()}
-            disabled={saving}
-            testID="new-sale-submit"
-          />
-        ) : (
-          <FeedbackBanner
-            testID="new-sale-no-catalog"
-            message="No hay precios cargados en este telefono todavia. Conectate una vez para poder vender."
-            tone="error"
-          />
-        )}
-        <FeedbackBanner message={message} tone={messageTone} />
-      </Card>
+      <ToggleRow
+        label="Envase devuelto"
+        subtitle={containerSubtitle}
+        value={containerReturned === true}
+        onValueChange={setContainerReturned}
+        testID="new-sale-container-returned"
+      />
 
-      <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Visita sin venta</Text>
-        <Text style={styles.apiHint}>
-          Para cuando el cliente devuelve el envase pero no compra nada. No
-          necesita productos cargados -- es una accion distinta de guardar
-          una venta.
+      {lastSale && (
+        <Text style={styles.lastSale} testID="new-sale-last-sale">
+          Última: {lastSale.customerName} · {formatArs(lastSale.total)}
         </Text>
-        <Button
-          label={recordingVisit ? 'Registrando...' : 'Registrar visita sin venta'}
-          variant="secondary"
-          onPress={() => void recordVisit()}
-          disabled={recordingVisit}
-          testID="new-sale-record-visit-button"
-        />
-      </Card>
+      )}
 
-      <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Editar ultima venta</Text>
-        <Text style={styles.apiHint}>
-          ID ultima venta: {lastSaleId ?? 'sin ventas guardadas'}
-        </Text>
-        <TextInput
-          style={styles.input}
-          value={editReason}
-          onChangeText={setEditReason}
-          placeholder="Motivo de edicion"
-        />
-        <Button
-          label={updating ? 'Actualizando...' : 'Editar ultima venta'}
-          variant="secondary"
-          onPress={() => void updateLastSale()}
-          disabled={updating}
-          testID="new-sale-edit-button"
-        />
-      </Card>
-
-      <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Anular ultima venta</Text>
-        <Text style={styles.apiHint}>
-          ID ultima venta: {lastSaleId ?? 'sin ventas guardadas'}
-        </Text>
-        <TextInput
-          style={styles.input}
-          value={cancelReason}
-          onChangeText={setCancelReason}
-          placeholder="Motivo de anulacion"
-        />
-        <Button
-          label={canceling ? 'Anulando...' : 'Anular ultima venta'}
-          variant="secondary"
-          onPress={() => void cancelLastSale()}
-          disabled={canceling}
-          testID="new-sale-cancel-button"
-        />
-      </Card>
+      <FeedbackBanner message={message} tone={messageTone} />
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  tag: {
-    color: colors.primary,
-    fontWeight: typography.weights.bold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
-    marginBottom: spacing.sm,
-  },
-  card: {
+  products: {
     gap: spacing.sm,
-    marginBottom: spacing.md,
+    marginTop: spacing.md,
   },
-  fieldLabel: {
-    fontSize: typography.sizes.sm,
+  sectionLabel: {
+    fontSize: typography.sizes.xs,
     fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
+    color: colors.textSecondary,
+    letterSpacing: 0.7,
+    marginTop: spacing.md,
     marginBottom: spacing.sm,
   },
-  assignedTruck: {
-    fontWeight: '600',
-    marginBottom: 8,
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
   },
-  truckProblem: {
-    marginBottom: 8,
-  },
-  apiHint: {
+  optional: {
     fontSize: typography.sizes.xs,
     color: colors.textSecondary,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.surface,
+  proof: {
+    gap: spacing.sm,
   },
-  segmentRow: {
+  proofButtons: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: spacing.sm,
   },
-  paymentProofWrap: {
-    gap: spacing.sm,
+  proofButton: {
+    flex: 1,
   },
-  receiptPreviewWrap: {
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
+  hint: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
   },
   receiptPreview: {
     width: '100%',
@@ -725,34 +646,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginTop: spacing.xs,
   },
-  productRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingBottom: spacing.sm,
-  },
-  productName: {
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-  },
-  qtyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  qtyValue: {
-    minWidth: 28,
-    textAlign: 'center',
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-  },
-  total: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
+  lastSale: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
+    marginTop: spacing.md,
   },
 });

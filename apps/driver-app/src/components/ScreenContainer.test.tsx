@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react-native';
+import { render, screen, within } from '@testing-library/react-native';
 import { StyleSheet, Text } from 'react-native';
 import { ScreenContainer } from './ScreenContainer';
 import { colors } from '../theme/colors';
@@ -74,5 +74,30 @@ describe('ScreenContainer', () => {
     );
 
     expect(screen.getByTestId('screen-keyboard-avoid')).toBeTruthy();
+  });
+
+  it('renders a footer pinned outside the scrollable area', async () => {
+    // La barra de total y accion no puede scrollear con el contenido: el
+    // chofer tiene que poder guardar la venta sin bajar hasta el final.
+    await render(
+      <ScreenContainer testID="screen" footer={<Text>Guardar venta</Text>}>
+        <Text>Contenido</Text>
+      </ScreenContainer>
+    );
+
+    const footer = screen.getByTestId('screen-footer');
+    expect(footer).toBeTruthy();
+    expect(within(footer).getByText('Guardar venta')).toBeTruthy();
+    expect(within(screen.getByTestId('screen-scroll')).queryByText('Guardar venta')).toBeNull();
+  });
+
+  it('renders no footer slot when the screen has no footer', async () => {
+    await render(
+      <ScreenContainer testID="screen">
+        <Text>Contenido</Text>
+      </ScreenContainer>
+    );
+
+    expect(screen.queryByTestId('screen-footer')).toBeNull();
   });
 });

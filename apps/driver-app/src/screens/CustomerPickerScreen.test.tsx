@@ -251,6 +251,9 @@ describe('CustomerPickerScreen/alta rapida', () => {
     await render(<CustomerPickerScreen />);
     await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
 
+    // El alta rapida arranca cerrada: la accion normal es elegir de la
+    // lista, no crear un cliente.
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-open'));
     await fireEvent.changeText(
       screen.getByTestId('customer-picker-quick-create-name'),
       'Almacen Norte 2',
@@ -284,6 +287,9 @@ describe('CustomerPickerScreen/alta rapida', () => {
     await render(<CustomerPickerScreen />);
     await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
 
+    // El alta rapida arranca cerrada: la accion normal es elegir de la
+    // lista, no crear un cliente.
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-open'));
     await fireEvent.changeText(
       screen.getByTestId('customer-picker-quick-create-name'),
       'Sin Ubicacion',
@@ -308,6 +314,9 @@ describe('CustomerPickerScreen/alta rapida', () => {
     await render(<CustomerPickerScreen />);
     await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
 
+    // El alta rapida arranca cerrada: la accion normal es elegir de la
+    // lista, no crear un cliente.
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-open'));
     await fireEvent.changeText(
       screen.getByTestId('customer-picker-quick-create-name'),
       'Cliente Fallido',
@@ -365,6 +374,9 @@ describe('CustomerPickerScreen — duplicate on quick create', () => {
     );
 
   const typeNameAndSubmit = async () => {
+    // El alta rapida arranca cerrada: la accion normal es elegir de la
+    // lista, no crear un cliente.
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-open'));
     await fireEvent.changeText(
       screen.getByTestId('customer-picker-quick-create-name'),
       'Don Jose',
@@ -451,5 +463,62 @@ describe('CustomerPickerScreen — duplicate on quick create', () => {
       ).toBeTruthy(),
     );
     expect(screen.queryByTestId('customer-picker-duplicate')).toBeNull();
+  });
+});
+
+describe('CustomerPickerScreen/subtitulo de la fila', () => {
+  it('reads the customer type alongside how far away it is', async () => {
+    mockedApiGet.mockResolvedValue(locatedCustomers);
+    mockedCaptureDeviceLocation.mockResolvedValue(readerLocation);
+
+    await render(<CustomerPickerScreen />);
+
+    await waitFor(() => expect(screen.getByText('Kiosco Cercano')).toBeTruthy());
+    // La distancia se muestra aca, donde sirve para elegir — no en la pantalla
+    // de carga, donde el cliente ya esta elegido.
+    expect(screen.getByTestId('customer-picker-subtitle-near-1')).toHaveTextContent(/^\w+ · a /);
+  });
+
+  it('falls back to the type alone when there is no GPS reading to measure from', async () => {
+    mockedApiGet.mockResolvedValue(locatedCustomers);
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+
+    await render(<CustomerPickerScreen />);
+
+    await waitFor(() => expect(screen.getByText('Kiosco Cercano')).toBeTruthy());
+    expect(screen.getByTestId('customer-picker-subtitle-near-1')).not.toHaveTextContent(/ · a /);
+  });
+
+  it('falls back to the type alone for a customer with no coordinates on file', async () => {
+    mockedApiGet.mockResolvedValue(locatedCustomers);
+    mockedCaptureDeviceLocation.mockResolvedValue(readerLocation);
+
+    await render(<CustomerPickerScreen />);
+
+    await waitFor(() => expect(screen.getByText('Sin Coordenadas')).toBeTruthy());
+    expect(screen.getByTestId('customer-picker-subtitle-unlocated-1')).not.toHaveTextContent(
+      / · a /,
+    );
+  });
+});
+
+describe('CustomerPickerScreen/alta rapida colapsada', () => {
+  it('keeps the create form out of the way until it is asked for', async () => {
+    mockedApiGet.mockResolvedValue(customers);
+
+    await render(<CustomerPickerScreen />);
+
+    expect(screen.queryByTestId('customer-picker-quick-create-name')).toBeNull();
+    expect(screen.getByTestId('customer-picker-quick-create-open')).toBeTruthy();
+  });
+
+  it('reveals the form when the driver asks for a new customer', async () => {
+    mockedApiGet.mockResolvedValue(customers);
+
+    await render(<CustomerPickerScreen />);
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-open'));
+
+    expect(screen.getByTestId('customer-picker-quick-create-name')).toBeTruthy();
+    expect(screen.queryByTestId('customer-picker-quick-create-open')).toBeNull();
   });
 });

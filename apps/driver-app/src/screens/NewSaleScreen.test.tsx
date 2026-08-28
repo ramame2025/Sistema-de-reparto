@@ -207,35 +207,42 @@ beforeEach(() => {
   });
 });
 
-// Extracted so every test gets a non-blank customerName by default (matching
-// the pre-fix 'Cliente de prueba' literal that used to live inside the
-// component's initial state) -- the blank-guard tests below opt out of this
-// helper (or clear the field afterward) to exercise the new validation path.
-const renderSaleScreen = async (customerName = 'Cliente de prueba') => {
-  const result = await render(<NewSaleScreen />);
-  await fireEvent.changeText(screen.getByPlaceholderText('Nombre del cliente'), customerName);
-  return result;
+// Every test needs a picked customer to get past the footer guard: the name
+// and the type are directory data now, so there is no text field to type them
+// into. Tests that exercise the no-customer path render the screen directly.
+const renderSaleScreen = async (
+  customerName = 'Cliente de prueba',
+  customerType: 'final' | 'comercio' | 'distribuidor' = 'final',
+) => {
+  mockedRouteParams = { pickedCustomer: { id: 'cus-1', name: customerName, customerType } };
+  return render(<NewSaleScreen />);
 };
 
 const saveOneSale = async (saleId: string) => {
   mockedTrySendSale.mockResolvedValueOnce(saleId);
-  await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-  await fireEvent.press(screen.getByText('Guardar venta'));
-  await waitFor(() => expect(screen.getAllByText(`ID ultima venta: ${saleId}`)).toHaveLength(2));
+  await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+  await fireEvent.press(screen.getByTestId('sale-footer-action'));
+  await waitFor(() =>
+    expect(mockedNavigate).toHaveBeenCalledWith('SaleResult', expect.anything()),
+  );
 };
 
 describe('NewSaleScreen/online success', () => {
-  it('submits, resets the form, refreshes the summary, and shows success feedback', async () => {
+  it('submits, resets the form, refreshes the summary, and hands off to the result screen', async () => {
     mockedTrySendSale.mockResolvedValue('sale-123');
 
-    await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await renderSaleScreen('Kiosco La Esquina');
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
-    expect(screen.getByText('Venta guardada correctamente. ID: sale-123')).toBeTruthy();
-    expect(screen.getAllByText('ID ultima venta: sale-123')).toHaveLength(2);
-    expect(screen.getByText('Total: $0')).toBeTruthy();
+    expect(mockedNavigate).toHaveBeenCalledWith('SaleResult', {
+      outcome: 'sent',
+      customerName: 'Kiosco La Esquina',
+      total: 8500,
+      paymentMethod: 'efectivo',
+    });
+    expect(screen.getByTestId('sale-footer-total')).toHaveTextContent('$0');
     expect(mockedRefreshDaySummary).toHaveBeenCalledTimes(1);
   });
 });
@@ -245,16 +252,20 @@ describe('NewSaleScreen/offline fallback', () => {
     mockedTrySendSale.mockRejectedValue(new Error('Network request failed'));
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G15'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent.press(screen.getByTestId('product-row-G15-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedEnqueueSale).toHaveBeenCalledTimes(1));
     expect(mockedEnqueueSale).toHaveBeenCalledWith(
       expect.objectContaining({ items: [{ productCode: 'G15', quantity: 1 }] }),
       'Network request failed',
     );
-    expect(screen.getByText('Sin conexion. Venta en cola offline (1 pendientes).')).toBeTruthy();
-    expect(screen.getByText('Total: $0')).toBeTruthy();
+    // Desenlace distinto, pantalla distinta: la venta sigue en el telefono.
+    expect(mockedNavigate).toHaveBeenCalledWith(
+      'SaleResult',
+      expect.objectContaining({ outcome: 'queued' }),
+    );
+    expect(screen.getByTestId('sale-footer-total')).toHaveTextContent('$0');
   });
 });
 
@@ -262,22 +273,22 @@ describe('NewSaleScreen/product quantities', () => {
   it('updates the derived total via calculateSaleTotal as steppers change', async () => {
     await renderSaleScreen();
 
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    expect(screen.getByText('Total: $8.500')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    expect(screen.getByTestId('sale-footer-total')).toHaveTextContent('$8.500');
 
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    expect(screen.getByText('Total: $17.000')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    expect(screen.getByTestId('sale-footer-total')).toHaveTextContent('$17.000');
 
-    await fireEvent.press(screen.getByTestId('new-sale-qty-decrement-G10'));
-    expect(screen.getByText('Total: $8.500')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('product-row-G10-decrement'));
+    expect(screen.getByTestId('sale-footer-total')).toHaveTextContent('$8.500');
   });
 });
 
 describe('NewSaleScreen/camion asignado', () => {
-  it('shows the assigned truck read-only, with no free-text input to type it', async () => {
+  it('shows the assigned truck in the header, with no free-text input to type it', async () => {
     await renderSaleScreen();
 
-    expect(screen.getByTestId('new-sale-assigned-truck')).toBeTruthy();
+    expect(screen.getByTestId('new-sale-header')).toBeTruthy();
     expect(screen.getByText(/CAMION-07/)).toBeTruthy();
     // El camion ya no se escribe: sale de la asignacion.
     expect(screen.queryByTestId('new-sale-truck-code')).toBeNull();
@@ -286,8 +297,8 @@ describe('NewSaleScreen/camion asignado', () => {
   it('sends truckId and truckCode from the assignment, not from anything the driver typed', async () => {
     await renderSaleScreen();
 
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalled());
     expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
@@ -302,8 +313,8 @@ describe('NewSaleScreen/camion asignado', () => {
 
     await renderSaleScreen();
 
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     expect(mockedTrySendSale).not.toHaveBeenCalled();
     expect(mockedEnqueueSale).not.toHaveBeenCalled();
@@ -327,99 +338,35 @@ describe('NewSaleScreen/camion asignado', () => {
   });
 });
 
-describe('NewSaleScreen/cancel last sale', () => {
-  it('requires a non-empty cancelReason before calling the cancel endpoint', async () => {
-    await renderSaleScreen();
-    await saveOneSale('sale-123');
-
-    await fireEvent.press(screen.getByTestId('new-sale-cancel-button'));
-
-    await waitFor(() =>
-      expect(
-        screen.getByText('El motivo de anulacion debe tener al menos 3 caracteres.'),
-      ).toBeTruthy(),
-    );
-    expect(mockedApiPatch).not.toHaveBeenCalled();
-  });
-
-  it('calls the cancel endpoint via api and shows success feedback', async () => {
-    mockedApiPatch.mockResolvedValue({});
-
-    await renderSaleScreen();
-    await saveOneSale('sale-123');
-
-    await fireEvent.changeText(
-      screen.getByPlaceholderText('Motivo de anulacion'),
-      'Cliente cancelo el pedido',
-    );
-    await fireEvent.press(screen.getByTestId('new-sale-cancel-button'));
-
-    await waitFor(() =>
-      expect(mockedApiPatch).toHaveBeenCalledWith('/sales/sale-123/cancel', {
-        reason: 'Cliente cancelo el pedido',
-      }),
-    );
-    expect(screen.getByText('Venta anulada correctamente.')).toBeTruthy();
-    expect(mockedRefreshDaySummary).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('NewSaleScreen/edit last sale', () => {
-  it('requires a non-empty editReason before calling the update endpoint', async () => {
-    await renderSaleScreen();
-    await saveOneSale('sale-123');
-
-    await fireEvent.changeText(screen.getByPlaceholderText('Motivo de edicion'), '');
-    await fireEvent.press(screen.getByTestId('new-sale-edit-button'));
-
-    await waitFor(() =>
-      expect(
-        screen.getByText('El motivo de edicion debe tener al menos 3 caracteres.'),
-      ).toBeTruthy(),
-    );
-    expect(mockedApiPatch).not.toHaveBeenCalled();
-  });
-
-  it('calls the update endpoint via api and shows success feedback', async () => {
-    mockedApiPatch.mockResolvedValue({});
-
-    await renderSaleScreen();
-    await saveOneSale('sale-123');
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-
-    await fireEvent.press(screen.getByTestId('new-sale-edit-button'));
-
-    await waitFor(() =>
-      expect(mockedApiPatch).toHaveBeenCalledWith(
-        '/sales/sale-123',
-        expect.objectContaining({ reason: 'Correccion de carga', driverName: 'chofer1' }),
-      ),
-    );
-    expect(screen.getByText('Venta editada correctamente.')).toBeTruthy();
-  });
-});
-
 describe('NewSaleScreen/envase devuelto toggle (visit-container-model Unit 4)', () => {
-  it('renders unmarked by default and flips state when pressed', async () => {
+  it('starts unmarked and reads its state back in words as it is flipped', async () => {
     await renderSaleScreen();
 
-    const toggle = screen.getByTestId('new-sale-container-returned-toggle');
-    expect(toggle).toBeTruthy();
-    expect(screen.getByText('Envase devuelto: sin marcar')).toBeTruthy();
+    // "Sin marcar" is the third state the boolean cannot carry: it is what
+    // keeps `containerReturned` out of the payload entirely.
+    expect(screen.getByText('Sin marcar')).toBeTruthy();
 
-    await fireEvent.press(toggle);
-    expect(screen.getByText('Envase devuelto: si')).toBeTruthy();
+    await fireEvent(
+      screen.getByTestId('new-sale-container-returned-switch'),
+      'valueChange',
+      true,
+    );
+    expect(screen.getByText('Devuelto')).toBeTruthy();
 
-    await fireEvent.press(toggle);
-    expect(screen.getByText('Envase devuelto: no')).toBeTruthy();
+    await fireEvent(
+      screen.getByTestId('new-sale-container-returned-switch'),
+      'valueChange',
+      false,
+    );
+    expect(screen.getByText('No devolvió')).toBeTruthy();
   });
 
   it('omits containerReturned from the Guardar venta payload when never touched', async () => {
     mockedTrySendSale.mockResolvedValue('sale-123');
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
     const payload = mockedTrySendSale.mock.calls[0][0];
@@ -430,9 +377,13 @@ describe('NewSaleScreen/envase devuelto toggle (visit-container-model Unit 4)', 
     mockedTrySendSale.mockResolvedValue('sale-123');
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-container-returned-toggle'));
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent(
+      screen.getByTestId('new-sale-container-returned-switch'),
+      'valueChange',
+      true,
+    );
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
     expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({ containerReturned: true });
@@ -440,19 +391,36 @@ describe('NewSaleScreen/envase devuelto toggle (visit-container-model Unit 4)', 
 });
 
 describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model Unit 4)', () => {
-  it('renders as a distinct, separately labeled action from Guardar venta', async () => {
+  // La visita sin venta dejo de ser una tarjeta aparte: es el estado del boton
+  // del pie cuando no hay productos y el envase quedo marcado. Sigue siendo el
+  // endpoint distinto de siempre, con su payload sin items ni forma de pago.
+  const markContainerReturned = async () =>
+    fireEvent(screen.getByTestId('new-sale-container-returned-switch'), 'valueChange', true);
+
+  it('takes over the footer action when the container is returned and nothing was sold', async () => {
     await renderSaleScreen();
 
-    expect(screen.getByTestId('new-sale-record-visit-button')).toBeTruthy();
-    expect(screen.getByText('Registrar visita sin venta')).toBeTruthy();
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Agregá productos');
+
+    await markContainerReturned();
+
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Registrar devolución');
+  });
+
+  it('goes back to being a normal sale as soon as a product is added', async () => {
+    await renderSaleScreen();
+    await markContainerReturned();
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Guardar venta');
   });
 
   it('does not require any items loaded, unlike Guardar venta', async () => {
     mockedTrySendEmptyVisit.mockResolvedValue('visit-1');
 
     await renderSaleScreen();
-    // No qty increment pressed -- zero items in the cart.
-    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+    await markContainerReturned();
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendEmptyVisit).toHaveBeenCalledTimes(1));
     expect(screen.queryByText('Agrega al menos un producto antes de guardar.')).toBeNull();
@@ -462,7 +430,8 @@ describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model
     mockedTrySendEmptyVisit.mockResolvedValue('visit-1');
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+    await markContainerReturned();
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendEmptyVisit).toHaveBeenCalledTimes(1));
     const payload = mockedTrySendEmptyVisit.mock.calls[0][0];
@@ -480,7 +449,8 @@ describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model
     mockedEnqueueEmptyVisit.mockResolvedValue(1);
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+    await markContainerReturned();
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedEnqueueEmptyVisit).toHaveBeenCalledTimes(1));
     expect(mockedEnqueueEmptyVisit).toHaveBeenCalledWith(
@@ -492,14 +462,16 @@ describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model
     ).toBeTruthy();
   });
 
-  it('blocks the visit and explains why when the driver has no truck today, same guard as saveSale', async () => {
+  it('offers no action at all when the driver has no truck today, same guard as saveSale', async () => {
     mockedUseTruck.mockReturnValue({ ...baseTruckValue, truck: null });
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+    await markContainerReturned();
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     expect(mockedTrySendEmptyVisit).not.toHaveBeenCalled();
     expect(mockedEnqueueEmptyVisit).not.toHaveBeenCalled();
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Sin camión asignado');
     expect(screen.getByTestId('new-sale-no-truck')).toBeTruthy();
   });
 });
@@ -517,7 +489,7 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
     async (method) => {
       await renderSaleScreen();
 
-      await fireEvent.press(screen.getByText(method));
+      await fireEvent.press(screen.getByTestId(`new-sale-payment-${method}`));
 
       expect(screen.getByTestId('new-sale-payment-proof-pick-gallery')).toBeTruthy();
       expect(screen.getByTestId('new-sale-payment-proof-capture-camera')).toBeTruthy();
@@ -527,10 +499,10 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
   it('hides the payment proof control again when switching back to efectivo', async () => {
     await renderSaleScreen();
 
-    await fireEvent.press(screen.getByText('transferencia'));
+    await fireEvent.press(screen.getByTestId('new-sale-payment-transferencia'));
     expect(screen.getByTestId('new-sale-payment-proof-pick-gallery')).toBeTruthy();
 
-    await fireEvent.press(screen.getByText('efectivo'));
+    await fireEvent.press(screen.getByTestId('new-sale-payment-efectivo'));
     expect(screen.queryByTestId('new-sale-payment-proof-pick-gallery')).toBeNull();
   });
 
@@ -539,7 +511,7 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
     mockedTrySendSale.mockResolvedValue('sale-123');
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByText('transferencia'));
+    await fireEvent.press(screen.getByTestId('new-sale-payment-transferencia'));
     await fireEvent.press(screen.getByTestId('new-sale-payment-proof-pick-gallery'));
 
     await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
@@ -554,8 +526,8 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
       expect.objectContaining({ fieldName: 'file', mimeType: 'image/jpeg' }),
     );
 
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
     expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
@@ -567,8 +539,8 @@ describe('NewSaleScreen/comprobante de pago (payment-proof-photo)', () => {
     mockedTrySendSale.mockResolvedValue('sale-123');
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
     const payload = mockedTrySendSale.mock.calls[0][0];
@@ -581,8 +553,8 @@ describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geol
     mockedTrySendSale.mockResolvedValue('sale-123');
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
     expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
@@ -596,8 +568,8 @@ describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geol
     mockedTrySendSale.mockResolvedValue('sale-123');
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
     const payload = mockedTrySendSale.mock.calls[0][0];
@@ -613,8 +585,8 @@ describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geol
       mockedTrySendSale.mockResolvedValue('sale-123');
 
       await renderSaleScreen();
-      await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-      await fireEvent.press(screen.getByText('Guardar venta'));
+      await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+      await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
       await jest.advanceTimersByTimeAsync(8000);
 
@@ -629,73 +601,47 @@ describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geol
 });
 
 describe('NewSaleScreen/elegir cliente (customer-picker-proximity PR2)', () => {
-  it('renders an "Elegir cliente" button that navigates to CustomerPicker', async () => {
-    await renderSaleScreen();
+  it('renders a customer card that navigates to CustomerPicker', async () => {
+    await render(<NewSaleScreen />);
 
-    await fireEvent.press(screen.getByTestId('new-sale-pick-customer-button'));
+    await fireEvent.press(screen.getByTestId('new-sale-customer-card'));
 
     expect(mockedNavigate).toHaveBeenCalledWith('CustomerPicker');
   });
 
-  it('populates customerId/customerName/customerType from route.params.pickedCustomer', async () => {
-    mockedRouteParams = {
-      pickedCustomer: { id: 'customer-1', name: 'Kiosco Sur', customerType: 'comercio' },
-    };
-    mockedTrySendSale.mockResolvedValue('sale-123');
-
-    // Not renderSaleScreen(): the route-params effect already populates a
-    // valid, non-blank customerName from the picked customer. Running the
-    // helper's auto-fill afterward would fire onChangeCustomerName and wipe
-    // the customerId this test exists to verify.
+  it('prompts for a customer and blocks the action until one is picked', async () => {
     await render(<NewSaleScreen />);
 
-    expect(screen.getByDisplayValue('Kiosco Sur')).toBeTruthy();
+    expect(screen.getAllByText('Elegí un cliente').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Elegí un cliente');
 
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+    expect(mockedTrySendSale).not.toHaveBeenCalled();
+    expect(mockedEnqueueSale).not.toHaveBeenCalled();
+  });
+
+  it('shows the picked customer and its directory type, which the driver cannot change', async () => {
+    await renderSaleScreen('Kiosco La Esquina', 'comercio');
+
+    expect(screen.getByText('Kiosco La Esquina')).toBeTruthy();
+    expect(screen.getByText('Comercio')).toBeTruthy();
+    // El tipo es lo que elige la lista de precios: no hay control para tocarlo.
+    expect(screen.queryByPlaceholderText('Nombre del cliente')).toBeNull();
+  });
+
+  it('sends customerId, name and type from the picked customer', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await renderSaleScreen('Kiosco La Esquina', 'comercio');
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
     expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
-      customerId: 'customer-1',
-      customerName: 'Kiosco Sur',
+      customerId: 'cus-1',
+      customerName: 'Kiosco La Esquina',
       customerType: 'comercio',
     });
-  });
-
-  it('clears customerId when customerName is hand-edited after a pick (data-integrity safeguard)', async () => {
-    mockedRouteParams = {
-      pickedCustomer: { id: 'customer-1', name: 'Kiosco Sur', customerType: 'comercio' },
-    };
-    mockedTrySendSale.mockResolvedValue('sale-123');
-
-    // Same reason as above: renderSaleScreen()'s auto-fill would race the
-    // route-params effect and clobber the picked customerId before this
-    // test gets to hand-edit the name itself.
-    await render(<NewSaleScreen />);
-
-    await fireEvent.changeText(
-      screen.getByDisplayValue('Kiosco Sur'),
-      'Kiosco Sur (nueva sucursal)',
-    );
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
-
-    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
-    const payload = mockedTrySendSale.mock.calls[0][0];
-    expect(Object.prototype.hasOwnProperty.call(payload, 'customerId')).toBe(false);
-    expect(payload).toMatchObject({ customerName: 'Kiosco Sur (nueva sucursal)' });
-  });
-
-  it('omits customerId from the payload when no customer was ever picked', async () => {
-    mockedTrySendSale.mockResolvedValue('sale-123');
-
-    await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
-
-    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
-    const payload = mockedTrySendSale.mock.calls[0][0];
-    expect(Object.prototype.hasOwnProperty.call(payload, 'customerId')).toBe(false);
   });
 });
 
@@ -706,137 +652,34 @@ describe('NewSaleScreen/elegir cliente (customer-picker-proximity PR2)', () => {
 // validateRecordEmptyVisitInput from @distribuidor/shared, same convention
 // as LoadManifestScreen.saveManifest -- in front of every network/
 // offline-queue call this screen makes.
-describe('NewSaleScreen/blank customerName guard (driver-ux-polish)', () => {
-  it('blocks saveSale when customerName is blank, without calling trySendSale/enqueueSale', async () => {
-    await renderSaleScreen('');
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+// driver-ux-polish (phase 9, Unit 1) pinned a client-side blank-name guard in
+// front of every network/offline-queue call. The guard itself is unchanged --
+// saveSale still runs validateCreateSaleInput before sending -- but a blank
+// name is no longer reachable through the UI: the name comes from the customer
+// directory, and without a picked customer the footer action never fires. That
+// unreachability is what these tests now pin.
+describe('NewSaleScreen/customer is required before anything is sent', () => {
+  it('never calls the network or the offline queue without a picked customer', async () => {
+    await render(<NewSaleScreen />);
 
-    await waitFor(() =>
-      expect(screen.getByText('customerName must have at least 2 characters')).toBeTruthy(),
-    );
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
     expect(mockedTrySendSale).not.toHaveBeenCalled();
     expect(mockedEnqueueSale).not.toHaveBeenCalled();
-  });
-
-  it('treats a whitespace-only customerName as blank and blocks saveSale the same way', async () => {
-    await renderSaleScreen('   ');
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
-
-    await waitFor(() =>
-      expect(screen.getByText('customerName must have at least 2 characters')).toBeTruthy(),
-    );
-    expect(mockedTrySendSale).not.toHaveBeenCalled();
-    expect(mockedEnqueueSale).not.toHaveBeenCalled();
-  });
-
-  it('lets saveSale proceed normally with a typed, valid customerName (happy path unaffected)', async () => {
-    mockedTrySendSale.mockResolvedValue('sale-999');
-
-    await renderSaleScreen('Juan Perez');
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
-
-    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
-    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({ customerName: 'Juan Perez' });
-  });
-
-  it('blocks updateLastSale when customerName is blank, without calling api.patch', async () => {
-    await renderSaleScreen();
-    await saveOneSale('sale-123');
-    // saveOneSale's success path resets quantities to zero -- re-add an item
-    // so the pre-existing "Agrega al menos un producto" guard does not fire
-    // first and mask the customerName guard this test targets.
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.changeText(screen.getByPlaceholderText('Nombre del cliente'), '');
-
-    await fireEvent.press(screen.getByTestId('new-sale-edit-button'));
-
-    await waitFor(() =>
-      expect(screen.getByText('customerName must have at least 2 characters')).toBeTruthy(),
-    );
-    expect(mockedApiPatch).not.toHaveBeenCalled();
-  });
-
-  it('blocks recordVisit when customerName is blank, without calling trySendEmptyVisit/enqueueEmptyVisit', async () => {
-    await renderSaleScreen('');
-    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
-
-    await waitFor(() =>
-      expect(screen.getByText('customerName must have at least 2 characters')).toBeTruthy(),
-    );
     expect(mockedTrySendEmptyVisit).not.toHaveBeenCalled();
     expect(mockedEnqueueEmptyVisit).not.toHaveBeenCalled();
   });
-});
 
-// driver-ux-polish (phase 9, Unit 1): updateLastSale's payload never
-// conditionally included customerId, unlike saveSale's payload
-// (...(customerId ? { customerId } : {})). Editing a sale that was linked
-// to a Customer via the picker silently dropped that link on every edit,
-// because the API's resolveCustomerAndTruck treats customerId === undefined
-// as "clear the link."
-describe('NewSaleScreen/updateLastSale preserves customerId (driver-ux-polish bug fix)', () => {
-  it('includes customerId in the PATCH payload when the edited sale is linked to a picked customer', async () => {
-    mockedRouteParams = {
-      pickedCustomer: { id: 'c1', name: 'Kiosco Sur', customerType: 'comercio' },
-    };
-    mockedApiPatch.mockResolvedValue({});
+  it('lets saveSale proceed normally once a customer is picked (happy path unaffected)', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-999');
 
-    // Not renderSaleScreen(): the route-params effect already supplies a
-    // valid customerName, and the helper's auto-fill would clear customerId
-    // via onChangeCustomerName before we ever get to edit.
-    await render(<NewSaleScreen />);
-    await saveOneSale('sale-123');
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await renderSaleScreen('Juan Perez');
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
-    await fireEvent.press(screen.getByTestId('new-sale-edit-button'));
-
-    await waitFor(() =>
-      expect(mockedApiPatch).toHaveBeenCalledWith(
-        '/sales/sale-123',
-        expect.objectContaining({ customerId: 'c1' }),
-      ),
-    );
-  });
-
-  it('omits customerId from the PATCH payload when the edited sale was never linked to a customer', async () => {
-    mockedApiPatch.mockResolvedValue({});
-
-    await renderSaleScreen();
-    await saveOneSale('sale-123');
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-
-    await fireEvent.press(screen.getByTestId('new-sale-edit-button'));
-
-    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
-    const payload = mockedApiPatch.mock.calls[0][1];
-    expect(Object.prototype.hasOwnProperty.call(payload, 'customerId')).toBe(false);
-  });
-});
-
-// driver-ux-polish (phase 9, Unit 1): "Editar ultima venta" and "Anular
-// ultima venta" used to render with no `variant`, defaulting to 'primary'
-// same as "Guardar venta" -- three primary-colored action buttons with no
-// visual hierarchy. This scopes the check to the three action-card buttons
-// rather than every Button on screen: the segmented "Tipo de cliente"/
-// "Forma de pago" controls and the "Envase devuelto" toggle intentionally
-// reuse variant="primary" to indicate an *active selection*, an unrelated
-// and pre-existing pattern this unit does not touch.
-describe('NewSaleScreen/button hierarchy (driver-ux-polish)', () => {
-  it('gives "Guardar venta" the only primary-colored button among the three action buttons', async () => {
-    await renderSaleScreen();
-    await saveOneSale('sale-123');
-
-    const actionLabels = ['Guardar venta', 'Editar ultima venta', 'Anular ultima venta'];
-    const primaryButtons = actionLabels.filter((name) => {
-      const button = screen.getByRole('button', { name });
-      const flatStyle = StyleSheet.flatten(button.props.style);
-      return flatStyle.backgroundColor === colors.primary;
-    });
-
-    expect(primaryButtons).toEqual(['Guardar venta']);
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({ customerName: 'Juan Perez' });
   });
 });
 
@@ -852,14 +695,14 @@ describe('NewSaleScreen — catalogo y precios reales', () => {
       },
     });
 
-    await render(<NewSaleScreen />);
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    // La lista de precios la elige el TIPO del cliente, asi que sin cliente
+    // elegido no hay precio que mostrar.
+    await renderSaleScreen('Cliente de prueba', 'final');
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
 
     // 1 x 99000 con los precios del catalogo. Con la tabla hardcodeada vieja
     // este total habria dado 8500.
-    expect(screen.getByTestId('new-sale-total')).toHaveTextContent(
-      `Total: $${(99000).toLocaleString('es-AR')}`,
-    );
+    expect(screen.getByTestId('sale-footer-total')).toHaveTextContent('$99.000');
   });
 
   it('renders one row per active catalogue product, in the admin order', async () => {
@@ -871,9 +714,9 @@ describe('NewSaleScreen — catalogo y precios reales', () => {
 
     await render(<NewSaleScreen />);
 
-    expect(screen.getByTestId('new-sale-qty-increment-G45')).toBeTruthy();
-    expect(screen.getByTestId('new-sale-qty-increment-G10')).toBeTruthy();
-    expect(screen.queryByTestId('new-sale-qty-increment-G15')).toBeNull();
+    expect(screen.getByTestId('product-row-G45-increment')).toBeTruthy();
+    expect(screen.getByTestId('product-row-G10-increment')).toBeTruthy();
+    expect(screen.queryByTestId('product-row-G15-increment')).toBeNull();
   });
 
   it('shows the product name, not the bare code', async () => {
@@ -911,8 +754,10 @@ describe('NewSaleScreen — catalogo y precios reales', () => {
 
     await render(<NewSaleScreen />);
 
-    expect(screen.getByTestId('new-sale-no-catalog')).toBeTruthy();
-    expect(screen.queryByTestId('new-sale-submit')).toBeNull();
+    // El motivo lo lleva el propio boton: un boton gris sin explicacion deja
+    // al chofer sin saber que le falta.
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Sin precios — sincronizá');
+    expect(screen.getByTestId('sale-footer-action').props.accessibilityState.disabled).toBe(true);
   });
 });
 
@@ -924,8 +769,8 @@ describe('NewSaleScreen — occurredAt', () => {
     mockedTrySendSale.mockResolvedValue('sale-occurred');
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
-    await fireEvent.press(screen.getByText('Guardar venta'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalled());
     const payload = mockedTrySendSale.mock.calls[0][0];
@@ -937,10 +782,107 @@ describe('NewSaleScreen — occurredAt', () => {
     mockedTrySendEmptyVisit.mockResolvedValue('visit-occurred');
 
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+    await fireEvent(
+      screen.getByTestId('new-sale-container-returned-switch'),
+      'valueChange',
+      true,
+    );
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendEmptyVisit).toHaveBeenCalled());
     const payload = mockedTrySendEmptyVisit.mock.calls[0][0];
     expect(typeof payload.occurredAt).toBe('string');
+  });
+});
+
+describe('NewSaleScreen/header', () => {
+  it('numbers the sale being loaded off the sales already closed today', async () => {
+    mockedUseSync.mockReturnValue({
+      ...baseSyncValue,
+      daySummary: { activeCount: 12, canceledCount: 0, activeTotal: 0 },
+      trySendSale: mockedTrySendSale,
+      enqueueSale: mockedEnqueueSale,
+      trySendEmptyVisit: mockedTrySendEmptyVisit,
+      enqueueEmptyVisit: mockedEnqueueEmptyVisit,
+      refreshDaySummary: mockedRefreshDaySummary,
+    });
+
+    await renderSaleScreen();
+
+    expect(screen.getByText('VENTA 13 · CAMION-07')).toBeTruthy();
+  });
+
+  it('surfaces the offline queue depth, and hides it when nothing is pending', async () => {
+    await renderSaleScreen();
+    expect(screen.queryByTestId('sale-header-queued')).toBeNull();
+
+    mockedUseSync.mockReturnValue({
+      ...baseSyncValue,
+      pendingSales: [{ queueId: 'q1' }, { queueId: 'q2' }],
+      trySendSale: mockedTrySendSale,
+      enqueueSale: mockedEnqueueSale,
+      trySendEmptyVisit: mockedTrySendEmptyVisit,
+      enqueueEmptyVisit: mockedEnqueueEmptyVisit,
+      refreshDaySummary: mockedRefreshDaySummary,
+    });
+
+    await renderSaleScreen();
+    expect(screen.getByText('2 EN COLA')).toBeTruthy();
+  });
+});
+
+// El boton del pie es la unica accion de la pantalla, y su texto es lo que
+// explica por que no esta disponible. Cada rama nombra lo que falta resolver.
+describe('NewSaleScreen/footer action states', () => {
+  it('asks for a customer first', async () => {
+    await render(<NewSaleScreen />);
+
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Elegí un cliente');
+  });
+
+  it('asks for products once there is a customer', async () => {
+    await renderSaleScreen();
+
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Agregá productos');
+  });
+
+  it('becomes Guardar venta as soon as something is added', async () => {
+    await renderSaleScreen();
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Guardar venta');
+  });
+
+  it('keeps the running total in step with the cart', async () => {
+    await renderSaleScreen();
+
+    expect(screen.getByTestId('sale-footer-total')).toHaveTextContent('$0');
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    expect(screen.getByTestId('sale-footer-total')).toHaveTextContent('$8.500');
+  });
+
+  it('names the missing truck instead of going dead without a reason', async () => {
+    mockedUseTruck.mockReturnValue({ ...baseTruckValue, truck: null });
+
+    await renderSaleScreen();
+
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Sin camión asignado');
+  });
+});
+
+describe('NewSaleScreen/last sale line', () => {
+  it('shows nothing until a sale has been recorded on this screen', async () => {
+    await renderSaleScreen();
+
+    expect(screen.queryByTestId('new-sale-last-sale')).toBeNull();
+  });
+
+  it('recalls the customer and amount of the sale just recorded', async () => {
+    await renderSaleScreen('Marta Suárez');
+    await saveOneSale('sale-777');
+
+    expect(screen.getByTestId('new-sale-last-sale')).toHaveTextContent(
+      'Última: Marta Suárez · $8.500',
+    );
   });
 });

@@ -471,6 +471,10 @@ export class SalesService {
       total: sale.total,
       customerName: sale.customerName,
       customerType: sale.customerType,
+      // Sin esto un consumidor no puede editar una venta sin desengancharla
+      // de su cliente: `updateSale` reescribe el vinculo con lo que reciba, y
+      // `resolveCustomerAndTruck` lee la ausencia del campo como "desenganchar".
+      customerId: sale.customerId ?? undefined,
       // `paymentMethod` is nullable at both the DB and `SaleRecord` type
       // level: `null` for a churn row (`kind === 'churn'`, written by
       // `recordEmptyVisit`), a real `PaymentMethod` for every normal sale.

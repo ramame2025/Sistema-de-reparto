@@ -39,6 +39,7 @@ function buildSaleRow(overrides: Record<string, unknown> = {}) {
     paymentProofRef: null,
     latitude: null,
     longitude: null,
+    customerId: null,
     items: [{ productCode: 'G10', quantity: 2 }],
     ...overrides,
   };
@@ -987,6 +988,24 @@ describe('SalesService', () => {
         }),
       );
       expect(result.status).toBe('canceled');
+    });
+  });
+
+  describe('toSaleRecord customer link', () => {
+    it('exposes the customerId so an edit can send it back instead of unlinking the sale', async () => {
+      prisma.sale.findMany.mockResolvedValue([buildSaleRow({ customerId: 'customer-1' })]);
+
+      const [record] = await service.listSalesByDriver('Juan');
+
+      expect(record.customerId).toBe('customer-1');
+    });
+
+    it('omits the customerId for a sale that was never linked to a customer', async () => {
+      prisma.sale.findMany.mockResolvedValue([buildSaleRow({ customerId: null })]);
+
+      const [record] = await service.listSalesByDriver('Juan');
+
+      expect(record.customerId).toBeUndefined();
     });
   });
 

@@ -4,6 +4,7 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  View,
 } from 'react-native';
 // React Native's own SafeAreaView is iOS-only: on Android it renders a plain
 // View with no insets, leaving content behind the system status bar. This one
@@ -17,6 +18,13 @@ export type ScreenContainerProps = {
   children: React.ReactNode;
   /** Agrega el padding de una pantalla larga. El scroll existe siempre. */
   scroll?: boolean;
+  /**
+   * Barra fija al pie, fuera del ScrollView. Para la accion principal de una
+   * pantalla larga: en Nueva Venta el chofer tiene que poder guardar sin
+   * bajar hasta el final de un catalogo que crece con cada producto que el
+   * admin da de alta.
+   */
+  footer?: React.ReactNode;
   testID?: string;
 };
 
@@ -33,6 +41,7 @@ export type ScreenContainerProps = {
 export function ScreenContainer({
   children,
   scroll = false,
+  footer,
   testID,
 }: ScreenContainerProps) {
   return (
@@ -60,6 +69,10 @@ export function ScreenContainer({
         >
           {children}
         </ScrollView>
+
+        {footer ? (
+          <View testID={testID ? `${testID}-footer` : undefined}>{footer}</View>
+        ) : null}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
