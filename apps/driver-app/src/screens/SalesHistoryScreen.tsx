@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { PaymentMethod, SaleRecord } from '@distribuidor/shared';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useAuth } from '../context/AuthContext';
+import type { HomeStackParamList } from '../navigation/HomeStack';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
@@ -36,8 +39,11 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   tarjeta: 'Tarjeta',
 };
 
+type SalesHistoryNavigationProp = NativeStackNavigationProp<HomeStackParamList, 'SalesHistory'>;
+
 export function SalesHistoryScreen() {
   const { api } = useAuth();
+  const navigation = useNavigation<SalesHistoryNavigationProp>();
 
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,7 +105,15 @@ export function SalesHistoryScreen() {
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}
             renderItem={({ item }) => (
-              <View style={styles.row} testID={`sales-history-row-${item.id}`}>
+              // The whole row is the tap target into edit/cancel. It carries
+              // the fetched record along so the detail screen needs no second
+              // request — and still opens with no signal.
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => navigation.navigate('SaleDetail', { sale: item })}
+                style={styles.row}
+                testID={`sales-history-row-${item.id}`}
+              >
                 <View style={styles.rowTop}>
                   <Text style={styles.customer}>{item.customerName}</Text>
                   <Text style={styles.total}>${item.total.toLocaleString('es-AR')}</Text>
@@ -115,7 +129,7 @@ export function SalesHistoryScreen() {
                     <Text style={styles.badgeCanceled}>Anulada</Text>
                   ) : null}
                 </View>
-              </View>
+              </Pressable>
             )}
           />
         )}

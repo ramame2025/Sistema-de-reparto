@@ -93,7 +93,36 @@ jest.mock('../screens/SalesHistoryScreen', () => {
       return (
         <>
           <Text testID="home-stack-fake-sales-history">Sales history fake</Text>
+          <Pressable
+            testID="home-stack-go-to-sale-detail"
+            onPress={() =>
+              navigation.navigate('SaleDetail', { sale: { id: 'sale-1' } })
+            }
+          >
+            <Text>Ir al detalle de la venta</Text>
+          </Pressable>
           <Pressable testID="home-stack-go-back-from-sales-history" onPress={() => navigation.goBack()}>
+            <Text>Volver</Text>
+          </Pressable>
+        </>
+      );
+    },
+  };
+});
+
+jest.mock('../screens/SaleDetailScreen', () => {
+  const { useNavigation } = require('@react-navigation/native');
+  const { Text, Pressable } = require('react-native');
+  return {
+    SaleDetailScreen: () => {
+      const navigation = useNavigation();
+      return (
+        <>
+          <Text testID="home-stack-fake-sale-detail">Sale detail fake</Text>
+          <Pressable
+            testID="home-stack-go-back-from-sale-detail"
+            onPress={() => navigation.goBack()}
+          >
             <Text>Volver</Text>
           </Pressable>
         </>
@@ -209,5 +238,22 @@ describe('HomeStack', () => {
 
     await waitFor(() => expect(screen.getByTestId('home-stack-fake-home')).toBeTruthy());
     expect(screen.queryByTestId('home-stack-fake-manifest-history')).toBeNull();
+  });
+
+  it('navigates from SalesHistory into SaleDetail and back', async () => {
+    await render(
+      <NavigationContainer>
+        <HomeStack />
+      </NavigationContainer>,
+    );
+
+    await fireEvent.press(screen.getByTestId('home-stack-go-to-sales-history'));
+    await waitFor(() => expect(screen.getByTestId('home-stack-fake-sales-history')).toBeTruthy());
+
+    await fireEvent.press(screen.getByTestId('home-stack-go-to-sale-detail'));
+    await waitFor(() => expect(screen.getByTestId('home-stack-fake-sale-detail')).toBeTruthy());
+
+    await fireEvent.press(screen.getByTestId('home-stack-go-back-from-sale-detail'));
+    await waitFor(() => expect(screen.getByTestId('home-stack-fake-sales-history')).toBeTruthy());
   });
 });

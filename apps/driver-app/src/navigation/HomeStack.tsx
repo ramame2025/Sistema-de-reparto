@@ -1,8 +1,10 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import type { SaleRecord } from '@distribuidor/shared';
 import { AssignedCustomersScreen } from '../screens/AssignedCustomersScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { LoadManifestScreen } from '../screens/LoadManifestScreen';
 import { ManifestHistoryScreen } from '../screens/ManifestHistoryScreen';
+import { SaleDetailScreen } from '../screens/SaleDetailScreen';
 import { SalesHistoryScreen } from '../screens/SalesHistoryScreen';
 
 export type HomeStackParamList = {
@@ -10,6 +12,13 @@ export type HomeStackParamList = {
   LoadManifest: undefined;
   AssignedCustomers: undefined;
   SalesHistory: undefined;
+  /**
+   * The full record travels as a param instead of an id: the history list
+   * already fetched it whole, so re-reading it from the API would be a round
+   * trip for data the app is holding — and would fail offline, which is
+   * exactly when a driver needs to fix a sale.
+   */
+  SaleDetail: { sale: SaleRecord };
   ManifestHistory: undefined;
 };
 
@@ -60,6 +69,11 @@ export function HomeStack() {
         name="SalesHistory"
         component={SalesHistoryScreen}
         options={{ headerShown: true, title: 'Historial de ventas' }}
+      />
+      <Stack.Screen
+        name="SaleDetail"
+        component={SaleDetailScreen}
+        options={{ headerShown: true, title: 'Detalle de venta' }}
       />
       <Stack.Screen
         name="ManifestHistory"

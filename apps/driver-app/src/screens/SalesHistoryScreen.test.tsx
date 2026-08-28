@@ -10,8 +10,14 @@ jest.mock('../context/AuthContext', () => {
   };
 });
 
+const mockedNavigate = jest.fn();
+
+jest.mock('@react-navigation/native', () => ({
+  useNavigation: () => ({ navigate: mockedNavigate }),
+}));
+
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import type { SaleRecord } from '@distribuidor/shared';
 import { SalesHistoryScreen } from './SalesHistoryScreen';
 import { useAuth } from '../context/AuthContext';
@@ -35,6 +41,7 @@ const buildSale = (overrides: Partial<SaleRecord> = {}): SaleRecord => ({
 });
 
 beforeEach(() => {
+  mockedNavigate.mockClear();
   mockedApiGet = jest.fn().mockResolvedValue([]);
   mockedUseAuth.mockReturnValue({
     status: 'authenticated' as const,
@@ -139,5 +146,31 @@ describe('SalesHistoryScreen/error', () => {
       expect(screen.getByText('No se pudo conectar con el servidor.')).toBeTruthy(),
     );
     expect(screen.queryByText('Todavía no registraste ventas')).toBeNull();
+  });
+});
+
+describe('SalesHistoryScreen/detail navigation', () => {
+  it('opens the detail of the tapped sale, carrying the record it already fetched', async () => {
+    const sale = buildSale({ id: 'sale-77' });
+    mockedApiGet.mockResolvedValue([sale]);
+
+    await render(<SalesHistoryScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('sales-history-row-sale-77')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('sales-history-row-sale-77'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('SaleDetail', { sale });
+  });
+
+  it('exposes each row as a button so the tap target is discoverable', async () => {
+    mockedApiGet.mockResolvedValue([buildSale({ id: 'sale-77' })]);
+
+    await render(<SalesHistoryScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('sales-history-row-sale-77').props.accessibilityRole).toBe(
+        'button',
+      ),
+    );
   });
 });
