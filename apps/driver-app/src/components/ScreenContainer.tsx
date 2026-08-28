@@ -2,6 +2,7 @@ import React from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   View,
@@ -25,6 +26,13 @@ export type ScreenContainerProps = {
    * admin da de alta.
    */
   footer?: React.ReactNode;
+  /**
+   * Habilita el gesto de tirar para recargar. Reemplaza al boton de
+   * "Actualizar" que las portadas solian llevar: el dato puede quedar viejo
+   * igual, pero el gesto no ocupa lugar en la pantalla.
+   */
+  onRefresh?: () => void;
+  refreshing?: boolean;
   testID?: string;
 };
 
@@ -42,6 +50,8 @@ export function ScreenContainer({
   children,
   scroll = false,
   footer,
+  onRefresh,
+  refreshing = false,
   testID,
 }: ScreenContainerProps) {
   return (
@@ -66,6 +76,11 @@ export function ScreenContainer({
           // Deja el campo enfocado visible sobre el teclado (iOS).
           automaticallyAdjustKeyboardInsets
           keyboardDismissMode="on-drag"
+          refreshControl={
+            onRefresh ? (
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            ) : undefined
+          }
         >
           {children}
         </ScrollView>

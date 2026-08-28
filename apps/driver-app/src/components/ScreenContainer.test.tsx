@@ -100,4 +100,28 @@ describe('ScreenContainer', () => {
 
     expect(screen.queryByTestId('screen-footer')).toBeNull();
   });
+
+  it('offers pull-to-refresh when the screen knows how to reload itself', async () => {
+    const onRefresh = jest.fn();
+    await render(
+      <ScreenContainer testID="screen" onRefresh={onRefresh} refreshing={false}>
+        <Text>Contenido</Text>
+      </ScreenContainer>
+    );
+
+    const control = screen.getByTestId('screen-scroll').props.refreshControl;
+    expect(control).toBeTruthy();
+    control.props.onRefresh();
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('has no refresh control on a screen that has nothing to reload', async () => {
+    await render(
+      <ScreenContainer testID="screen">
+        <Text>Contenido</Text>
+      </ScreenContainer>
+    );
+
+    expect(screen.getByTestId('screen-scroll').props.refreshControl).toBeUndefined();
+  });
 });
