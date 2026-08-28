@@ -1,5 +1,6 @@
 import {
   type CreateAssignmentInput,
+  type CreateProductInput,
   type CreateCustomerInput,
   type CreateDriverCustomerAssignmentInput,
   type CreateLoadManifestInput,
@@ -8,10 +9,13 @@ import {
   type RecordEmptyVisitInput,
   type UpdatePriceInput,
   type UpdateCustomerInput,
+  type UpdateProductInput,
   type UpdateSaleInput,
   type UpdateTruckInput,
+  resolveOccurredAt,
   validateCreateAssignmentInput,
   normalizeCustomerName,
+  validateCreateProductInput,
   validateCreateCustomerInput,
   validateCreateDriverCustomerAssignmentInput,
   validateCreateLoadManifestInput,
@@ -21,6 +25,7 @@ import {
   validateUpdatePriceInput,
   validateUpdateSaleInput,
   validateUpdateCustomerInput,
+  validateUpdateProductInput,
   validateUpdateTruckInput,
 } from '@distribuidor/shared';
 
@@ -455,12 +460,29 @@ describe('validateCreateLoadManifestInput', () => {
       ...base,
       items: [
         {
-          productCode: 'G99' as CreateLoadManifestInput['items'][number]['productCode'],
+          productCode: '  ' as CreateLoadManifestInput['items'][number]['productCode'],
           quantity: 5,
         },
       ],
     });
     expect(errors).toContain('items[0].productCode is invalid');
+  });
+
+  // El catalogo lo define el admin en runtime, asi que `packages/shared` no
+  // puede saber que codigos existen: valida la FORMA, y la PERTENENCIA se
+  // verifica contra la tabla Product del lado del servidor. Rechazar aca un
+  // codigo desconocido bloquearia todo producto nuevo.
+  it('accepts a well-formed code it has never heard of', () => {
+    const errors = validateCreateLoadManifestInput({
+      ...base,
+      items: [
+        {
+          productCode: 'G99' as CreateLoadManifestInput['items'][number]['productCode'],
+          quantity: 5,
+        },
+      ],
+    });
+    expect(errors).toEqual([]);
   });
 
   it('rejects an item with a non-integer quantity', () => {
@@ -683,5 +705,177 @@ describe('validateUpdateSaleInput', () => {
   it('still requires reason regardless of kind', () => {
     const errors = validateUpdateSaleInput({ ...base, kind: 'churn', items: [], reason: '' });
     expect(errors).toContain('reason must have at least 3 characters');
+  });
+});
+
+describe('validateCreateProductInput', () => {
+  const base: CreateProductInput = {
+    code: 'G20',
+    name: 'Garrafa 20kg',
+    prices: { final: 15000, comercio: 14500, distribuidor: 14000 },
+  };
+
+  it('accepts a valid product with all three prices', () => {
+    expect(validateCreateProductInput(base)).toEqual([]);
+  });
+
+  it('accepts an optional sortOrder', () => {
+    expect(validateCreateProductInput({ ...base, sortOrder: 4 })).toEqual([]);
+  });
+
+  describe('code', () => {
+    it('rejects an empty code', () => {
+      expect(validateCreateProductInput({ ...base, code: '  ' })).toContain(
+        'code is required',
+      );
+    });
+
+    // The code travels inside sale payloads already queued on drivers'
+    // phones, so it has to stay a plain, stable token.
+    it('rejects lowercase, spaces and punctuation', () => {
+      for (const code of ['g20', 'G 20', 'G-20', 'G20!']) {
+        expect(validateCreateProductInput({ ...base, code })).toContain(
+          'code must be uppercase letters, digits or underscore',
+        );
+      }
+    });
+
+    it('accepts the shapes already in use', () => {
+      for (const code of ['G10', 'G15', 'G45', 'G15_AUTO']) {
+        expect(validateCreateProductInput({ ...base, code })).toEqual([]);
+      }
+    });
+
+    it('rejects a code longer than 20 characters', () => {
+      expect(
+        validateCreateProductInput({ ...base, code: 'A'.repeat(21) }),
+      ).toContain('code must be at most 20 characters');
+    });
+  });
+
+  describe('name', () => {
+    it('rejects a name shorter than 2 characters', () => {
+      expect(validateCreateProductInput({ ...base, name: 'G' })).toContain(
+        'name must have at least 2 characters',
+      );
+    });
+  });
+
+  describe('prices', () => {
+    // A product with a missing price breaks getPriceTable for EVERY sale in
+    // the system, not just its own -- so it must never exist, not even
+    // briefly.
+    it('rejects a product missing any customer type', () => {
+      const errors = validateCreateProductInput({
+        ...base,
+        prices: { final: 15000, comercio: 14500 } as CreateProductInput['prices'],
+      });
+      expect(errors).toContain('prices.distribuidor is required');
+    });
+
+    it('rejects prices missing entirely', () => {
+      const errors = validateCreateProductInput({
+        ...base,
+        prices: undefined as unknown as CreateProductInput['prices'],
+      });
+      expect(errors).toContain('prices is required');
+    });
+
+    it('rejects a negative or non-integer price', () => {
+      expect(
+        validateCreateProductInput({ ...base, prices: { ...base.prices, final: -1 } }),
+      ).toContain('prices.final must be a non-negative integer');
+      expect(
+        validateCreateProductInput({ ...base, prices: { ...base.prices, final: 10.5 } }),
+      ).toContain('prices.final must be a non-negative integer');
+    });
+
+    it('accepts a price of zero', () => {
+      expect(
+        validateCreateProductInput({ ...base, prices: { ...base.prices, final: 0 } }),
+      ).toEqual([]);
+    });
+  });
+});
+
+describe('validateUpdateProductInput', () => {
+  it('accepts a patch touching a single field', () => {
+    expect(validateUpdateProductInput({ name: 'Garrafa 20 kilos' })).toEqual([]);
+  });
+
+  it('rejects an empty patch', () => {
+    expect(validateUpdateProductInput({})).toContain(
+      'at least one field must be provided',
+    );
+  });
+
+  // Renaming a code would orphan the sale payloads already queued on drivers'
+  // phones, so the code is not patchable at all.
+  it('has no way to change the code', () => {
+    const patch = { code: 'OTRO' } as unknown as UpdateProductInput;
+    expect(validateUpdateProductInput(patch)).toContain(
+      'at least one field must be provided',
+    );
+  });
+
+  it('rejects a short name, a non-boolean isActive and a non-integer sortOrder', () => {
+    expect(validateUpdateProductInput({ name: 'G' })).toContain(
+      'name must have at least 2 characters',
+    );
+    expect(
+      validateUpdateProductInput({ isActive: 'si' as unknown as boolean }),
+    ).toContain('isActive must be a boolean');
+    expect(validateUpdateProductInput({ sortOrder: 1.5 })).toContain(
+      'sortOrder must be an integer',
+    );
+  });
+
+  it('accepts deactivating a product', () => {
+    expect(validateUpdateProductInput({ isActive: false })).toEqual([]);
+  });
+});
+
+describe('resolveOccurredAt', () => {
+  const now = new Date('2026-08-27T15:00:00.000Z');
+
+  it('falls back to now when the device sent nothing', () => {
+    expect(resolveOccurredAt(undefined, now)).toEqual(now);
+  });
+
+  it('keeps a plausible timestamp from the device', () => {
+    const earlier = '2026-08-27T09:30:00.000Z';
+    expect(resolveOccurredAt(earlier, now)).toEqual(new Date(earlier));
+  });
+
+  // El caso corriente que justifica todo esto: una venta de las 23:50 que
+  // sincroniza pasada la medianoche no puede quedar contada al dia siguiente.
+  it('keeps a sale made minutes before midnight', () => {
+    const justBeforeMidnight = '2026-08-27T02:50:00.000Z';
+    const syncedAfter = new Date('2026-08-27T03:10:00.000Z');
+    expect(resolveOccurredAt(justBeforeMidnight, syncedAfter)).toEqual(
+      new Date(justBeforeMidnight),
+    );
+  });
+
+  // Un reloj adelantado no puede fechar una venta en el futuro.
+  it('clamps a future timestamp to now', () => {
+    expect(resolveOccurredAt('2026-09-01T00:00:00.000Z', now)).toEqual(now);
+  });
+
+  // Ni un reloj atrasado, ni alguien manipulando el telefono, puede comprar
+  // precios viejos fechando la venta meses atras.
+  it('clamps a timestamp older than the queue window to now', () => {
+    expect(resolveOccurredAt('2026-01-01T00:00:00.000Z', now)).toEqual(now);
+  });
+
+  it('accepts the oldest timestamp still inside the window', () => {
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    expect(resolveOccurredAt(thirtyDaysAgo.toISOString(), now)).toEqual(thirtyDaysAgo);
+  });
+
+  it('falls back to now for anything unparseable', () => {
+    for (const bad of ['', 'ayer', '2026-13-45T99:99:99Z']) {
+      expect(resolveOccurredAt(bad, now)).toEqual(now);
+    }
   });
 });

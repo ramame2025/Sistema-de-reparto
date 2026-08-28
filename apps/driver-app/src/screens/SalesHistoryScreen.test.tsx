@@ -22,13 +22,14 @@ let mockedApiGet: jest.Mock;
 const buildSale = (overrides: Partial<SaleRecord> = {}): SaleRecord => ({
   id: 's1',
   createdAt: '2026-08-20T14:30:00.000Z',
+  occurredAt: '2026-08-20T14:30:00.000Z',
   status: 'active',
   driverName: 'chofer1',
   total: 15000,
   customerName: 'Kiosco Norte',
   customerType: 'comercio',
   paymentMethod: 'transferencia',
-  items: [{ productCode: 'G10', quantity: 2 }],
+  items: [{ productCode: 'G10', quantity: 2, unitPrice: 7500 }],
   kind: 'sale',
   ...overrides,
 });

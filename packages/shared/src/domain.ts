@@ -1,3 +1,13 @@
+/**
+ * Los cuatro productos con los que arranco el sistema, hoy sembrados como las
+ * primeras filas de la tabla `Product`.
+ *
+ * YA NO ES EL CATALOGO: el admin crea y da de baja productos, asi que esta
+ * lista no es exhaustiva ni autoritativa. Sobrevive como fuente del seed y
+ * como lista de fallback de las pantallas que todavia no consumen el catalogo
+ * de la API. Validar contra ella rechazaria productos nuevos y legitimos: la
+ * pertenencia se verifica contra la base, del lado del servidor.
+ */
 export const PRODUCT_CODES = [
   "G10",
   "G15",
@@ -5,7 +15,26 @@ export const PRODUCT_CODES = [
   "G15_AUTO",
 ] as const;
 
-export type ProductCode = (typeof PRODUCT_CODES)[number];
+/**
+ * Codigo de producto tal como viaja por la API. Es un string abierto, no una
+ * union cerrada: el catalogo lo define el admin en runtime. El codigo es
+ * estable e inmutable una vez creado, porque ya viaja dentro de los payloads
+ * encolados offline en los telefonos de los choferes.
+ */
+export type ProductCode = string;
+
+/**
+ * Valida la FORMA de un codigo de producto, no su pertenencia al catalogo.
+ *
+ * `packages/shared` corre en el telefono y en el navegador, y ninguno de los
+ * dos conoce el catalogo: lo define el admin en runtime. Comprobar pertenencia
+ * aca rechazaria todo producto nuevo y legitimo. Que el codigo EXISTA se
+ * verifica contra la tabla `Product`, del lado del servidor, que es el unico
+ * lugar que tiene la respuesta.
+ */
+export function isWellFormedProductCode(code: unknown): boolean {
+  return typeof code === "string" && code.trim().length > 0;
+}
 
 export const CUSTOMER_TYPES = ["final", "comercio", "distribuidor"] as const;
 
@@ -47,6 +76,12 @@ export type SaleItemInput = {
 
 export type CreateSaleInput = {
   clientGeneratedId?: string;
+  /**
+   * Cuando ocurrio la venta, en ISO, segun el reloj del telefono. Opcional:
+   * los payloads viejos ya encolados no lo traen. El servidor lo acota con
+   * `resolveOccurredAt` antes de creerle.
+   */
+  occurredAt?: string;
   driverName: string;
   truckCode?: string;
   customerName: string;
@@ -69,6 +104,8 @@ export type CreateSaleInput = {
  * `recordEmptyVisit` (fuera de scope de esta unidad).
  */
 export type RecordEmptyVisitInput = {
+  /** Cuando ocurrio la visita, en ISO. Ver `CreateSaleInput.occurredAt`. */
+  occurredAt?: string;
   clientGeneratedId?: string;
   driverName: string;
   truckCode?: string;
@@ -90,9 +127,22 @@ export type UpdateSaleInput = CreateSaleInput & {
   kind?: SaleKind;
 };
 
+/**
+ * Una linea tal como quedo GRABADA, no como se pidio: incluye el precio
+ * unitario congelado en el momento de la venta.
+ */
+export type SaleItemRecord = SaleItemInput & {
+  unitPrice: number;
+};
+
 export type SaleRecord = {
   id: string;
   createdAt: string;
+  /**
+   * Cuando ocurrio la venta en la calle. Distinto de `createdAt`, que es
+   * cuando la fila entro: una venta sin senal se sincroniza mas tarde.
+   */
+  occurredAt: string;
   status: "active" | "canceled";
   canceledAt?: string;
   cancelReason?: string;
@@ -107,7 +157,7 @@ export type SaleRecord = {
    * sigue teniendo un `PaymentMethod` valido.
    */
   paymentMethod: PaymentMethod | null;
-  items: SaleItemInput[];
+  items: SaleItemRecord[];
   note?: string;
   kind: SaleKind;
   containerReturned?: boolean;
@@ -275,6 +325,41 @@ export type CustomerRecord = {
   updatedAt: string;
 };
 
+export type ProductRecord = {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Un producto nace CON sus tres precios, en la misma transaccion. No es una
+ * comodidad: `getPriceTable` falla entera si a cualquier producto le falta el
+ * precio de cualquier tipo de cliente, y eso no rompe la venta de ese producto
+ * sino TODAS las ventas del sistema. Un producto sin precios no puede existir
+ * jamas, ni por un instante.
+ */
+export type CreateProductInput = {
+  code: string;
+  name: string;
+  sortOrder?: number;
+  prices: Record<CustomerType, number>;
+};
+
+/**
+ * El `code` no se puede cambiar, y por eso no esta aca. Ya viaja dentro de los
+ * payloads de venta encolados en los telefonos de los choferes: renombrarlo
+ * dejaria esas ventas apuntando a un producto inexistente.
+ */
+export type UpdateProductInput = {
+  name?: string;
+  isActive?: boolean;
+  sortOrder?: number;
+};
+
 export type CreateTruckInput = {
   code: string;
   plate: string;
@@ -404,7 +489,7 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
 
   if (Array.isArray(input.items)) {
     input.items.forEach((item, index) => {
-      if (!PRODUCT_CODES.includes(item.productCode)) {
+      if (!isWellFormedProductCode(item.productCode)) {
         errors.push(`items[${index}].productCode is invalid`);
       }
 
@@ -574,7 +659,7 @@ export function validateCreateLoadManifestInput(input: CreateLoadManifestInput):
 
   if (Array.isArray(input.items)) {
     input.items.forEach((item, index) => {
-      if (!PRODUCT_CODES.includes(item.productCode)) {
+      if (!isWellFormedProductCode(item.productCode)) {
         errors.push(`items[${index}].productCode is invalid`);
       }
 
@@ -894,4 +979,124 @@ export function validateCreateDriverCustomerAssignmentInput(
   }
 
   return errors;
+}
+
+const PRODUCT_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_]*$/;
+const PRODUCT_CODE_MAX_LENGTH = 20;
+
+function validateProductPrice(
+  prices: Record<CustomerType, number>,
+  customerType: CustomerType,
+  errors: string[],
+): void {
+  const amount = prices[customerType];
+
+  if (amount === undefined || amount === null) {
+    errors.push(`prices.${customerType} is required`);
+    return;
+  }
+
+  if (!Number.isInteger(amount) || amount < 0) {
+    errors.push(`prices.${customerType} must be a non-negative integer`);
+  }
+}
+
+export function validateCreateProductInput(input: CreateProductInput): string[] {
+  const errors: string[] = [];
+  const code = input.code?.trim() ?? "";
+
+  if (code.length === 0) {
+    errors.push("code is required");
+  } else {
+    if (code.length > PRODUCT_CODE_MAX_LENGTH) {
+      errors.push(`code must be at most ${PRODUCT_CODE_MAX_LENGTH} characters`);
+    }
+    if (!PRODUCT_CODE_PATTERN.test(code)) {
+      errors.push("code must be uppercase letters, digits or underscore");
+    }
+  }
+
+  if (!input.name || input.name.trim().length < 2) {
+    errors.push("name must have at least 2 characters");
+  }
+
+  if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+    errors.push("sortOrder must be an integer");
+  }
+
+  if (!input.prices) {
+    errors.push("prices is required");
+  } else {
+    for (const customerType of CUSTOMER_TYPES) {
+      validateProductPrice(input.prices, customerType, errors);
+    }
+  }
+
+  return errors;
+}
+
+export function validateUpdateProductInput(input: UpdateProductInput): string[] {
+  const errors: string[] = [];
+
+  const touched =
+    input.name !== undefined ||
+    input.isActive !== undefined ||
+    input.sortOrder !== undefined;
+
+  if (!touched) {
+    errors.push("at least one field must be provided");
+  }
+
+  if (input.name !== undefined && input.name.trim().length < 2) {
+    errors.push("name must have at least 2 characters");
+  }
+
+  if (input.isActive !== undefined && typeof input.isActive !== "boolean") {
+    errors.push("isActive must be a boolean");
+  }
+
+  if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+    errors.push("sortOrder must be an integer");
+  }
+
+  return errors;
+}
+
+/**
+ * Ventana hacia atras que se acepta en `occurredAt`. Cubre de sobra el uso
+ * real -- los choferes sincronizan el mismo dia -- y acota el dano de un
+ * reloj mal puesto o manipulado.
+ */
+export const OCCURRED_AT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Resuelve cuando ocurrio realmente una venta a partir de lo que dijo el
+ * dispositivo, acotandolo a una ventana creible.
+ *
+ * La fecha la pone el telefono porque es el unico que sabe cuando se hizo la
+ * venta: el servidor solo ve el momento en que llego. Pero el telefono no es
+ * confiable, y de esa fecha depende a que precio se tarifa: un reloj atrasado
+ * -- por accidente o a proposito -- compraria precios viejos. Fuera de la
+ * ventana, o ante cualquier cosa impareseable, se usa `now`, que es siempre
+ * defendible.
+ */
+export function resolveOccurredAt(value: string | undefined, now: Date): Date {
+  if (!value) {
+    return now;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return now;
+  }
+
+  if (parsed.getTime() > now.getTime()) {
+    return now;
+  }
+
+  if (now.getTime() - parsed.getTime() > OCCURRED_AT_MAX_AGE_MS) {
+    return now;
+  }
+
+  return parsed;
 }

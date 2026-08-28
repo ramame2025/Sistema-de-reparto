@@ -471,6 +471,7 @@ describe('SyncContext/4.4 refreshDaySummary chaining + visible summaryError', ()
     const saleRecord: SaleRecord = {
       id: 'sale-ok',
       createdAt: today,
+      occurredAt: today,
       status: 'active',
       driverName: 'chofer1',
       truckCode: 'CAMION-01',
@@ -478,7 +479,7 @@ describe('SyncContext/4.4 refreshDaySummary chaining + visible summaryError', ()
       customerName: 'Cliente de prueba',
       customerType: 'final',
       paymentMethod: 'efectivo',
-      items: [{ productCode: 'G10', quantity: 1 }],
+      items: [{ productCode: 'G10', quantity: 1, unitPrice: 500 }],
       kind: 'sale',
     };
 

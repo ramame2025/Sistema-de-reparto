@@ -1,5 +1,31 @@
+/**
+ * Los cuatro productos con los que arranco el sistema, hoy sembrados como las
+ * primeras filas de la tabla `Product`.
+ *
+ * YA NO ES EL CATALOGO: el admin crea y da de baja productos, asi que esta
+ * lista no es exhaustiva ni autoritativa. Sobrevive como fuente del seed y
+ * como lista de fallback de las pantallas que todavia no consumen el catalogo
+ * de la API. Validar contra ella rechazaria productos nuevos y legitimos: la
+ * pertenencia se verifica contra la base, del lado del servidor.
+ */
 export declare const PRODUCT_CODES: readonly ["G10", "G15", "G45", "G15_AUTO"];
-export type ProductCode = (typeof PRODUCT_CODES)[number];
+/**
+ * Codigo de producto tal como viaja por la API. Es un string abierto, no una
+ * union cerrada: el catalogo lo define el admin en runtime. El codigo es
+ * estable e inmutable una vez creado, porque ya viaja dentro de los payloads
+ * encolados offline en los telefonos de los choferes.
+ */
+export type ProductCode = string;
+/**
+ * Valida la FORMA de un codigo de producto, no su pertenencia al catalogo.
+ *
+ * `packages/shared` corre en el telefono y en el navegador, y ninguno de los
+ * dos conoce el catalogo: lo define el admin en runtime. Comprobar pertenencia
+ * aca rechazaria todo producto nuevo y legitimo. Que el codigo EXISTA se
+ * verifica contra la tabla `Product`, del lado del servidor, que es el unico
+ * lugar que tiene la respuesta.
+ */
+export declare function isWellFormedProductCode(code: unknown): boolean;
 export declare const CUSTOMER_TYPES: readonly ["final", "comercio", "distribuidor"];
 export type CustomerType = (typeof CUSTOMER_TYPES)[number];
 export declare const PAYMENT_METHODS: readonly ["efectivo", "transferencia", "qr", "tarjeta"];
@@ -19,6 +45,12 @@ export type SaleItemInput = {
 };
 export type CreateSaleInput = {
     clientGeneratedId?: string;
+    /**
+     * Cuando ocurrio la venta, en ISO, segun el reloj del telefono. Opcional:
+     * los payloads viejos ya encolados no lo traen. El servidor lo acota con
+     * `resolveOccurredAt` antes de creerle.
+     */
+    occurredAt?: string;
     driverName: string;
     truckCode?: string;
     customerName: string;
@@ -40,6 +72,8 @@ export type CreateSaleInput = {
  * `recordEmptyVisit` (fuera de scope de esta unidad).
  */
 export type RecordEmptyVisitInput = {
+    /** Cuando ocurrio la visita, en ISO. Ver `CreateSaleInput.occurredAt`. */
+    occurredAt?: string;
     clientGeneratedId?: string;
     driverName: string;
     truckCode?: string;
@@ -59,9 +93,21 @@ export type UpdateSaleInput = CreateSaleInput & {
      */
     kind?: SaleKind;
 };
+/**
+ * Una linea tal como quedo GRABADA, no como se pidio: incluye el precio
+ * unitario congelado en el momento de la venta.
+ */
+export type SaleItemRecord = SaleItemInput & {
+    unitPrice: number;
+};
 export type SaleRecord = {
     id: string;
     createdAt: string;
+    /**
+     * Cuando ocurrio la venta en la calle. Distinto de `createdAt`, que es
+     * cuando la fila entro: una venta sin senal se sincroniza mas tarde.
+     */
+    occurredAt: string;
     status: "active" | "canceled";
     canceledAt?: string;
     cancelReason?: string;
@@ -76,7 +122,7 @@ export type SaleRecord = {
      * sigue teniendo un `PaymentMethod` valido.
      */
     paymentMethod: PaymentMethod | null;
-    items: SaleItemInput[];
+    items: SaleItemRecord[];
     note?: string;
     kind: SaleKind;
     containerReturned?: boolean;
@@ -223,6 +269,38 @@ export type CustomerRecord = {
     createdAt: string;
     updatedAt: string;
 };
+export type ProductRecord = {
+    id: string;
+    code: string;
+    name: string;
+    isActive: boolean;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+};
+/**
+ * Un producto nace CON sus tres precios, en la misma transaccion. No es una
+ * comodidad: `getPriceTable` falla entera si a cualquier producto le falta el
+ * precio de cualquier tipo de cliente, y eso no rompe la venta de ese producto
+ * sino TODAS las ventas del sistema. Un producto sin precios no puede existir
+ * jamas, ni por un instante.
+ */
+export type CreateProductInput = {
+    code: string;
+    name: string;
+    sortOrder?: number;
+    prices: Record<CustomerType, number>;
+};
+/**
+ * El `code` no se puede cambiar, y por eso no esta aca. Ya viaja dentro de los
+ * payloads de venta encolados en los telefonos de los choferes: renombrarlo
+ * dejaria esas ventas apuntando a un producto inexistente.
+ */
+export type UpdateProductInput = {
+    name?: string;
+    isActive?: boolean;
+    sortOrder?: number;
+};
 export type CreateTruckInput = {
     code: string;
     plate: string;
@@ -312,3 +390,23 @@ export declare function validateUpdatePriceInput(input: UpdatePriceInput): strin
  * de identidad faltantes/invalidos.
  */
 export declare function validateCreateDriverCustomerAssignmentInput(input: CreateDriverCustomerAssignmentInput): string[];
+export declare function validateCreateProductInput(input: CreateProductInput): string[];
+export declare function validateUpdateProductInput(input: UpdateProductInput): string[];
+/**
+ * Ventana hacia atras que se acepta en `occurredAt`. Cubre de sobra el uso
+ * real -- los choferes sincronizan el mismo dia -- y acota el dano de un
+ * reloj mal puesto o manipulado.
+ */
+export declare const OCCURRED_AT_MAX_AGE_MS: number;
+/**
+ * Resuelve cuando ocurrio realmente una venta a partir de lo que dijo el
+ * dispositivo, acotandolo a una ventana creible.
+ *
+ * La fecha la pone el telefono porque es el unico que sabe cuando se hizo la
+ * venta: el servidor solo ve el momento en que llego. Pero el telefono no es
+ * confiable, y de esa fecha depende a que precio se tarifa: un reloj atrasado
+ * -- por accidente o a proposito -- compraria precios viejos. Fuera de la
+ * ventana, o ante cualquier cosa impareseable, se usa `now`, que es siempre
+ * defendible.
+ */
+export declare function resolveOccurredAt(value: string | undefined, now: Date): Date;

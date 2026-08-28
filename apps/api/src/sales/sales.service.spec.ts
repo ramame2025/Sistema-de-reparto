@@ -9,6 +9,7 @@ import type {
 } from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
+import { ProductsService } from '../products/products.service';
 import { SalesService } from './sales.service';
 
 const CUSTOM_PRICE_TABLE: PriceTable = {
@@ -22,6 +23,7 @@ function buildSaleRow(overrides: Record<string, unknown> = {}) {
     id: 'sale-1',
     clientGeneratedId: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    occurredAt: new Date('2026-01-01T00:00:00.000Z'),
     status: 'active',
     canceledAt: null,
     cancelReason: null,
@@ -92,7 +94,8 @@ describe('SalesService', () => {
     truck: { findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
-  let pricesService: { getPriceTable: jest.Mock };
+  let pricesService: { getPriceTable: jest.Mock; getPriceTableAt: jest.Mock };
+  let productsService: { assertProductCodesExist: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -103,13 +106,18 @@ describe('SalesService', () => {
       truck: { findUnique: jest.fn() },
       $transaction: jest.fn(),
     };
-    pricesService = { getPriceTable: jest.fn().mockResolvedValue(CUSTOM_PRICE_TABLE) };
+    pricesService = {
+      getPriceTable: jest.fn().mockResolvedValue(CUSTOM_PRICE_TABLE),
+      getPriceTableAt: jest.fn().mockResolvedValue(CUSTOM_PRICE_TABLE),
+    };
+    productsService = { assertProductCodesExist: jest.fn().mockResolvedValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         SalesService,
         { provide: PrismaService, useValue: prisma },
         { provide: PricesService, useValue: pricesService },
+        { provide: ProductsService, useValue: productsService },
       ],
     }).compile();
 
@@ -221,6 +229,126 @@ describe('SalesService', () => {
       expect(prisma.sale.create).not.toHaveBeenCalled();
     });
 
+    // packages/shared ya no puede saber que codigos existen -- el catalogo lo
+    // define el admin en runtime -- asi que la pertenencia se verifica aca.
+    // Sin esto un codigo inexistente llegaria hasta la FK y saldria como un
+    // error de Prisma en vez de un 400 legible.
+    // El precio unitario queda congelado en la linea. Es el registro
+    // definitivo: ningun cambio de precio posterior puede alterar lo que esta
+    // venta cobro.
+    it('freezes the unit price on every sale item', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(
+        buildCreateInput({
+          customerType: 'final',
+          items: [
+            { productCode: 'G10', quantity: 2 },
+            { productCode: 'G45', quantity: 1 },
+          ],
+        }),
+      );
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            items: {
+              create: [
+                { productCode: 'G10', quantity: 2, unitPrice: 100 },
+                { productCode: 'G45', quantity: 1, unitPrice: 300 },
+              ],
+            },
+          }),
+        }),
+      );
+    });
+
+    it('derives the total from the frozen unit prices, so total and items can never disagree', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(
+        buildCreateInput({
+          customerType: 'final',
+          items: [
+            { productCode: 'G10', quantity: 2 },
+            { productCode: 'G45', quantity: 1 },
+          ],
+        }),
+      );
+
+      // 2 * 100 + 1 * 300
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ total: 500 }) }),
+      );
+    });
+
+    // El corazon del cambio: una venta hecha sin senal se tarifa con los
+    // precios del momento en que ocurrio, no del momento en que llego.
+    it('prices the sale at occurredAt, not at the time it arrived', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+      const occurredAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+      await service.createSale(buildCreateInput({ occurredAt }));
+
+      expect(pricesService.getPriceTableAt).toHaveBeenCalledWith(new Date(occurredAt));
+    });
+
+    it('persists occurredAt alongside the sale', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+      const occurredAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+      await service.createSale(buildCreateInput({ occurredAt }));
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ occurredAt: new Date(occurredAt) }),
+        }),
+      );
+    });
+
+    it('falls back to now when the device sent no occurredAt', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(buildCreateInput());
+
+      const [[call]] = prisma.sale.create.mock.calls;
+      expect(call.data.occurredAt).toBeInstanceOf(Date);
+      expect(pricesService.getPriceTableAt).toHaveBeenCalledWith(call.data.occurredAt);
+    });
+
+    // Un reloj mal puesto no puede comprar precios viejos.
+    it('ignores an occurredAt far outside the queue window', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(
+        buildCreateInput({ occurredAt: '2020-01-01T00:00:00.000Z' }),
+      );
+
+      const [[call]] = prisma.sale.create.mock.calls;
+      expect(call.data.occurredAt.getFullYear()).toBeGreaterThan(2020);
+    });
+
+    it('verifies every productCode against the catalogue before writing', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(
+        buildCreateInput({ items: [{ productCode: 'G10', quantity: 2 }] }),
+      );
+
+      expect(productsService.assertProductCodesExist).toHaveBeenCalledWith(['G10']);
+    });
+
+    it('does not write anything when a productCode is not in the catalogue', async () => {
+      productsService.assertProductCodesExist.mockRejectedValue(
+        new Error('Unknown productCode: G99'),
+      );
+
+      await expect(
+        service.createSale(buildCreateInput({ items: [{ productCode: 'G99', quantity: 1 }] })),
+      ).rejects.toThrow(/G99/);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
     it('computes the total from PricesService.getPriceTable, not DEFAULT_PRICE_TABLE', async () => {
       prisma.sale.create.mockResolvedValue(buildSaleRow({ total: 400 }));
 
@@ -228,7 +356,8 @@ describe('SalesService', () => {
         buildCreateInput({ items: [{ productCode: 'G15_AUTO', quantity: 1 }] }),
       );
 
-      expect(pricesService.getPriceTable).toHaveBeenCalledTimes(1);
+      // Ahora se pide la tabla vigente en la fecha de la venta, no la actual.
+      expect(pricesService.getPriceTableAt).toHaveBeenCalledTimes(1);
       // DEFAULT_PRICE_TABLE.final.G15_AUTO is 14500; CUSTOM_PRICE_TABLE.final.G15_AUTO is 400.
       expect(prisma.sale.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ total: 400 }) }),
@@ -384,6 +513,48 @@ describe('SalesService', () => {
       expect(prisma.sale.update).not.toHaveBeenCalled();
     });
 
+    // Requisito 4 tambien vale para las correcciones: arreglar una cantidad de
+    // una venta de marzo no puede moverle el precio a agosto.
+    it('reprices an edit at the sale own occurredAt, never at today', async () => {
+      const occurredAt = new Date('2026-03-10T12:00:00.000Z');
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({ occurredAt, items: [] }),
+      );
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+        fn(prisma),
+      );
+      prisma.sale.update.mockResolvedValue(buildSaleRow({ occurredAt }));
+
+      await service.updateSale('sale-1', buildUpdateInput());
+
+      expect(pricesService.getPriceTableAt).toHaveBeenCalledWith(occurredAt);
+    });
+
+    it('freezes unit prices on the rewritten items too', async () => {
+      const occurredAt = new Date('2026-03-10T12:00:00.000Z');
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({ occurredAt, items: [] }),
+      );
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+        fn(prisma),
+      );
+      prisma.sale.update.mockResolvedValue(buildSaleRow({ occurredAt }));
+
+      await service.updateSale(
+        'sale-1',
+        buildUpdateInput({
+          customerType: 'final',
+          items: [{ productCode: 'G10', quantity: 2 }],
+        }),
+      );
+
+      const call = prisma.sale.update.mock.calls[0][0];
+      expect(call.data.items.create).toEqual([
+        { productCode: 'G10', quantity: 2, unitPrice: 100 },
+      ]);
+      expect(call.data.total).toBe(200);
+    });
+
     it('computes the total from PricesService.getPriceTable, not DEFAULT_PRICE_TABLE', async () => {
       prisma.sale.update.mockResolvedValue(buildSaleRow({ total: 400 }));
 
@@ -392,7 +563,7 @@ describe('SalesService', () => {
         buildUpdateInput({ items: [{ productCode: 'G15_AUTO', quantity: 1 }] }),
       );
 
-      expect(pricesService.getPriceTable).toHaveBeenCalledTimes(1);
+      expect(pricesService.getPriceTableAt).toHaveBeenCalledTimes(1);
       expect(prisma.sale.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ total: 400 }) }),
       );
@@ -858,6 +1029,7 @@ describe('SalesService', () => {
         {
           id: 'sale-1',
           createdAt: now,
+          occurredAt: now,
           status: 'active',
           canceledAt: null,
           cancelReason: null,
@@ -868,7 +1040,7 @@ describe('SalesService', () => {
           customerType: 'final',
           paymentMethod: 'efectivo',
           note: null,
-          items: [{ productCode: 'G10', quantity: 2 }],
+          items: [{ productCode: 'G10', quantity: 2, unitPrice: 50 }],
         },
       ]);
 
@@ -878,6 +1050,7 @@ describe('SalesService', () => {
         {
           id: 'sale-1',
           createdAt: now.toISOString(),
+          occurredAt: now.toISOString(),
           status: 'active',
           canceledAt: undefined,
           cancelReason: undefined,
@@ -888,7 +1061,7 @@ describe('SalesService', () => {
           customerType: 'final',
           paymentMethod: 'efectivo',
           note: undefined,
-          items: [{ productCode: 'G10', quantity: 2 }],
+          items: [{ productCode: 'G10', quantity: 2, unitPrice: 50 }],
         },
       ]);
     });

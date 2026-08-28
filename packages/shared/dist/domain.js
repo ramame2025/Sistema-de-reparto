@@ -1,9 +1,31 @@
+/**
+ * Los cuatro productos con los que arranco el sistema, hoy sembrados como las
+ * primeras filas de la tabla `Product`.
+ *
+ * YA NO ES EL CATALOGO: el admin crea y da de baja productos, asi que esta
+ * lista no es exhaustiva ni autoritativa. Sobrevive como fuente del seed y
+ * como lista de fallback de las pantallas que todavia no consumen el catalogo
+ * de la API. Validar contra ella rechazaria productos nuevos y legitimos: la
+ * pertenencia se verifica contra la base, del lado del servidor.
+ */
 export const PRODUCT_CODES = [
     "G10",
     "G15",
     "G45",
     "G15_AUTO",
 ];
+/**
+ * Valida la FORMA de un codigo de producto, no su pertenencia al catalogo.
+ *
+ * `packages/shared` corre en el telefono y en el navegador, y ninguno de los
+ * dos conoce el catalogo: lo define el admin en runtime. Comprobar pertenencia
+ * aca rechazaria todo producto nuevo y legitimo. Que el codigo EXISTA se
+ * verifica contra la tabla `Product`, del lado del servidor, que es el unico
+ * lugar que tiene la respuesta.
+ */
+export function isWellFormedProductCode(code) {
+    return typeof code === "string" && code.trim().length > 0;
+}
 export const CUSTOMER_TYPES = ["final", "comercio", "distribuidor"];
 export const PAYMENT_METHODS = [
     "efectivo",
@@ -64,7 +86,7 @@ export function validateCreateSaleInput(input) {
     }
     if (Array.isArray(input.items)) {
         input.items.forEach((item, index) => {
-            if (!PRODUCT_CODES.includes(item.productCode)) {
+            if (!isWellFormedProductCode(item.productCode)) {
                 errors.push(`items[${index}].productCode is invalid`);
             }
             if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
@@ -185,7 +207,7 @@ export function validateCreateLoadManifestInput(input) {
     }
     if (Array.isArray(input.items)) {
         input.items.forEach((item, index) => {
-            if (!PRODUCT_CODES.includes(item.productCode)) {
+            if (!isWellFormedProductCode(item.productCode)) {
                 errors.push(`items[${index}].productCode is invalid`);
             }
             if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
@@ -423,4 +445,98 @@ export function validateCreateDriverCustomerAssignmentInput(input) {
         errors.push('duplicate customerId');
     }
     return errors;
+}
+const PRODUCT_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_]*$/;
+const PRODUCT_CODE_MAX_LENGTH = 20;
+function validateProductPrice(prices, customerType, errors) {
+    const amount = prices[customerType];
+    if (amount === undefined || amount === null) {
+        errors.push(`prices.${customerType} is required`);
+        return;
+    }
+    if (!Number.isInteger(amount) || amount < 0) {
+        errors.push(`prices.${customerType} must be a non-negative integer`);
+    }
+}
+export function validateCreateProductInput(input) {
+    const errors = [];
+    const code = input.code?.trim() ?? "";
+    if (code.length === 0) {
+        errors.push("code is required");
+    }
+    else {
+        if (code.length > PRODUCT_CODE_MAX_LENGTH) {
+            errors.push(`code must be at most ${PRODUCT_CODE_MAX_LENGTH} characters`);
+        }
+        if (!PRODUCT_CODE_PATTERN.test(code)) {
+            errors.push("code must be uppercase letters, digits or underscore");
+        }
+    }
+    if (!input.name || input.name.trim().length < 2) {
+        errors.push("name must have at least 2 characters");
+    }
+    if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+        errors.push("sortOrder must be an integer");
+    }
+    if (!input.prices) {
+        errors.push("prices is required");
+    }
+    else {
+        for (const customerType of CUSTOMER_TYPES) {
+            validateProductPrice(input.prices, customerType, errors);
+        }
+    }
+    return errors;
+}
+export function validateUpdateProductInput(input) {
+    const errors = [];
+    const touched = input.name !== undefined ||
+        input.isActive !== undefined ||
+        input.sortOrder !== undefined;
+    if (!touched) {
+        errors.push("at least one field must be provided");
+    }
+    if (input.name !== undefined && input.name.trim().length < 2) {
+        errors.push("name must have at least 2 characters");
+    }
+    if (input.isActive !== undefined && typeof input.isActive !== "boolean") {
+        errors.push("isActive must be a boolean");
+    }
+    if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+        errors.push("sortOrder must be an integer");
+    }
+    return errors;
+}
+/**
+ * Ventana hacia atras que se acepta en `occurredAt`. Cubre de sobra el uso
+ * real -- los choferes sincronizan el mismo dia -- y acota el dano de un
+ * reloj mal puesto o manipulado.
+ */
+export const OCCURRED_AT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * Resuelve cuando ocurrio realmente una venta a partir de lo que dijo el
+ * dispositivo, acotandolo a una ventana creible.
+ *
+ * La fecha la pone el telefono porque es el unico que sabe cuando se hizo la
+ * venta: el servidor solo ve el momento en que llego. Pero el telefono no es
+ * confiable, y de esa fecha depende a que precio se tarifa: un reloj atrasado
+ * -- por accidente o a proposito -- compraria precios viejos. Fuera de la
+ * ventana, o ante cualquier cosa impareseable, se usa `now`, que es siempre
+ * defendible.
+ */
+export function resolveOccurredAt(value, now) {
+    if (!value) {
+        return now;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return now;
+    }
+    if (parsed.getTime() > now.getTime()) {
+        return now;
+    }
+    if (now.getTime() - parsed.getTime() > OCCURRED_AT_MAX_AGE_MS) {
+        return now;
+    }
+    return parsed;
 }

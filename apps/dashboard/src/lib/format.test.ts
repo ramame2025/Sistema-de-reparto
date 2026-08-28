@@ -4,6 +4,7 @@ import { formatPaymentMethod } from "./format";
 const buildChurnSale = (): SaleRecord => ({
   id: "sale-1",
   createdAt: new Date().toISOString(),
+  occurredAt: new Date().toISOString(),
   status: "active",
   driverName: "Chofer Test",
   total: 0,

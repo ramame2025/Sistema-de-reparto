@@ -13,6 +13,7 @@ import { DriverCustomerAssignmentsModule } from './driver-customer-assignments/d
 import { DriverTruckAssignmentsModule } from './driver-truck-assignments/driver-truck-assignments.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { LoadManifestsModule } from './load-manifests/load-manifests.module';
+import { ProductsModule } from './products/products.module';
 import { PricesModule } from './prices/prices.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SalesModule } from './sales/sales.module';
@@ -44,6 +45,7 @@ import { UsersModule } from './users/users.module';
     TrucksModule,
     DriverTruckAssignmentsModule,
     DriverCustomerAssignmentsModule,
+    ProductsModule,
     PricesModule,
   ],
   controllers: [AppController],

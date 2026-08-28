@@ -18,6 +18,14 @@ jest.mock('../context/TruckContext', () => {
   };
 });
 
+jest.mock('../context/CatalogContext', () => {
+  const actual = jest.requireActual('../context/CatalogContext');
+  return {
+    ...actual,
+    useCatalog: jest.fn(),
+  };
+});
+
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import * as ExpoFileSystem from 'expo-file-system';
@@ -25,10 +33,31 @@ import * as ImagePicker from 'expo-image-picker';
 import { LoadManifestScreen } from './LoadManifestScreen';
 import { useAuth } from '../context/AuthContext';
 import { useTruck } from '../context/TruckContext';
+import { useCatalog } from '../context/CatalogContext';
 import { ApiError } from '../services/apiClient';
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseTruck = useTruck as jest.Mock;
+const mockedUseCatalog = useCatalog as jest.Mock;
+
+const manifestCatalog = {
+  products: ['G10', 'G15', 'G45', 'G15_AUTO'].map((code, index) => ({
+    id: `p-${code}`,
+    code,
+    name: code,
+    isActive: true,
+    sortOrder: index,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  })),
+  prices: null,
+  status: 'ready' as const,
+  stale: false,
+  fetchedAt: '2026-08-27T10:00:00.000Z',
+  canSell: false,
+  error: null,
+  reload: jest.fn(),
+};
 const mockedLaunchImageLibraryAsync = ImagePicker.launchImageLibraryAsync as jest.Mock;
 const mockedLaunchCameraAsync = ImagePicker.launchCameraAsync as jest.Mock;
 const mockedRequestMediaLibraryPermissionsAsync =
@@ -85,6 +114,7 @@ beforeEach(() => {
   });
 
   mockedUseTruck.mockReturnValue(baseTruckValue);
+  mockedUseCatalog.mockReturnValue(manifestCatalog);
 
   mockedRequestMediaLibraryPermissionsAsync.mockClear();
   mockedRequestMediaLibraryPermissionsAsync.mockResolvedValue({ granted: true });

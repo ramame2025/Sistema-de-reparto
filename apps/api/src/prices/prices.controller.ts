@@ -1,26 +1,32 @@
 import { BadRequestException, Body, Controller, Get, Param, Put } from '@nestjs/common';
 import {
   CUSTOMER_TYPES,
-  PRODUCT_CODES,
   type CustomerType,
   type ProductCode,
   type UpdatePriceInput,
   validateUpdatePriceInput,
 } from '@distribuidor/shared';
 import { Roles } from '../auth/roles.decorator';
+import { ProductsService } from '../products/products.service';
 import { PricesService } from './prices.service';
 
 @Controller('prices')
 @Roles('admin')
 export class PricesController {
-  constructor(private readonly pricesService: PricesService) {}
+  constructor(
+    private readonly pricesService: PricesService,
+    private readonly productsService: ProductsService,
+  ) {}
 
   @Get()
   async listPrices() {
     return this.pricesService.listPrices();
   }
 
+  // El chofer lee la tabla para mostrar el total antes de cobrar; escribir
+  // sigue siendo solo del admin, por el default de clase.
   @Get('table')
+  @Roles('admin', 'chofer')
   async getPriceTable() {
     return this.pricesService.getPriceTable();
   }
@@ -31,12 +37,9 @@ export class PricesController {
     @Param('customerType') customerType: string,
     @Body() input: UpdatePriceInput,
   ) {
-    if (!PRODUCT_CODES.includes(productCode as ProductCode)) {
-      throw new BadRequestException({
-        message: 'Invalid productCode',
-        errors: [`productCode must be one of ${PRODUCT_CODES.join(', ')}`],
-      });
-    }
+    // Contra el catalogo real, no contra una lista fija: si no, ningun precio
+    // de un producto creado por el admin se podria editar nunca.
+    await this.productsService.assertProductCodesExist([productCode]);
 
     if (!CUSTOMER_TYPES.includes(customerType as CustomerType)) {
       throw new BadRequestException({

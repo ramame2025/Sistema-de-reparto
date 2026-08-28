@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  resolveOccurredAt,
   calculateSaleTotal,
   type CancelSaleInput,
   type CreateSaleInput,
@@ -13,7 +14,6 @@ import {
 import {
   CustomerType as PrismaCustomerType,
   PaymentMethod as PrismaPaymentMethod,
-  ProductCode as PrismaProductCode,
   SaleAuditAction as PrismaSaleAuditAction,
   SaleKind as PrismaSaleKind,
   type SaleAudit,
@@ -22,6 +22,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
+import { ProductsService } from '../products/products.service';
 
 type ResolvedSaleLinks = {
   customerType: CustomerType;
@@ -47,6 +48,7 @@ export class SalesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricesService: PricesService,
+    private readonly productsService: ProductsService,
   ) {}
 
   private async resolveCustomerAndTruck(
@@ -124,16 +126,40 @@ export class SalesService {
       }
     }
 
-    const priceTable = await this.pricesService.getPriceTable();
+    // `packages/shared` valida la forma del codigo pero no puede saber cuales
+    // existen: el catalogo lo define el admin en runtime. La pertenencia se
+    // verifica aca, antes de escribir, para que un codigo desconocido salga
+    // como un 400 legible y no como un error de FK de Prisma.
+    await this.productsService.assertProductCodesExist(
+      input.items.map((item) => item.productCode),
+    );
+
+    // Cuando paso la venta, no cuando llego: una venta sin senal se sincroniza
+    // mas tarde, y tiene que tarifarse con los precios de su propio momento.
+    const occurredAt = resolveOccurredAt(input.occurredAt, new Date());
+
+    const priceTable = await this.pricesService.getPriceTableAt(occurredAt);
     const { customerType, customerName, customerId, truckId } =
       await this.resolveCustomerAndTruck(input);
-    const total = calculateSaleTotal(customerType, input.items, priceTable);
+
+    // El precio unitario se congela en cada linea, y el total se deriva de
+    // esas lineas. Asi total e items no pueden discrepar nunca.
+    const pricedItems = input.items.map((item) => ({
+      productCode: item.productCode,
+      quantity: item.quantity,
+      unitPrice: priceTable[customerType][item.productCode] ?? 0,
+    }));
+    const total = pricedItems.reduce(
+      (sum, item) => sum + item.unitPrice * item.quantity,
+      0,
+    );
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
 
     const sale = await this.prisma.sale.create({
       data: {
         clientGeneratedId: input.clientGeneratedId ?? null,
+        occurredAt,
         driverName: resolvedDriverName,
         truckCode: resolvedTruckCode,
         customerName,
@@ -148,10 +174,7 @@ export class SalesService {
         latitude: input.latitude ?? null,
         longitude: input.longitude ?? null,
         items: {
-          create: input.items.map((item) => ({
-            productCode: item.productCode as PrismaProductCode,
-            quantity: item.quantity,
-          })),
+          create: pricedItems,
         },
         audits: {
           create: {
@@ -190,6 +213,11 @@ export class SalesService {
       }
     }
 
+    // Una visita sin venta tambien ocurre en la calle y tambien se encola sin
+    // senal, asi que merece la misma fecha real que una venta. No se tarifa
+    // -- total 0, sin items -- pero si se cuenta en el dia correcto.
+    const occurredAt = resolveOccurredAt(input.occurredAt, new Date());
+
     const { customerType, customerName, customerId, truckId } =
       await this.resolveCustomerAndTruck(input);
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
@@ -198,6 +226,7 @@ export class SalesService {
     const sale = await this.prisma.sale.create({
       data: {
         clientGeneratedId: input.clientGeneratedId ?? null,
+        occurredAt,
         driverName: resolvedDriverName,
         truckCode: resolvedTruckCode,
         customerName,
@@ -253,20 +282,32 @@ export class SalesService {
 
     const isChurn = existingKind === 'churn';
 
-    const priceTable = await this.pricesService.getPriceTable();
+    if (!isChurn) {
+      await this.productsService.assertProductCodesExist(
+        input.items.map((item) => item.productCode),
+      );
+    }
+
+    // Con la fecha ORIGINAL de la venta, nunca con la de hoy: corregir una
+    // cantidad de una venta de marzo no puede moverle el precio a agosto.
+    const priceTable = await this.pricesService.getPriceTableAt(existing.occurredAt);
     const { customerType, customerName, customerId, truckId } =
       await this.resolveCustomerAndTruck(input);
     // A churn row never has items/paymentMethod, on create or on edit
     // (Design decision #2/#5): forced here too, regardless of whatever the
     // edit payload does or doesn't carry, mirroring `recordEmptyVisit`.
-    const total = isChurn ? 0 : calculateSaleTotal(customerType, input.items, priceTable);
-    const resolvedPaymentMethod = isChurn ? null : (input.paymentMethod as PrismaPaymentMethod);
     const resolvedItems = isChurn
       ? []
       : input.items.map((item) => ({
-          productCode: item.productCode as PrismaProductCode,
+          productCode: item.productCode,
           quantity: item.quantity,
+          unitPrice: priceTable[customerType][item.productCode] ?? 0,
         }));
+    const total = resolvedItems.reduce(
+      (sum, item) => sum + item.unitPrice * item.quantity,
+      0,
+    );
+    const resolvedPaymentMethod = isChurn ? null : (input.paymentMethod as PrismaPaymentMethod);
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
     // A churn row never has a payment, so it never has a payment proof either
@@ -421,6 +462,7 @@ export class SalesService {
     return {
       id: sale.id,
       createdAt: sale.createdAt.toISOString(),
+      occurredAt: sale.occurredAt.toISOString(),
       status: sale.status,
       canceledAt: sale.canceledAt?.toISOString(),
       cancelReason: sale.cancelReason ?? undefined,
@@ -443,6 +485,7 @@ export class SalesService {
       items: sale.items.map((item) => ({
         productCode: item.productCode,
         quantity: item.quantity,
+        unitPrice: item.unitPrice,
       })),
     };
   }

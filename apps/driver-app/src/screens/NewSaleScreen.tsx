@@ -6,10 +6,7 @@ import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
   CUSTOMER_TYPES,
-  DEFAULT_PRICE_TABLE,
   PAYMENT_METHODS,
-  PRODUCT_CODES,
-  calculateSaleTotal,
   type CreateSaleInput,
   type CustomerType,
   type PaymentMethod,
@@ -28,6 +25,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
+import { useCatalog } from '../context/CatalogContext';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { ApiError } from '../services/apiClient';
 import { API_URL } from '../services/config';
@@ -38,12 +36,11 @@ import { typography } from '../theme/typography';
 
 type NewSaleScreenNavigationProp = NativeStackNavigationProp<NewSaleStackParamList, 'Sale'>;
 
-const EMPTY_QUANTITIES: Record<ProductCode, number> = {
-  G10: 0,
-  G15: 0,
-  G45: 0,
-  G15_AUTO: 0,
-};
+/**
+ * Ya no puede ser una constante con las cuatro claves fijas: el catalogo lo
+ * define el admin en runtime. Una cantidad ausente se lee como 0.
+ */
+const EMPTY_QUANTITIES: Record<ProductCode, number> = {};
 
 const buildClientGeneratedId = () =>
   `m_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -87,6 +84,7 @@ export function NewSaleScreen() {
   // whenever customerId is present, so an un-cleared customerId here would
   // discard the driver's edit server-side without any visible error.
   const [customerId, setCustomerId] = useState<string | undefined>(undefined);
+  const { products, prices, stale: pricesAreStale, canSell } = useCatalog();
   const [quantities, setQuantities] = useState<Record<ProductCode, number>>(EMPTY_QUANTITIES);
   // `undefined` = nunca tocado (se omite del payload, "no preguntado" en el
   // backend). Solo pasa a true/false cuando el chofer toca el control.
@@ -131,22 +129,32 @@ export function NewSaleScreen() {
 
   const currentItems = useMemo(
     () =>
-      PRODUCT_CODES.filter((code) => quantities[code] > 0).map((code) => ({
-        productCode: code,
-        quantity: quantities[code],
-      })),
-    [quantities],
+      products
+        .filter((product) => (quantities[product.code] ?? 0) > 0)
+        .map((product) => ({
+          productCode: product.code,
+          quantity: quantities[product.code],
+        })),
+    [products, quantities],
   );
 
-  const total = useMemo(
-    () => calculateSaleTotal(customerType, currentItems, DEFAULT_PRICE_TABLE),
-    [customerType, currentItems],
-  );
+  // Con los precios que vinieron de la API, no con una tabla compilada dentro
+  // de la app. Este era el numero que podia diferir del que grababa el
+  // servidor, y con precios editables esa diferencia es plata.
+  const total = useMemo(() => {
+    if (!prices) {
+      return 0;
+    }
+    return currentItems.reduce(
+      (sum, item) => sum + (prices[customerType][item.productCode] ?? 0) * item.quantity,
+      0,
+    );
+  }, [customerType, currentItems, prices]);
 
   const changeQty = (productCode: ProductCode, delta: number) => {
     setQuantities((previous) => ({
       ...previous,
-      [productCode]: Math.max(0, previous[productCode] + delta),
+      [productCode]: Math.max(0, (previous[productCode] ?? 0) + delta),
     }));
   };
 
@@ -268,6 +276,10 @@ export function NewSaleScreen() {
 
     const payload: CreateSaleInput = {
       clientGeneratedId: buildClientGeneratedId(),
+      // Cuando ocurre la venta, que es lo unico que este telefono sabe y el
+      // servidor no: si la venta se encola, va a llegar horas o dias despues.
+      // De esta fecha depende a que precio se graba y en que dia se cuenta.
+      occurredAt: new Date().toISOString(),
       driverName: username,
       truckId: truck.truckId,
       truckCode: truck.code,
@@ -412,6 +424,7 @@ export function NewSaleScreen() {
 
     const payload: RecordEmptyVisitInput = {
       clientGeneratedId: buildClientGeneratedId(),
+      occurredAt: new Date().toISOString(),
       driverName: username,
       truckId: truck?.truckId,
       truckCode: truck?.code,
@@ -548,22 +561,22 @@ export function NewSaleScreen() {
 
       <Card style={styles.card}>
         <Text style={styles.fieldLabel}>Productos</Text>
-        {PRODUCT_CODES.map((code) => (
-          <View key={code} style={styles.productRow}>
-            <Text style={styles.productName}>{code}</Text>
+        {products.map((product) => (
+          <View key={product.code} style={styles.productRow}>
+            <Text style={styles.productName}>{product.name}</Text>
             <View style={styles.qtyRow}>
               <Button
                 label="-"
                 variant="secondary"
-                onPress={() => changeQty(code, -1)}
-                testID={`new-sale-qty-decrement-${code}`}
+                onPress={() => changeQty(product.code, -1)}
+                testID={`new-sale-qty-decrement-${product.code}`}
               />
-              <Text style={styles.qtyValue}>{quantities[code]}</Text>
+              <Text style={styles.qtyValue}>{quantities[product.code] ?? 0}</Text>
               <Button
                 label="+"
                 variant="secondary"
-                onPress={() => changeQty(code, 1)}
-                testID={`new-sale-qty-increment-${code}`}
+                onPress={() => changeQty(product.code, 1)}
+                testID={`new-sale-qty-increment-${product.code}`}
               />
             </View>
           </View>
@@ -571,12 +584,30 @@ export function NewSaleScreen() {
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.total}>Total: ${total.toLocaleString('es-AR')}</Text>
-        <Button
-          label={saving ? 'Guardando...' : 'Guardar venta'}
-          onPress={() => void saveSale()}
-          disabled={saving}
-        />
+        <Text style={styles.total} testID="new-sale-total">
+          Total: ${total.toLocaleString('es-AR')}
+        </Text>
+        {pricesAreStale && (
+          <FeedbackBanner
+            testID="new-sale-stale-prices"
+            message="Sin conexion: precios de la ultima vez que sincronizaste. Pueden estar desactualizados."
+            tone="warning"
+          />
+        )}
+        {canSell ? (
+          <Button
+            label={saving ? 'Guardando...' : 'Guardar venta'}
+            onPress={() => void saveSale()}
+            disabled={saving}
+            testID="new-sale-submit"
+          />
+        ) : (
+          <FeedbackBanner
+            testID="new-sale-no-catalog"
+            message="No hay precios cargados en este telefono todavia. Conectate una vez para poder vender."
+            tone="error"
+          />
+        )}
         <FeedbackBanner message={message} tone={messageTone} />
       </Card>
 
