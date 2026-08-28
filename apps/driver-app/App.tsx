@@ -21,7 +21,11 @@ export default function App() {
           </CatalogProvider>
         </TruckProvider>
       </AuthProvider>
-      <StatusBar style="auto" />
+      {/* Pinned to "dark" (dark icons), not "auto": the app declares
+          userInterfaceStyle "light" in app.json and its background is a light
+          #F5F6F8, so following the device theme turns the icons white and
+          invisible whenever the phone itself is in dark mode. */}
+      <StatusBar style="dark" />
     </SafeAreaProvider>
   );
 }

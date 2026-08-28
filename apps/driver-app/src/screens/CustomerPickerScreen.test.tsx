@@ -28,6 +28,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react-nativ
 import { StyleSheet } from 'react-native';
 import type { CustomerRecord } from '@distribuidor/shared';
 import { CustomerPickerScreen } from './CustomerPickerScreen';
+import { ApiError } from '../services/apiClient';
 import { useAuth } from '../context/AuthContext';
 import { captureDeviceLocation } from '../services/location';
 import { MIN_TOUCH_TARGET } from '../theme/spacing';
@@ -318,5 +319,137 @@ describe('CustomerPickerScreen/alta rapida', () => {
       screen.getByText('No se pudo crear el cliente. Revisa la conexion e intenta de nuevo.'),
     ).toBeTruthy();
     expect(mockedNavigate).not.toHaveBeenCalled();
+  });
+});
+
+describe('CustomerPickerScreen — address', () => {
+  it('shows the street address on the row when the customer has one', async () => {
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+    mockedApiGet.mockResolvedValue([
+      { ...customers[0], address: 'Av. Mitre 1234' },
+      customers[1],
+    ]);
+
+    await render(<CustomerPickerScreen />);
+
+    await waitFor(() => expect(screen.getByText('Av. Mitre 1234')).toBeTruthy());
+  });
+
+  it('renders a customer with no address exactly as before', async () => {
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+    mockedApiGet.mockResolvedValue(customers);
+
+    await render(<CustomerPickerScreen />);
+
+    await waitFor(() => expect(screen.getByText('Kiosco Sur')).toBeTruthy());
+    expect(screen.queryByTestId('customer-picker-address-customer-1')).toBeNull();
+  });
+});
+
+describe('CustomerPickerScreen — duplicate on quick create', () => {
+  const conflictingCustomer = {
+    id: 'existing-9',
+    name: 'Don Jose',
+    customerType: 'final' as const,
+    isActive: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  const rejectWithConflict = () =>
+    mockedApiPost.mockRejectedValueOnce(
+      new ApiError(409, 'A customer with this name already exists in this zone', {
+        message: 'A customer with this name already exists in this zone',
+        customer: conflictingCustomer,
+      }),
+    );
+
+  const typeNameAndSubmit = async () => {
+    await fireEvent.changeText(
+      screen.getByTestId('customer-picker-quick-create-name'),
+      'Don Jose',
+    );
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-submit'));
+  };
+
+  beforeEach(() => {
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+    mockedApiGet.mockResolvedValue(customers);
+  });
+
+  it('offers the existing customer instead of showing a raw error', async () => {
+    rejectWithConflict();
+
+    await render(<CustomerPickerScreen />);
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+    await typeNameAndSubmit();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('customer-picker-duplicate')).toBeTruthy(),
+    );
+    expect(mockedNavigate).not.toHaveBeenCalled();
+  });
+
+  // The driver is standing in front of the customer; picking the existing one
+  // must be a single tap, not a retype.
+  it('picks the existing customer and continues the sale', async () => {
+    rejectWithConflict();
+
+    await render(<CustomerPickerScreen />);
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+    await typeNameAndSubmit();
+    await waitFor(() =>
+      expect(screen.getByTestId('customer-picker-duplicate-use')).toBeTruthy(),
+    );
+    await fireEvent.press(screen.getByTestId('customer-picker-duplicate-use'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('Sale', {
+      pickedCustomer: {
+        id: 'existing-9',
+        name: 'Don Jose',
+        customerType: 'final',
+      },
+    });
+  });
+
+  it('retries allowing the duplicate when the driver says it is another customer', async () => {
+    rejectWithConflict();
+    mockedApiPost.mockResolvedValueOnce({
+      id: 'new-customer-9',
+      name: 'Don Jose',
+      customerType: 'final',
+      isActive: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    await render(<CustomerPickerScreen />);
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+    await typeNameAndSubmit();
+    await waitFor(() =>
+      expect(screen.getByTestId('customer-picker-duplicate-force')).toBeTruthy(),
+    );
+    await fireEvent.press(screen.getByTestId('customer-picker-duplicate-force'));
+
+    await waitFor(() => expect(mockedApiPost).toHaveBeenCalledTimes(2));
+    expect(mockedApiPost.mock.calls[1][0]).toBe('/customers?allowDuplicate=true');
+    expect(mockedNavigate).toHaveBeenCalledWith('Sale', {
+      pickedCustomer: { id: 'new-customer-9', name: 'Don Jose', customerType: 'final' },
+    });
+  });
+
+  it('keeps showing a plain error banner for any non-409 failure', async () => {
+    mockedApiPost.mockRejectedValueOnce(new Error('Network request failed'));
+
+    await render(<CustomerPickerScreen />);
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+    await typeNameAndSubmit();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('No se pudo crear el cliente. Revisa la conexion e intenta de nuevo.'),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByTestId('customer-picker-duplicate')).toBeNull();
   });
 });

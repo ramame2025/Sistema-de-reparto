@@ -5,6 +5,7 @@ import { AuthRoleError, useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { FeedbackBanner } from '../components/FeedbackBanner';
+import { PasswordInput } from '../components/PasswordInput';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
@@ -42,13 +43,12 @@ export function LoginScreen() {
             placeholder="Usuario"
             autoCapitalize="none"
           />
-          <TextInput
-            style={styles.input}
+          <PasswordInput
             value={password}
             onChangeText={setPassword}
             placeholder="Password"
-            secureTextEntry
             onSubmitEditing={() => void handleLogin()}
+            testID="login-password"
           />
           <Button
             label={loading ? 'Ingresando...' : 'Iniciar sesion'}

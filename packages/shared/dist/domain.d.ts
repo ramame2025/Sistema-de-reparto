@@ -234,14 +234,35 @@ export type CreateCustomerInput = {
     name: string;
     customerType: CustomerType;
     zone?: string;
+    /**
+     * Human-readable street address. Independent from latitude/longitude:
+     * a customer may carry a pin, an address, both, or neither. Nothing
+     * geocodes one into the other (plan decision D2).
+     */
+    address?: string;
     latitude?: number;
     longitude?: number;
+};
+/**
+ * Every field optional — a patch touches only what it names. `null` on
+ * `zone`, `address` or the coordinate pair clears the stored value, which
+ * `undefined` cannot express.
+ */
+export type UpdateCustomerInput = {
+    name?: string;
+    customerType?: CustomerType;
+    zone?: string | null;
+    address?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    isActive?: boolean;
 };
 export type CustomerRecord = {
     id: string;
     name: string;
     customerType: CustomerType;
     zone?: string;
+    address?: string;
     latitude?: number;
     longitude?: number;
     isActive: boolean;
@@ -351,7 +372,14 @@ export declare function validateCreateLoadManifestInput(input: CreateLoadManifes
 export declare function validateLoginInput(input: LoginInput): string[];
 export declare function validateCreateUserInput(input: CreateUserInput): string[];
 export declare function validateChangePasswordInput(input: ChangePasswordInput): string[];
+/**
+ * Canonical form used to decide whether two customer names are "the same"
+ * for duplicate detection. Accent folding is not cosmetic here: without it
+ * "Don Jose" and "Don José" slip past the check on the very first try.
+ */
+export declare function normalizeCustomerName(name: string): string;
 export declare function validateCreateCustomerInput(input: CreateCustomerInput): string[];
+export declare function validateUpdateCustomerInput(input: UpdateCustomerInput): string[];
 export declare function validateCreateTruckInput(input: CreateTruckInput): string[];
 export declare function validateUpdateTruckInput(input: UpdateTruckInput): string[];
 export declare function validateCreateAssignmentInput(input: CreateAssignmentInput): string[];

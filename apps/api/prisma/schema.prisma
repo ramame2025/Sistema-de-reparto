@@ -155,6 +155,10 @@ model Customer {
   name              String
   customerType      CustomerType
   zone              String?
+  /// Human-readable street address. Independent from latitude/longitude:
+  /// a customer may have a pin, an address, both, or neither. Nothing
+  /// geocodes one into the other.
+  address           String?
   latitude          Float?
   longitude         Float?
   isActive          Boolean                         @default(true)
