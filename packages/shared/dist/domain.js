@@ -231,6 +231,28 @@ export function validateChangePasswordInput(input) {
     }
     return errors;
 }
+const LATITUDE_ERROR = 'latitude must be between -90 and 90';
+const LONGITUDE_ERROR = 'longitude must be between -180 and 180';
+const COORDINATE_PAIR_ERROR = 'latitude and longitude must be provided together';
+function isInvalidLatitude(value) {
+    return !Number.isFinite(value) || value < -90 || value > 90;
+}
+function isInvalidLongitude(value) {
+    return !Number.isFinite(value) || value < -180 || value > 180;
+}
+/**
+ * Canonical form used to decide whether two customer names are "the same"
+ * for duplicate detection. Accent folding is not cosmetic here: without it
+ * "Don Jose" and "Don José" slip past the check on the very first try.
+ */
+export function normalizeCustomerName(name) {
+    return name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ');
+}
 export function validateCreateCustomerInput(input) {
     const errors = [];
     if (!input.name || input.name.trim().length < 2) {
@@ -242,13 +264,66 @@ export function validateCreateCustomerInput(input) {
     if (input.zone !== undefined && input.zone.trim().length === 0) {
         errors.push('zone must not be empty when provided');
     }
+    if (input.address !== undefined && input.address.trim().length === 0) {
+        errors.push('address must not be empty when provided');
+    }
+    if (input.latitude !== undefined && isInvalidLatitude(input.latitude)) {
+        errors.push(LATITUDE_ERROR);
+    }
+    if (input.longitude !== undefined && isInvalidLongitude(input.longitude)) {
+        errors.push(LONGITUDE_ERROR);
+    }
+    // A record holding one half of the pair looks located but cannot be
+    // ranked by sortByProximity, so it would drop out of "Cerca tuyo"
+    // without anyone noticing.
+    if ((input.latitude === undefined) !== (input.longitude === undefined)) {
+        errors.push(COORDINATE_PAIR_ERROR);
+    }
+    return errors;
+}
+export function validateUpdateCustomerInput(input) {
+    const errors = [];
+    const touched = input.name !== undefined ||
+        input.customerType !== undefined ||
+        input.zone !== undefined ||
+        input.address !== undefined ||
+        input.latitude !== undefined ||
+        input.longitude !== undefined ||
+        input.isActive !== undefined;
+    if (!touched) {
+        errors.push('at least one field must be provided');
+    }
+    if (input.name !== undefined && input.name.trim().length < 2) {
+        errors.push('name must have at least 2 characters');
+    }
+    if (input.customerType !== undefined && !CUSTOMER_TYPES.includes(input.customerType)) {
+        errors.push('customerType is invalid');
+    }
+    if (input.zone !== undefined && input.zone !== null && input.zone.trim().length === 0) {
+        errors.push('zone must not be empty when provided');
+    }
+    if (input.address !== undefined &&
+        input.address !== null &&
+        input.address.trim().length === 0) {
+        errors.push('address must not be empty when provided');
+    }
     if (input.latitude !== undefined &&
-        (!Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90)) {
-        errors.push('latitude must be between -90 and 90');
+        input.latitude !== null &&
+        isInvalidLatitude(input.latitude)) {
+        errors.push(LATITUDE_ERROR);
     }
     if (input.longitude !== undefined &&
-        (!Number.isFinite(input.longitude) || input.longitude < -180 || input.longitude > 180)) {
-        errors.push('longitude must be between -180 and 180');
+        input.longitude !== null &&
+        isInvalidLongitude(input.longitude)) {
+        errors.push(LONGITUDE_ERROR);
+    }
+    // Both halves move together or neither does — including when clearing,
+    // where both must be null.
+    if ((input.latitude === undefined) !== (input.longitude === undefined)) {
+        errors.push(COORDINATE_PAIR_ERROR);
+    }
+    if (input.isActive !== undefined && typeof input.isActive !== 'boolean') {
+        errors.push('isActive must be a boolean');
     }
     return errors;
 }

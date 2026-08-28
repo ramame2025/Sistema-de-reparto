@@ -14,6 +14,64 @@ describe('apiClient/ApiError', () => {
     expect(error.status).toBe(404);
     expect(error.message).toBe('not found');
   });
+
+  it('carries a parsed body when one is given', () => {
+    const body = { message: 'duplicate', customer: { id: 'c1' } };
+    expect(new ApiError(409, 'duplicate', body).body).toEqual(body);
+  });
+});
+
+describe('apiClient error bodies', () => {
+  beforeEach(() => {
+    globalThis.fetch = jest.fn();
+  });
+
+  // POST /customers answers 409 with the conflicting customer in a JSON
+  // body. Without parsing it, the raw JSON string ends up as `message` --
+  // which every screen shows verbatim to the driver.
+  it('parses a JSON error body onto the error', async () => {
+    const payload = { message: 'A customer with this name already exists', customer: { id: 'c1' } };
+    (globalThis.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: async () => JSON.stringify(payload),
+    } as Response);
+    const client = createApiClient(() => 'tok123');
+
+    await expect(client.post('/customers', {})).rejects.toMatchObject({
+      status: 409,
+      body: payload,
+    });
+  });
+
+  it('uses the body message as the error message, never the raw JSON', async () => {
+    const payload = { message: 'Ya existe ese cliente', customer: { id: 'c1' } };
+    (globalThis.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: async () => JSON.stringify(payload),
+    } as Response);
+    const client = createApiClient(() => 'tok123');
+
+    await expect(client.post('/customers', {})).rejects.toMatchObject({
+      message: 'Ya existe ese cliente',
+    });
+  });
+
+  it('leaves a plain-text error body as the message, with no parsed body', async () => {
+    (globalThis.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => 'server exploded',
+    } as Response);
+    const client = createApiClient(() => 'tok123');
+
+    await expect(client.get('/sales')).rejects.toMatchObject({
+      status: 500,
+      message: 'server exploded',
+      body: undefined,
+    });
+  });
 });
 
 describe('apiClient/get', () => {

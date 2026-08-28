@@ -32,6 +32,16 @@ type CustomerPickerNavigationProp = NativeStackNavigationProp<
 // the full list stays reachable below regardless of this number).
 const NEARBY_HIGHLIGHT_COUNT = 5;
 
+/** El 409 de POST /customers viaja con el cliente que ya existe. */
+function conflictingCustomerFrom(error: unknown): CustomerRecord | null {
+  if (!(error instanceof ApiError) || error.status !== 409) {
+    return null;
+  }
+
+  const body = error.body as { customer?: CustomerRecord } | undefined;
+  return body?.customer ?? null;
+}
+
 /**
  * v2 (Phase 6 PR3, docs/plans/customer-picker-proximity.md): adds proximity
  * suggestion and quick creation on top of PR2's search + manual selection.
@@ -68,6 +78,7 @@ export function CustomerPickerScreen() {
   const [quickCreateType, setQuickCreateType] = useState<CustomerType>('final');
   const [creating, setCreating] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
+  const [duplicate, setDuplicate] = useState<CustomerRecord | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,22 +167,34 @@ export function CustomerPickerScreen() {
     });
   };
 
-  const submitQuickCreate = async () => {
+  const submitQuickCreate = async (allowDuplicate = false) => {
     setQuickCreateError(null);
 
     try {
       setCreating(true);
-      const created = await api.post<CustomerRecord>('/customers', {
-        name: quickCreateName,
-        customerType: quickCreateType,
-        // Omitido (no las keys) si no hubo lectura de ubicacion exitosa --
-        // mismo criterio "best-effort" que saveSale usa para
-        // latitude/longitude en NewSaleScreen (Open Question 4).
-        ...(location ? { latitude: location.latitude, longitude: location.longitude } : {}),
-      });
+      const created = await api.post<CustomerRecord>(
+        allowDuplicate ? '/customers?allowDuplicate=true' : '/customers',
+        {
+          name: quickCreateName,
+          customerType: quickCreateType,
+          // Omitido (no las keys) si no hubo lectura de ubicacion exitosa --
+          // mismo criterio "best-effort" que saveSale usa para
+          // latitude/longitude en NewSaleScreen (Open Question 4).
+          ...(location ? { latitude: location.latitude, longitude: location.longitude } : {}),
+        },
+      );
 
+      setDuplicate(null);
       pickCustomer(created);
     } catch (err) {
+      const conflicting = conflictingCustomerFrom(err);
+      if (conflicting) {
+        // Un nombre parecido no puede dejar al chofer varado frente a un
+        // cliente real: se le ofrece el existente de un toque, o crear igual.
+        setDuplicate(conflicting);
+        return;
+      }
+
       // Alta rapida es solo online (Open Question 13, design decision #13):
       // un fallo -- incluida la falta de conexion -- muestra error y no
       // navega. El chofer puede seguir con el nombre libre en NewSaleScreen.
@@ -224,6 +247,14 @@ export function CustomerPickerScreen() {
               <View style={styles.customerInfo}>
                 <Text style={styles.customerName}>{item.name}</Text>
                 <Text style={styles.customerType}>{item.customerType}</Text>
+                {item.address && (
+                  <Text
+                    style={styles.customerAddress}
+                    testID={`customer-picker-address-${item.id}`}
+                  >
+                    {item.address}
+                  </Text>
+                )}
               </View>
               {nearbyCustomerIds.has(item.id) && (
                 <StatusBadge
@@ -259,10 +290,36 @@ export function CustomerPickerScreen() {
         </View>
         <Button
           label={creating ? 'Creando...' : 'Crear cliente'}
-          onPress={() => void submitQuickCreate()}
+          onPress={() => void submitQuickCreate(false)}
           disabled={creating || quickCreateName.trim().length === 0}
           testID="customer-picker-quick-create-submit"
         />
+        {duplicate && (
+          <View style={styles.duplicateBox} testID="customer-picker-duplicate">
+            <Text style={styles.duplicateText}>
+              Ya existe {duplicate.name}
+              {duplicate.zone ? ` en ${duplicate.zone}` : ''}. Si es el mismo,
+              usalo. Si es otro, crealo igual.
+            </Text>
+            <View style={styles.duplicateActions}>
+              <Button
+                label="Usar el existente"
+                onPress={() => {
+                  setDuplicate(null);
+                  pickCustomer(duplicate);
+                }}
+                testID="customer-picker-duplicate-use"
+              />
+              <Button
+                label="Crear igual"
+                variant="secondary"
+                onPress={() => void submitQuickCreate(true)}
+                testID="customer-picker-duplicate-force"
+              />
+            </View>
+          </View>
+        )}
+
         <FeedbackBanner message={quickCreateError} tone="error" />
       </Card>
     </ScreenContainer>
@@ -319,6 +376,27 @@ const styles = StyleSheet.create({
   customerType: {
     fontSize: typography.sizes.sm,
     color: colors.textSecondary,
+  },
+  customerAddress: {
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
+  },
+  duplicateBox: {
+    borderWidth: 1,
+    borderColor: colors.warning,
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    padding: spacing.sm,
+    gap: spacing.sm,
+  },
+  duplicateText: {
+    fontSize: typography.sizes.sm,
+    color: colors.textPrimary,
+  },
+  duplicateActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
   segmentRow: {
     flexDirection: 'row',
