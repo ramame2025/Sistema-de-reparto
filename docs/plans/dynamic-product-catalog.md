@@ -182,9 +182,25 @@ on sales and empty visits. `DEFAULT_PRICE_TABLE` and `PRODUCT_CODES` no
 longer appear anywhere in the driver app's runtime code. Driver-app suite
 274 tests, 31 suites.
 
-**Phase 4 — Admin screens.** `/admin/productos`: create a product with its
-three prices, rename, reorder, activate/deactivate, and edit prices. The
-report product filter becomes dynamic.
+**Phase 4 — Admin screens. ✅ DONE.** `/admin/productos`: create a product
+with its three prices, rename, reorder, activate/deactivate, and edit
+prices. The report product filter becomes dynamic.
+
+Verified end-to-end against a clone of the live database: renaming `G10` to
+"Garrafa 10 kg"; creating `G20` with its three prices and seeing it appear
+for the driver; deactivating `G45`, which disappears from the driver's
+catalogue **while its price stays in the table**, so a sale for it queued
+earlier still syncs at 39000. A driver gets 403 on `POST /products` and
+`PUT /prices/...`, and 200 on `GET /prices/table`. Dashboard suite 40
+tests, 6 suites.
+
+It also fixed a latent bug Phase 2 introduced: with `ProductPrice`
+append-only, `GET /prices` was returning **every historical version**. Any
+screen listing it would have shown the same product repeated at different
+prices with no indication of which one was in force. It now returns the
+current row per product and customer type.
+
+**All four phases are complete.**
 
 ## Risks
 
