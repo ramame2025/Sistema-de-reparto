@@ -3,7 +3,6 @@ import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
-  PRODUCT_CODES,
   validateCreateLoadManifestInput,
   type CreateLoadManifestInput,
   type ProductCode,
@@ -14,23 +13,20 @@ import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner'
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useAuth } from '../context/AuthContext';
 import { useTruck } from '../context/TruckContext';
+import { useCatalog } from '../context/CatalogContext';
 import { ApiError } from '../services/apiClient';
 import { API_URL } from '../services/config';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
-const EMPTY_QUANTITIES: Record<ProductCode, number> = {
-  G10: 0,
-  G15: 0,
-  G45: 0,
-  G15_AUTO: 0,
-};
+/** El catalogo lo define el admin en runtime; una cantidad ausente es 0. */
+const EMPTY_QUANTITIES: Record<ProductCode, number> = {};
 
 /**
  * New screen for Phase 3 PR4 (docs/plans/load-manifest.md). No prior
  * App.tsx history to relocate from — the stepper is copy-adapted from
- * NewSaleScreen (per-product +/- over PRODUCT_CODES, filter quantity>0
+ * NewSaleScreen (per-product +/- over the API catalogue, filter quantity>0
  * before building items) and the optional photo pick/capture is
  * copy-adapted from ExpensesScreen (same permission/cancel/upload-failure
  * handling, same `POST /uploads/receipt` endpoint reused per design
@@ -41,6 +37,10 @@ const EMPTY_QUANTITIES: Record<ProductCode, number> = {
  */
 export function LoadManifestScreen() {
   const { api, username, requireAuthToken } = useAuth();
+  // El remito no lleva precios, pero si tiene que ofrecer los mismos productos
+  // que el catalogo: si el admin da de alta uno nuevo, se tiene que poder
+  // cargar al camion sin esperar un deploy.
+  const { products } = useCatalog();
   const { truck, status: truckStatus, error: truckError } = useTruck();
 
   const [quantities, setQuantities] = useState<Record<ProductCode, number>>(EMPTY_QUANTITIES);
@@ -53,17 +53,19 @@ export function LoadManifestScreen() {
 
   const currentItems = useMemo(
     () =>
-      PRODUCT_CODES.filter((code) => quantities[code] > 0).map((code) => ({
-        productCode: code,
-        quantity: quantities[code],
-      })),
+      products
+        .filter((product) => (quantities[product.code] ?? 0) > 0)
+        .map((product) => ({
+          productCode: product.code,
+          quantity: quantities[product.code],
+        })),
     [quantities],
   );
 
   const changeQty = (productCode: ProductCode, delta: number) => {
     setQuantities((previous) => ({
       ...previous,
-      [productCode]: Math.max(0, previous[productCode] + delta),
+      [productCode]: Math.max(0, (previous[productCode] ?? 0) + delta),
     }));
   };
 
@@ -220,24 +222,27 @@ export function LoadManifestScreen() {
 
       <Card style={styles.card}>
         <Text style={styles.fieldLabel}>Productos</Text>
-        {PRODUCT_CODES.map((code) => (
-          <View key={code} style={styles.productRow}>
-            <Text style={styles.productName}>{code}</Text>
+        {products.map((product) => (
+          <View key={product.code} style={styles.productRow}>
+            <Text style={styles.productName}>{product.name}</Text>
             <View style={styles.qtyRow}>
               <Button
                 label="-"
                 variant="secondary"
-                onPress={() => changeQty(code, -1)}
-                testID={`load-manifest-qty-decrement-${code}`}
+                onPress={() => changeQty(product.code, -1)}
+                testID={`load-manifest-qty-decrement-${product.code}`}
               />
-              <Text style={styles.qtyValue} testID={`load-manifest-qty-value-${code}`}>
-                {quantities[code]}
+              <Text
+                style={styles.qtyValue}
+                testID={`load-manifest-qty-value-${product.code}`}
+              >
+                {quantities[product.code] ?? 0}
               </Text>
               <Button
                 label="+"
                 variant="secondary"
-                onPress={() => changeQty(code, 1)}
-                testID={`load-manifest-qty-increment-${code}`}
+                onPress={() => changeQty(product.code, 1)}
+                testID={`load-manifest-qty-increment-${product.code}`}
               />
             </View>
           </View>

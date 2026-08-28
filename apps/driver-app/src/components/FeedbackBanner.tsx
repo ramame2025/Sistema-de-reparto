@@ -9,6 +9,7 @@ export type FeedbackTone = 'success' | 'error' | 'warning' | 'info';
 export type FeedbackBannerProps = {
   message: string | null;
   tone: FeedbackTone;
+  testID?: string;
 };
 
 const TONE_BACKGROUND: Record<FeedbackTone, string> = {
@@ -18,7 +19,7 @@ const TONE_BACKGROUND: Record<FeedbackTone, string> = {
   info: colors.secondary,
 };
 
-export function FeedbackBanner({ message, tone }: FeedbackBannerProps) {
+export function FeedbackBanner({ message, tone, testID }: FeedbackBannerProps) {
   if (!message) {
     return null;
   }
@@ -27,6 +28,7 @@ export function FeedbackBanner({ message, tone }: FeedbackBannerProps) {
     <View
       role="alert"
       accessible
+      testID={testID}
       style={[styles.banner, { backgroundColor: TONE_BACKGROUND[tone] }]}
     >
       <Text style={styles.text}>{message}</Text>

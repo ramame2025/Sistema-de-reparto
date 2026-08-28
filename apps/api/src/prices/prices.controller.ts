@@ -23,7 +23,10 @@ export class PricesController {
     return this.pricesService.listPrices();
   }
 
+  // El chofer lee la tabla para mostrar el total antes de cobrar; escribir
+  // sigue siendo solo del admin, por el default de clase.
   @Get('table')
+  @Roles('admin', 'chofer')
   async getPriceTable() {
     return this.pricesService.getPriceTable();
   }

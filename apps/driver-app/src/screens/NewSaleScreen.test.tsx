@@ -10,6 +10,14 @@ jest.mock('../context/SyncContext', () => {
   };
 });
 
+jest.mock('../context/CatalogContext', () => {
+  const actual = jest.requireActual('../context/CatalogContext');
+  return {
+    ...actual,
+    useCatalog: jest.fn(),
+  };
+});
+
 jest.mock('../context/TruckContext', () => {
   const actual = jest.requireActual('../context/TruckContext');
   return {
@@ -53,11 +61,13 @@ import { NewSaleScreen } from './NewSaleScreen';
 import { useSync } from '../context/SyncContext';
 import { useAuth } from '../context/AuthContext';
 import { useTruck } from '../context/TruckContext';
+import { useCatalog } from '../context/CatalogContext';
 import { colors } from '../theme/colors';
 
 const mockedUseSync = useSync as jest.Mock;
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseTruck = useTruck as jest.Mock;
+const mockedUseCatalog = useCatalog as jest.Mock;
 const mockedLaunchImageLibraryAsync = ImagePicker.launchImageLibraryAsync as jest.Mock;
 const mockedFile = ExpoFileSystem.File as unknown as jest.Mock;
 // mockUpload is a manual-mock-only export not present in the real module's
@@ -76,6 +86,36 @@ const assignedTruck = {
   capacity: 40,
   startDate: '2026-02-01T00:00:00.000Z',
   endDate: null,
+};
+
+const catalogProduct = (code: string, sortOrder: number) => ({
+  id: `p-${code}`,
+  code,
+  name: `Producto ${code}`,
+  isActive: true,
+  sortOrder,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+});
+
+const baseCatalogValue = {
+  products: [
+    catalogProduct('G10', 0),
+    catalogProduct('G15', 1),
+    catalogProduct('G45', 2),
+    catalogProduct('G15_AUTO', 3),
+  ],
+  prices: {
+    final: { G10: 8500, G15: 13000, G45: 39000, G15_AUTO: 14500 },
+    comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },
+    distribuidor: { G10: 7900, G15: 12100, G45: 36500, G15_AUTO: 13600 },
+  },
+  status: 'ready' as const,
+  stale: false,
+  fetchedAt: '2026-08-27T10:00:00.000Z',
+  canSell: true,
+  error: null,
+  reload: jest.fn(),
 };
 
 const baseTruckValue = {
@@ -147,6 +187,7 @@ beforeEach(() => {
     refreshDaySummary: mockedRefreshDaySummary,
   });
   mockedUseTruck.mockReturnValue(baseTruckValue);
+  mockedUseCatalog.mockReturnValue(baseCatalogValue);
   mockedUseAuth.mockReturnValue({
     ...baseAuthValue,
     api: { patch: mockedApiPatch },
@@ -796,5 +837,110 @@ describe('NewSaleScreen/button hierarchy (driver-ux-polish)', () => {
     });
 
     expect(primaryButtons).toEqual(['Guardar venta']);
+  });
+});
+
+describe('NewSaleScreen — catalogo y precios reales', () => {
+  // El bug que cierra toda esta fase: el total lo tiene que decidir la API,
+  // no una tabla hardcodeada que puede haber quedado vieja.
+  it('prices the sale with the catalogue prices, not a hardcoded table', async () => {
+    mockedUseCatalog.mockReturnValue({
+      ...baseCatalogValue,
+      prices: {
+        ...baseCatalogValue.prices,
+        final: { ...baseCatalogValue.prices.final, G10: 99000 },
+      },
+    });
+
+    await render(<NewSaleScreen />);
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+
+    // 1 x 99000 con los precios del catalogo. Con la tabla hardcodeada vieja
+    // este total habria dado 8500.
+    expect(screen.getByTestId('new-sale-total')).toHaveTextContent(
+      `Total: $${(99000).toLocaleString('es-AR')}`,
+    );
+  });
+
+  it('renders one row per active catalogue product, in the admin order', async () => {
+    mockedUseCatalog.mockReturnValue({
+      ...baseCatalogValue,
+      products: [catalogProduct('G45', 0), catalogProduct('G10', 1)],
+      prices: baseCatalogValue.prices,
+    });
+
+    await render(<NewSaleScreen />);
+
+    expect(screen.getByTestId('new-sale-qty-increment-G45')).toBeTruthy();
+    expect(screen.getByTestId('new-sale-qty-increment-G10')).toBeTruthy();
+    expect(screen.queryByTestId('new-sale-qty-increment-G15')).toBeNull();
+  });
+
+  it('shows the product name, not the bare code', async () => {
+    await render(<NewSaleScreen />);
+
+    expect(screen.getByText('Producto G10')).toBeTruthy();
+  });
+
+  // Offline con cache: se vende, pero el chofer tiene que VER que el precio
+  // puede estar viejo antes de cobrarlo.
+  it('warns the driver when the prices came from a stale cache', async () => {
+    mockedUseCatalog.mockReturnValue({ ...baseCatalogValue, stale: true });
+
+    await render(<NewSaleScreen />);
+
+    expect(screen.getByTestId('new-sale-stale-prices')).toBeTruthy();
+  });
+
+  it('does not warn when the prices are fresh', async () => {
+    await render(<NewSaleScreen />);
+
+    expect(screen.queryByTestId('new-sale-stale-prices')).toBeNull();
+  });
+
+  // Sin catalogo no hay precio honesto: se bloquea en vez de inventar.
+  it('blocks the sale when there is no catalogue at all', async () => {
+    mockedUseCatalog.mockReturnValue({
+      ...baseCatalogValue,
+      products: [],
+      prices: null,
+      status: 'error' as const,
+      canSell: false,
+      error: 'No se pudieron cargar los productos y precios.',
+    });
+
+    await render(<NewSaleScreen />);
+
+    expect(screen.getByTestId('new-sale-no-catalog')).toBeTruthy();
+    expect(screen.queryByTestId('new-sale-submit')).toBeNull();
+  });
+});
+
+describe('NewSaleScreen — occurredAt', () => {
+  // La fecha la tiene que poner el telefono: el servidor solo sabe cuando
+  // LLEGO la venta. Sin esto una venta encolada se tarifa y se fecha el dia
+  // que sincroniza, no el dia que se hizo.
+  it('stamps the sale with the moment it happened', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-occurred');
+
+    await renderSaleScreen();
+    await fireEvent.press(screen.getByTestId('new-sale-qty-increment-G10'));
+    await fireEvent.press(screen.getByText('Guardar venta'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalled());
+    const payload = mockedTrySendSale.mock.calls[0][0];
+    expect(typeof payload.occurredAt).toBe('string');
+    expect(Number.isNaN(Date.parse(payload.occurredAt))).toBe(false);
+  });
+
+  it('stamps an empty visit too, so it lands on the right day', async () => {
+    mockedTrySendEmptyVisit.mockResolvedValue('visit-occurred');
+
+    await renderSaleScreen();
+    await fireEvent.press(screen.getByTestId('new-sale-record-visit-button'));
+
+    await waitFor(() => expect(mockedTrySendEmptyVisit).toHaveBeenCalled());
+    const payload = mockedTrySendEmptyVisit.mock.calls[0][0];
+    expect(typeof payload.occurredAt).toBe('string');
   });
 });
