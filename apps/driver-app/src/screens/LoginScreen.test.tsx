@@ -97,4 +97,16 @@ describe('LoginScreen/error handling', () => {
 
     await waitFor(() => expect(screen.queryByText('invalid credentials')).toBeNull());
   });
+
+  it('lets the driver reveal the password to check what he typed', async () => {
+    // Escribir a ciegas con el pulgar es la causa mas comun de un login
+    // fallido que despues se busca del lado del servidor.
+    await render(<LoginScreen />);
+
+    expect(screen.getByTestId('login-password').props.secureTextEntry).toBe(true);
+
+    await fireEvent.press(screen.getByTestId('login-password-toggle'));
+
+    expect(screen.getByTestId('login-password').props.secureTextEntry).toBe(false);
+  });
 });
