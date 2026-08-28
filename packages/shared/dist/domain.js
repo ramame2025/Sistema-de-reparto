@@ -432,3 +432,36 @@ export function validateUpdateProductInput(input) {
     }
     return errors;
 }
+/**
+ * Ventana hacia atras que se acepta en `occurredAt`. Cubre de sobra el uso
+ * real -- los choferes sincronizan el mismo dia -- y acota el dano de un
+ * reloj mal puesto o manipulado.
+ */
+export const OCCURRED_AT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * Resuelve cuando ocurrio realmente una venta a partir de lo que dijo el
+ * dispositivo, acotandolo a una ventana creible.
+ *
+ * La fecha la pone el telefono porque es el unico que sabe cuando se hizo la
+ * venta: el servidor solo ve el momento en que llego. Pero el telefono no es
+ * confiable, y de esa fecha depende a que precio se tarifa: un reloj atrasado
+ * -- por accidente o a proposito -- compraria precios viejos. Fuera de la
+ * ventana, o ante cualquier cosa impareseable, se usa `now`, que es siempre
+ * defendible.
+ */
+export function resolveOccurredAt(value, now) {
+    if (!value) {
+        return now;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return now;
+    }
+    if (parsed.getTime() > now.getTime()) {
+        return now;
+    }
+    if (now.getTime() - parsed.getTime() > OCCURRED_AT_MAX_AGE_MS) {
+        return now;
+    }
+    return parsed;
+}

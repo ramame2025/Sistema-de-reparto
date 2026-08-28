@@ -76,6 +76,12 @@ export type SaleItemInput = {
 
 export type CreateSaleInput = {
   clientGeneratedId?: string;
+  /**
+   * Cuando ocurrio la venta, en ISO, segun el reloj del telefono. Opcional:
+   * los payloads viejos ya encolados no lo traen. El servidor lo acota con
+   * `resolveOccurredAt` antes de creerle.
+   */
+  occurredAt?: string;
   driverName: string;
   truckCode?: string;
   customerName: string;
@@ -98,6 +104,8 @@ export type CreateSaleInput = {
  * `recordEmptyVisit` (fuera de scope de esta unidad).
  */
 export type RecordEmptyVisitInput = {
+  /** Cuando ocurrio la visita, en ISO. Ver `CreateSaleInput.occurredAt`. */
+  occurredAt?: string;
   clientGeneratedId?: string;
   driverName: string;
   truckCode?: string;
@@ -119,9 +127,22 @@ export type UpdateSaleInput = CreateSaleInput & {
   kind?: SaleKind;
 };
 
+/**
+ * Una linea tal como quedo GRABADA, no como se pidio: incluye el precio
+ * unitario congelado en el momento de la venta.
+ */
+export type SaleItemRecord = SaleItemInput & {
+  unitPrice: number;
+};
+
 export type SaleRecord = {
   id: string;
   createdAt: string;
+  /**
+   * Cuando ocurrio la venta en la calle. Distinto de `createdAt`, que es
+   * cuando la fila entro: una venta sin senal se sincroniza mas tarde.
+   */
+  occurredAt: string;
   status: "active" | "canceled";
   canceledAt?: string;
   cancelReason?: string;
@@ -136,7 +157,7 @@ export type SaleRecord = {
    * sigue teniendo un `PaymentMethod` valido.
    */
   paymentMethod: PaymentMethod | null;
-  items: SaleItemInput[];
+  items: SaleItemRecord[];
   note?: string;
   kind: SaleKind;
   containerReturned?: boolean;
@@ -921,4 +942,43 @@ export function validateUpdateProductInput(input: UpdateProductInput): string[] 
   }
 
   return errors;
+}
+
+/**
+ * Ventana hacia atras que se acepta en `occurredAt`. Cubre de sobra el uso
+ * real -- los choferes sincronizan el mismo dia -- y acota el dano de un
+ * reloj mal puesto o manipulado.
+ */
+export const OCCURRED_AT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Resuelve cuando ocurrio realmente una venta a partir de lo que dijo el
+ * dispositivo, acotandolo a una ventana creible.
+ *
+ * La fecha la pone el telefono porque es el unico que sabe cuando se hizo la
+ * venta: el servidor solo ve el momento en que llego. Pero el telefono no es
+ * confiable, y de esa fecha depende a que precio se tarifa: un reloj atrasado
+ * -- por accidente o a proposito -- compraria precios viejos. Fuera de la
+ * ventana, o ante cualquier cosa impareseable, se usa `now`, que es siempre
+ * defendible.
+ */
+export function resolveOccurredAt(value: string | undefined, now: Date): Date {
+  if (!value) {
+    return now;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return now;
+  }
+
+  if (parsed.getTime() > now.getTime()) {
+    return now;
+  }
+
+  if (now.getTime() - parsed.getTime() > OCCURRED_AT_MAX_AGE_MS) {
+    return now;
+  }
+
+  return parsed;
 }

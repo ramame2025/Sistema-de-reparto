@@ -61,6 +61,11 @@ model Sale {
   id                String         @id @default(cuid())
   clientGeneratedId String?        @unique
   createdAt         DateTime       @default(now())
+  /// Cuando ocurrio la venta en la calle, que no es cuando la fila se
+  /// inserto: una venta sin senal se sincroniza mas tarde. Se tarifa por esta
+  /// fecha, y es la que evita que una venta de las 23:50 quede contada al dia
+  /// siguiente.
+  occurredAt        DateTime       @default(now())
   status            SaleStatus     @default(active)
   canceledAt        DateTime?
   cancelReason      String?
@@ -84,6 +89,7 @@ model Sale {
   audits            SaleAudit[]
 
   @@index([createdAt])
+  @@index([occurredAt])
   @@index([driverName, createdAt])
   @@index([customerId])
   @@index([truckId, createdAt])
@@ -95,6 +101,10 @@ model SaleItem {
   saleId      String
   productCode String
   quantity    Int
+  /// Precio unitario congelado en el momento de la venta. Es el registro
+  /// definitivo: ningun cambio de precio posterior, ni una correccion del
+  /// historial, puede alterar lo que esta linea cobro.
+  unitPrice   Int
   sale        Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
   /// Restrict, no Cascade: un producto que alguna vez se vendio no se puede
   /// borrar nunca. Se da de baja con isActive.
@@ -262,13 +272,21 @@ model Product {
   @@index([isActive, sortOrder])
 }
 
+/// Append-only: cambiar un precio INSERTA una fila nueva, nunca pisa una
+/// existente. El precio vigente en una fecha es la fila mas reciente con
+/// `validFrom` menor o igual a esa fecha. Sin esto no hay forma de responder
+/// "cuanto valia esto el lunes", que es lo que necesita una venta encolada.
+/// El historial de quien cambio que precio sale gratis de este mismo diseno.
 model ProductPrice {
   id           String       @id @default(cuid())
   productCode  String
   customerType CustomerType
   amount       Int
+  validFrom    DateTime     @default(now())
+  createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   product      Product      @relation(fields: [productCode], references: [code], onDelete: Restrict)
 
-  @@unique([productCode, customerType])
+  @@unique([productCode, customerType, validFrom])
+  @@index([productCode, customerType, validFrom])
 }

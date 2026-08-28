@@ -11,6 +11,7 @@ import {
   type UpdateProductInput,
   type UpdateSaleInput,
   type UpdateTruckInput,
+  resolveOccurredAt,
   validateCreateAssignmentInput,
   validateCreateProductInput,
   validateCreateCustomerInput,
@@ -702,5 +703,50 @@ describe('validateUpdateProductInput', () => {
 
   it('accepts deactivating a product', () => {
     expect(validateUpdateProductInput({ isActive: false })).toEqual([]);
+  });
+});
+
+describe('resolveOccurredAt', () => {
+  const now = new Date('2026-08-27T15:00:00.000Z');
+
+  it('falls back to now when the device sent nothing', () => {
+    expect(resolveOccurredAt(undefined, now)).toEqual(now);
+  });
+
+  it('keeps a plausible timestamp from the device', () => {
+    const earlier = '2026-08-27T09:30:00.000Z';
+    expect(resolveOccurredAt(earlier, now)).toEqual(new Date(earlier));
+  });
+
+  // El caso corriente que justifica todo esto: una venta de las 23:50 que
+  // sincroniza pasada la medianoche no puede quedar contada al dia siguiente.
+  it('keeps a sale made minutes before midnight', () => {
+    const justBeforeMidnight = '2026-08-27T02:50:00.000Z';
+    const syncedAfter = new Date('2026-08-27T03:10:00.000Z');
+    expect(resolveOccurredAt(justBeforeMidnight, syncedAfter)).toEqual(
+      new Date(justBeforeMidnight),
+    );
+  });
+
+  // Un reloj adelantado no puede fechar una venta en el futuro.
+  it('clamps a future timestamp to now', () => {
+    expect(resolveOccurredAt('2026-09-01T00:00:00.000Z', now)).toEqual(now);
+  });
+
+  // Ni un reloj atrasado, ni alguien manipulando el telefono, puede comprar
+  // precios viejos fechando la venta meses atras.
+  it('clamps a timestamp older than the queue window to now', () => {
+    expect(resolveOccurredAt('2026-01-01T00:00:00.000Z', now)).toEqual(now);
+  });
+
+  it('accepts the oldest timestamp still inside the window', () => {
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    expect(resolveOccurredAt(thirtyDaysAgo.toISOString(), now)).toEqual(thirtyDaysAgo);
+  });
+
+  it('falls back to now for anything unparseable', () => {
+    for (const bad of ['', 'ayer', '2026-13-45T99:99:99Z']) {
+      expect(resolveOccurredAt(bad, now)).toEqual(now);
+    }
   });
 });

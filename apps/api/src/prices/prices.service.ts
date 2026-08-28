@@ -24,6 +24,7 @@ type PriceRow = {
   productCode: ProductCode;
   customerType: CustomerType;
   amount: number;
+  validFrom: Date;
   updatedAt: Date;
 };
 
@@ -31,7 +32,20 @@ type PriceRow = {
 export class PricesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Los precios vigentes ahora. */
   async getPriceTable(): Promise<PriceTable> {
+    return this.getPriceTableAt(new Date());
+  }
+
+  /**
+   * Los precios vigentes en una fecha dada: para cada producto y tipo de
+   * cliente, la version mas reciente cuyo `validFrom` no sea posterior a esa
+   * fecha.
+   *
+   * Es lo que permite que una venta encolada el lunes y sincronizada el
+   * miercoles se grabe al precio del lunes, que es el que el chofer cobro.
+   */
+  async getPriceTableAt(at: Date): Promise<PriceTable> {
     // TODOS los productos, activos y dados de baja. Una venta encolada en el
     // telefono antes de que el producto se ocultara tiene que poder
     // sincronizar despues, y para eso necesita su precio.
@@ -39,9 +53,14 @@ export class PricesService {
       this.prisma.product.findMany({ select: { code: true } }) as Promise<
         { code: string }[]
       >,
-      this.prisma.productPrice.findMany() as Promise<PriceRow[]>,
+      this.prisma.productPrice.findMany({
+        where: { validFrom: { lte: at } },
+        orderBy: { validFrom: 'asc' },
+      }) as Promise<PriceRow[]>,
     ]);
 
+    // Las filas vienen ordenadas por validFrom ascendente, asi que la ultima
+    // que se escribe de cada combinacion es la vigente en `at`.
     const byCustomerType = new Map<CustomerType, Map<ProductCode, number>>();
     for (const row of rows) {
       if (!byCustomerType.has(row.customerType)) {
@@ -61,7 +80,7 @@ export class PricesService {
           // Por eso `createProduct` escribe producto y precios en la misma
           // transaccion, y por eso esto sigue siendo un error y no un cero.
           throw new InternalServerErrorException(
-            `Missing price for productCode=${code} customerType=${customerType}`,
+            `Missing price for productCode=${code} customerType=${customerType} at ${at.toISOString()}`,
           );
         }
         table[customerType][code] = amount;
@@ -79,24 +98,23 @@ export class PricesService {
     return rows.map((row) => this.toRecord(row));
   }
 
+  /**
+   * Fija el precio a partir de `validFrom` INSERTANDO una version nueva.
+   *
+   * Nunca pisa la fila existente: esa fila es el precio al que ya se vendio, y
+   * sobreescribirla reescribiria la historia de esas ventas.
+   */
   async updatePrice(
     productCode: ProductCode,
     customerType: CustomerType,
     amount: number,
+    validFrom: Date = new Date(),
   ): Promise<ProductPriceRecord> {
-    const existing = await this.prisma.productPrice.findUnique({
-      where: { productCode_customerType: { productCode, customerType } },
-    });
-    if (!existing) {
-      throw new NotFoundException('Price not found');
-    }
-
-    const updated: PriceRow = await this.prisma.productPrice.update({
-      where: { productCode_customerType: { productCode, customerType } },
-      data: { amount },
+    const created: PriceRow = await this.prisma.productPrice.create({
+      data: { productCode, customerType, amount, validFrom },
     });
 
-    return this.toRecord(updated);
+    return this.toRecord(created);
   }
 
   private toRecord(row: PriceRow): ProductPriceRecord {
