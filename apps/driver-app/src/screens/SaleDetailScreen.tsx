@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { File, UploadType } from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
@@ -19,6 +21,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { ApiError } from '../services/apiClient';
+import { API_URL } from '../services/config';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
@@ -63,7 +66,7 @@ const formatDateTime = (iso: string): string => {
 export function SaleDetailScreen() {
   const route = useRoute<RouteProp<HomeStackParamList, 'SaleDetail'>>();
   const navigation = useNavigation<SaleDetailNavigationProp>();
-  const { api, username } = useAuth();
+  const { api, username, requireAuthToken } = useAuth();
   const { refreshDaySummary } = useSync();
 
   const sale = route.params.sale;
@@ -95,6 +98,8 @@ export function SaleDetailScreen() {
   const [editReason, setEditReason] = useState('');
   const [cancelReason, setCancelReason] = useState('');
   const [saving, setSaving] = useState(false);
+  const [attachingProof, setAttachingProof] = useState(false);
+  const [proofRef, setProofRef] = useState(sale.paymentProofRef);
   const [canceling, setCanceling] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<FeedbackTone>('info');
@@ -165,7 +170,7 @@ export function SaleDetailScreen() {
       // ?? null` y `note` como `input.note?.trim() || null`: lo que la
       // edicion no manda, la API lo borra. Sin esto, corregir una cantidad
       // borraba el comprobante de la transferencia y la respuesta del envase.
-      ...(sale.paymentProofRef ? { paymentProofRef: sale.paymentProofRef } : {}),
+      ...(proofRef ? { paymentProofRef: proofRef } : {}),
       // `false` es una respuesta ("no lo devolvio"), no una ausencia: solo se
       // omite cuando nunca se pregunto.
       ...(sale.containerReturned !== undefined
@@ -190,6 +195,80 @@ export function SaleDetailScreen() {
       showMessage(cause, 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Inicio marca como problema toda venta de hoy cobrada sin efectivo que no
+   * tenga comprobante, y manda al chofer justo a esta pantalla. Sin esta
+   * accion ese camino terminaria en un cartel que solo enuncia el problema.
+   *
+   * Reusa el mismo mecanismo de subida que la carga de la venta
+   * (`/uploads/receipt` + `File.upload`), y despues guarda con un motivo fijo:
+   * el PATCH exige uno, y no tiene sentido hacerle escribir "adjunto lo que
+   * faltaba" al chofer.
+   */
+  const attachMissingProof = async () => {
+    setMessage(null);
+
+    try {
+      setAttachingProof(true);
+
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        showMessage('Permiso de camara requerido para sacar el comprobante.', 'error');
+        return;
+      }
+
+      const shot = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.7,
+      });
+      if (shot.canceled || shot.assets.length === 0) {
+        return;
+      }
+
+      const token = requireAuthToken();
+      const uploaded = await new File(shot.assets[0].uri).upload(
+        `${API_URL}/uploads/receipt`,
+        {
+          uploadType: UploadType.MULTIPART,
+          fieldName: 'file',
+          mimeType: 'image/jpeg',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        },
+      );
+
+      if (uploaded.status < 200 || uploaded.status >= 300) {
+        throw new ApiError(uploaded.status, uploaded.body || `API ${uploaded.status}`);
+      }
+
+      const { url } = JSON.parse(uploaded.body) as { url: string };
+
+      await api.patch<SaleRecord>(`/sales/${sale.id}`, {
+        driverName: username,
+        truckCode: sale.truckCode,
+        customerName: sale.customerName,
+        customerType: sale.customerType,
+        paymentMethod,
+        items: editedItems,
+        reason: 'Se adjunta el comprobante',
+        paymentProofRef: url,
+        ...(sale.customerId ? { customerId: sale.customerId } : {}),
+        ...(sale.containerReturned !== undefined
+          ? { containerReturned: sale.containerReturned }
+          : {}),
+        ...(sale.note ? { note: sale.note } : {}),
+      } satisfies UpdateSaleInput);
+
+      setProofRef(url);
+      showMessage('Comprobante adjuntado correctamente.', 'success');
+      await refreshDaySummary();
+    } catch {
+      showMessage('No se pudo subir el comprobante.', 'error');
+    } finally {
+      setAttachingProof(false);
     }
   };
 
@@ -258,6 +337,21 @@ export function SaleDetailScreen() {
               onDecrement={() => isEditable && changeQty(item.productCode, -1)}
             />
           ))}
+        </Card>
+      )}
+
+      {isEditable && sale.paymentMethod !== 'efectivo' && !proofRef && (
+        <Card style={styles.card}>
+          <Text style={styles.fieldLabel}>Falta el comprobante</Text>
+          <Text style={styles.meta}>
+            Esta venta no se cobró en efectivo y no tiene comprobante adjunto.
+          </Text>
+          <Button
+            label={attachingProof ? 'Subiendo...' : 'Sacar foto del comprobante'}
+            onPress={() => void attachMissingProof()}
+            disabled={attachingProof}
+            testID="sale-detail-attach-proof"
+          />
         </Card>
       )}
 
