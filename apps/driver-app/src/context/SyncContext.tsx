@@ -35,6 +35,13 @@ export type SyncContextValue = {
   pendingSales: PendingSale[];
   syncing: boolean;
   daySummary: DaySummary;
+  /**
+   * Las ventas de hoy tal cual vinieron, no solo sus totales. `refreshDaySummary`
+   * ya las tenia en la mano para contar; se exponen porque Inicio necesita mirar
+   * fila por fila (que venta quedo sin comprobante, a que clientes se visito) y
+   * volver a pedir `/sales/mine` seria el mismo request dos veces.
+   */
+  todaySales: SaleRecord[];
   summaryLoading: boolean;
   summaryError: string | null;
   /** Codigo del camion que el chofer tiene asignado hoy, o '' si no tiene. */
@@ -73,6 +80,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   });
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [todaySales, setTodaySales] = useState<SaleRecord[]>([]);
 
   const persistPendingSales = useCallback(async (next: PendingSale[]) => {
     setPendingSales(next);
@@ -93,6 +101,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         canceledCount: canceled.length,
         activeTotal: active.reduce((acc, sale) => acc + sale.total, 0),
       });
+      setTodaySales(todaySales);
       setSummaryError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo actualizar el resumen.';
@@ -290,6 +299,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       pendingSales,
       syncing,
       daySummary,
+      todaySales,
       summaryLoading,
       summaryError,
       assignedTruckCode,
@@ -304,6 +314,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       pendingSales,
       syncing,
       daySummary,
+      todaySales,
       summaryLoading,
       summaryError,
       assignedTruckCode,
