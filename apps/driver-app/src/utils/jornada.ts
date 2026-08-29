@@ -23,3 +23,12 @@ const pad = (value: number): string => String(value).padStart(2, '0');
 export function formatJornada(date: Date): string {
   return `${WEEKDAYS[date.getDay()]} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}`;
 }
+
+/**
+ * La misma jornada en minuscula, para cuando encabeza una pantalla en lugar de
+ * etiquetarla ("jueves 27/08" bajo el titulo "NUEVO GASTO"). Se deriva de
+ * `formatJornada` para que las dos formas no puedan discrepar sobre el dia.
+ */
+export function formatJornadaTitle(date: Date): string {
+  return formatJornada(date).toLowerCase();
+}

@@ -7,6 +7,8 @@ import { formatArs } from '../utils/currency';
 
 export type SaleFooterBarProps = {
   total: number;
+  /** Como se llama el numero en esta pantalla. En Gastos sale, no entra. */
+  totalLabel?: string;
   /**
    * The single action of the screen, whose wording is what tells the driver
    * why it is unavailable ("Elegí un cliente", "Agregá productos") instead of
@@ -21,6 +23,7 @@ export type SaleFooterBarProps = {
 /** Running total and the screen's only action, pinned outside the scroll. */
 export function SaleFooterBar({
   total,
+  totalLabel = 'TOTAL',
   actionLabel,
   onPress,
   disabled = false,
@@ -29,7 +32,7 @@ export function SaleFooterBar({
   return (
     <View style={styles.bar} testID={testID}>
       <View style={styles.totalWrap}>
-        <Text style={styles.totalLabel}>TOTAL</Text>
+        <Text style={styles.totalLabel}>{totalLabel}</Text>
         <Text style={styles.totalValue} testID="sale-footer-total">
           {formatArs(total)}
         </Text>

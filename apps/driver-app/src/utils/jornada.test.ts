@@ -1,4 +1,4 @@
-import { formatJornada } from './jornada';
+import { formatJornada, formatJornadaTitle } from './jornada';
 
 describe('formatJornada', () => {
   it('names the weekday and the day/month, the way the header reads it', () => {
@@ -19,5 +19,16 @@ describe('formatJornada', () => {
     // Las 23:30 locales del 28 son el 29 en UTC: la jornada del chofer es la
     // que marca su telefono, no la del servidor.
     expect(formatJornada(new Date(2026, 7, 27, 23, 30))).toBe('JUEVES 27/08');
+  });
+});
+
+describe('formatJornadaTitle', () => {
+  it('reads as a sentence, not as a label', () => {
+    expect(formatJornadaTitle(new Date(2026, 7, 27))).toBe('jueves 27/08');
+  });
+
+  it('uses the same calendar as the uppercase header, so both agree on the day', () => {
+    const date = new Date(2026, 7, 27, 23, 30);
+    expect(formatJornadaTitle(date)).toBe(formatJornada(date).toLowerCase());
   });
 });
