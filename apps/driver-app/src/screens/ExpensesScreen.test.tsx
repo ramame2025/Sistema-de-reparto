@@ -10,6 +10,11 @@ jest.mock('../context/AuthContext', () => {
   };
 });
 
+jest.mock('../context/TruckContext', () => {
+  const actual = jest.requireActual('../context/TruckContext');
+  return { ...actual, useTruck: jest.fn() };
+});
+
 const mockedNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
@@ -25,6 +30,7 @@ import * as ExpoFileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { ExpensesScreen } from './ExpensesScreen';
 import { useAuth } from '../context/AuthContext';
+import { useTruck } from '../context/TruckContext';
 import { ApiError } from '../services/apiClient';
 
 const mockedUseAuth = useAuth as jest.Mock;
@@ -42,9 +48,27 @@ const successUpload = (url: string) => ({
 });
 
 let mockedApiPost: jest.Mock;
+let mockedApiGet: jest.Mock;
 
 beforeEach(() => {
+  (useTruck as jest.Mock).mockReturnValue({
+    truck: {
+      assignmentId: 'a-1',
+      kind: 'titular' as const,
+      truckId: 'truck-1',
+      code: 'C-04',
+      plate: 'AB123CD',
+      capacity: 120,
+      startDate: '2026-08-01T00:00:00.000Z',
+      endDate: null,
+    },
+    date: '2026-08-28',
+    status: 'ready' as const,
+    error: null,
+    reload: jest.fn(),
+  });
   mockedApiPost = jest.fn();
+  mockedApiGet = jest.fn().mockResolvedValue([]);
   mockedFile.mockClear();
   mockUpload.mockClear();
   mockUpload.mockResolvedValue(successUpload('https://cdn.test/mock-upload.jpg'));
@@ -54,7 +78,7 @@ beforeEach(() => {
     token: 'tok',
     username: 'chofer1',
     loading: false,
-    api: { post: mockedApiPost },
+    api: { post: mockedApiPost, get: mockedApiGet },
     login: jest.fn(),
     logout: jest.fn(),
     requireAuthToken: jest.fn(() => 'tok'),
@@ -73,24 +97,14 @@ beforeEach(() => {
   mockedNavigate.mockClear();
 });
 
-describe('ExpensesScreen/history CTA', () => {
-  it('navigates to ExpensesHistory when the history CTA is pressed', async () => {
-    await render(<ExpensesScreen />);
-
-    fireEvent.press(screen.getByTestId('expenses-history-cta'));
-
-    expect(mockedNavigate).toHaveBeenCalledWith('ExpensesHistory');
-  });
-});
-
 describe('ExpensesScreen/save expense', () => {
   it('submits category/amount/note via api.post and shows success feedback', async () => {
     mockedApiPost.mockResolvedValue({ id: 'exp-1' });
 
     await render(<ExpensesScreen />);
-    await fireEvent.changeText(screen.getByTestId('expense-amount'), '1500');
-    await fireEvent.changeText(screen.getByPlaceholderText('Descripcion (opcional)'), 'Nafta');
-    await fireEvent.press(screen.getByTestId('expense-save-button'));
+    await fireEvent.changeText(screen.getByTestId('expense-amount-input'), '1500');
+    await fireEvent.changeText(screen.getByTestId('expense-note'), 'Nafta');
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() =>
       expect(mockedApiPost).toHaveBeenCalledWith('/expenses', {
@@ -101,32 +115,74 @@ describe('ExpensesScreen/save expense', () => {
         receiptRef: undefined,
       }),
     );
-    expect(screen.getByText('Gasto guardado correctamente.')).toBeTruthy();
-    expect(screen.getByTestId('expense-amount').props.value).toBe('0');
-    expect(screen.queryByTestId('expense-receipt-ref')).toBeNull();
+    expect(mockedNavigate).toHaveBeenCalledWith('ExpenseResult', {
+      category: 'combustible',
+      amount: 1500,
+      hasReceipt: false,
+    });
+    // El formulario queda limpio para el gasto siguiente.
+    expect(screen.getByTestId('expense-amount-input').props.value).toBe('');
   });
 
   it('shows distinct failure feedback when api.post rejects, without enqueueing offline', async () => {
     mockedApiPost.mockRejectedValue(new ApiError(500, 'API 500'));
 
     await render(<ExpensesScreen />);
-    await fireEvent.changeText(screen.getByTestId('expense-amount'), '900');
-    await fireEvent.press(screen.getByTestId('expense-save-button'));
+    await fireEvent.changeText(screen.getByTestId('expense-amount-input'), '900');
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(screen.getByText('API 500')).toBeTruthy());
     expect(screen.getByText('API 500')).toBeTruthy();
-    expect(screen.queryByText('Gasto guardado correctamente.')).toBeNull();
-    expect(screen.getByTestId('expense-amount').props.value).toBe('900');
+    expect(mockedNavigate).not.toHaveBeenCalled();
+    // Sin cola offline, el gasto solo existe en este formulario: no puede
+    // borrarse por un fallo de red.
+    expect(screen.getByTestId('expense-amount-input').props.value).toBe('900');
   });
 
-  it('blocks submission when amount is not greater than 0', async () => {
+  it('will not submit without an amount, and says what is missing', async () => {
     await render(<ExpensesScreen />);
-    await fireEvent.press(screen.getByTestId('expense-save-button'));
 
-    await waitFor(() =>
-      expect(screen.getByText('El monto del gasto debe ser mayor a 0.')).toBeTruthy(),
-    );
+    // La guarda de validacion sigue en saveExpense; lo que cambia es que el
+    // boton ya no deja llegar hasta ahi con el monto en cero.
+    expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Poné el monto');
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
     expect(mockedApiPost).not.toHaveBeenCalled();
+    expect(mockedNavigate).not.toHaveBeenCalled();
+  });
+
+  it('carries the receipt into the payload and into the confirmation', async () => {
+    mockedApiPost.mockResolvedValue({ id: 'exp-2' });
+    mockUpload.mockResolvedValue(successUpload('https://cdn.test/ticket.jpg'));
+
+    await render(<ExpensesScreen />);
+    await fireEvent.press(screen.getByTestId('expense-receipt-capture'));
+    await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
+
+    await fireEvent.changeText(screen.getByTestId('expense-amount-input'), '45000');
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    await waitFor(() => expect(mockedApiPost).toHaveBeenCalledTimes(1));
+    expect(mockedApiPost.mock.calls[0][1].receiptRef).toBe('https://cdn.test/ticket.jpg');
+    expect(mockedNavigate).toHaveBeenCalledWith('ExpenseResult', {
+      category: 'combustible',
+      amount: 45000,
+      hasReceipt: true,
+    });
+  });
+
+  it('lets a wrong photo be taken back off before saving', async () => {
+    mockUpload.mockResolvedValue(successUpload('https://cdn.test/movida.jpg'));
+
+    await render(<ExpensesScreen />);
+    await fireEvent.press(screen.getByTestId('expense-receipt-capture'));
+    await waitFor(() => expect(screen.getByTestId('expense-receipt-remove')).toBeTruthy());
+
+    await fireEvent.press(screen.getByTestId('expense-receipt-remove'));
+
+    // Antes no habia salida: o se guardaba el gasto con la foto equivocada, o
+    // se perdia lo cargado saliendo de la pantalla.
+    expect(screen.queryByTestId('expense-receipt-remove')).toBeNull();
   });
 });
 
@@ -135,7 +191,7 @@ describe('ExpensesScreen/pick receipt from gallery', () => {
     mockUpload.mockResolvedValue(successUpload('https://cdn.test/receipt-1.jpg'));
 
     await render(<ExpensesScreen />);
-    await fireEvent.press(screen.getByTestId('expense-pick-gallery'));
+    await fireEvent.press(screen.getByTestId('expense-receipt-gallery'));
 
     await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
     // Uses expo-file-system's File.upload() (native multipart task) -- the RN
@@ -148,7 +204,7 @@ describe('ExpensesScreen/pick receipt from gallery', () => {
       'http://localhost:4000/uploads/receipt',
       expect.objectContaining({ fieldName: 'file', mimeType: 'image/jpeg' }),
     );
-    expect(screen.getByTestId('expense-receipt-preview').props.source).toEqual({
+    expect(screen.getByTestId('expense-receipt-thumb').props.source).toEqual({
       uri: 'https://cdn.test/receipt-1.jpg',
     });
     expect(screen.getByText('Comprobante cargado correctamente.')).toBeTruthy();
@@ -158,11 +214,11 @@ describe('ExpensesScreen/pick receipt from gallery', () => {
     mockedLaunchImageLibraryAsync.mockResolvedValueOnce({ canceled: true });
 
     await render(<ExpensesScreen />);
-    await fireEvent.press(screen.getByTestId('expense-pick-gallery'));
+    await fireEvent.press(screen.getByTestId('expense-receipt-gallery'));
 
     await waitFor(() => expect(mockedLaunchImageLibraryAsync).toHaveBeenCalledTimes(1));
     expect(mockUpload).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('expense-receipt-preview')).toBeNull();
+    expect(screen.queryByTestId('expense-receipt-remove')).toBeNull();
   });
 });
 
@@ -171,11 +227,11 @@ describe('ExpensesScreen/capture receipt from camera', () => {
     mockUpload.mockResolvedValue(successUpload('https://cdn.test/receipt-2.jpg'));
 
     await render(<ExpensesScreen />);
-    await fireEvent.press(screen.getByTestId('expense-capture-camera'));
+    await fireEvent.press(screen.getByTestId('expense-receipt-capture'));
 
     await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
     expect(mockedFile).toHaveBeenCalledWith('file://fake.jpg');
-    expect(screen.getByTestId('expense-receipt-preview').props.source).toEqual({
+    expect(screen.getByTestId('expense-receipt-thumb').props.source).toEqual({
       uri: 'https://cdn.test/receipt-2.jpg',
     });
     expect(screen.getByText('Comprobante capturado y cargado correctamente.')).toBeTruthy();
@@ -185,7 +241,7 @@ describe('ExpensesScreen/capture receipt from camera', () => {
     mockedLaunchCameraAsync.mockResolvedValueOnce({ canceled: true });
 
     await render(<ExpensesScreen />);
-    await fireEvent.press(screen.getByTestId('expense-capture-camera'));
+    await fireEvent.press(screen.getByTestId('expense-receipt-capture'));
 
     await waitFor(() => expect(mockedLaunchCameraAsync).toHaveBeenCalledTimes(1));
     expect(mockUpload).not.toHaveBeenCalled();
@@ -198,19 +254,19 @@ describe('ExpensesScreen/upload failure', () => {
     mockUpload.mockResolvedValueOnce(successUpload('https://cdn.test/receipt-3.jpg'));
 
     await render(<ExpensesScreen />);
-    await fireEvent.press(screen.getByTestId('expense-pick-gallery'));
+    await fireEvent.press(screen.getByTestId('expense-receipt-gallery'));
 
     await waitFor(() => expect(screen.getByText('No se pudo subir el comprobante.')).toBeTruthy());
-    expect(screen.queryByTestId('expense-receipt-preview')).toBeNull();
-    expect(screen.getByTestId('expense-pick-gallery').props.accessibilityState.disabled).toBe(
+    expect(screen.queryByTestId('expense-receipt-remove')).toBeNull();
+    expect(screen.getByTestId('expense-receipt-gallery').props.accessibilityState.disabled).toBe(
       false,
     );
 
-    await fireEvent.press(screen.getByTestId('expense-pick-gallery'));
+    await fireEvent.press(screen.getByTestId('expense-receipt-gallery'));
 
     await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(2));
     expect(screen.getByText('Comprobante cargado correctamente.')).toBeTruthy();
-    expect(screen.getByTestId('expense-receipt-preview').props.source).toEqual({
+    expect(screen.getByTestId('expense-receipt-thumb').props.source).toEqual({
       uri: 'https://cdn.test/receipt-3.jpg',
     });
   });
@@ -219,9 +275,83 @@ describe('ExpensesScreen/upload failure', () => {
     mockUpload.mockResolvedValueOnce({ body: 'file is required', status: 400, headers: {} });
 
     await render(<ExpensesScreen />);
-    await fireEvent.press(screen.getByTestId('expense-pick-gallery'));
+    await fireEvent.press(screen.getByTestId('expense-receipt-gallery'));
 
     await waitFor(() => expect(screen.getByText('No se pudo subir el comprobante.')).toBeTruthy());
-    expect(screen.queryByTestId('expense-receipt-preview')).toBeNull();
+    expect(screen.queryByTestId('expense-receipt-remove')).toBeNull();
+  });
+});
+
+describe('ExpensesScreen/encabezado', () => {
+  it('shows the truck and what has already been spent today', async () => {
+    mockedApiGet = jest.fn().mockResolvedValue([
+      {
+        id: 'e1',
+        createdAt: new Date().toISOString(),
+        driverName: 'chofer1',
+        category: 'combustible',
+        amount: 57100,
+      },
+    ]);
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated' as const,
+      token: 'tok',
+      username: 'chofer1',
+      loading: false,
+      api: { post: mockedApiPost, get: mockedApiGet },
+      login: jest.fn(),
+      logout: jest.fn(),
+      requireAuthToken: jest.fn(() => 'tok'),
+    });
+
+    await render(<ExpensesScreen />);
+
+    expect(screen.getByText('NUEVO GASTO · C-04')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTestId('expenses-header-amount')).toHaveTextContent('$57.100'),
+    );
+  });
+
+  it('still renders the form when the running total cannot be read', async () => {
+    mockedApiGet = jest.fn().mockRejectedValue(new Error('sin red'));
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated' as const,
+      token: 'tok',
+      username: 'chofer1',
+      loading: false,
+      api: { post: mockedApiPost, get: mockedApiGet },
+      login: jest.fn(),
+      logout: jest.fn(),
+      requireAuthToken: jest.fn(() => 'tok'),
+    });
+
+    await render(<ExpensesScreen />);
+
+    // El total del dia es contexto, no el trabajo: que no cargue no puede
+    // impedir registrar el gasto.
+    await waitFor(() => expect(mockedApiGet).toHaveBeenCalled());
+    expect(screen.getByTestId('expense-amount-input')).toBeTruthy();
+    expect(screen.getByTestId('expenses-header-amount')).toHaveTextContent('$0');
+  });
+});
+
+describe('ExpensesScreen/categoria', () => {
+  it('offers every category with a readable label, not the raw code', async () => {
+    await render(<ExpensesScreen />);
+
+    expect(screen.getByText('Combustible')).toBeTruthy();
+    expect(screen.getByText('Mantenimiento')).toBeTruthy();
+  });
+
+  it('sends the category the driver switched to', async () => {
+    mockedApiPost.mockResolvedValue({ id: 'exp-3' });
+
+    await render(<ExpensesScreen />);
+    await fireEvent.press(screen.getByTestId('expense-category-peaje'));
+    await fireEvent.changeText(screen.getByTestId('expense-amount-input'), '2300');
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    await waitFor(() => expect(mockedApiPost).toHaveBeenCalledTimes(1));
+    expect(mockedApiPost.mock.calls[0][1].category).toBe('peaje');
   });
 });
