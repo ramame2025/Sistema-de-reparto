@@ -2,6 +2,21 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
+const mockUpload = jest.fn();
+jest.mock('expo-file-system', () => ({
+  File: jest.fn().mockImplementation(() => ({ upload: mockUpload })),
+  UploadType: { MULTIPART: 'multipart' },
+}));
+
+const mockedLaunchCameraAsync = jest.fn();
+const mockedRequestCameraPermissionsAsync = jest.fn();
+jest.mock('expo-image-picker', () => ({
+  launchCameraAsync: (...args: unknown[]) => mockedLaunchCameraAsync(...args),
+  requestCameraPermissionsAsync: (...args: unknown[]) =>
+    mockedRequestCameraPermissionsAsync(...args),
+  MediaTypeOptions: { Images: 'Images' },
+}));
+
 jest.mock('../context/AuthContext', () => {
   const actual = jest.requireActual('../context/AuthContext');
   return { ...actual, useAuth: jest.fn() };
@@ -66,6 +81,17 @@ beforeEach(() => {
   });
 
   mockedUseSync.mockReturnValue({ refreshDaySummary: mockedRefreshDaySummary });
+
+  mockUpload.mockReset();
+  mockUpload.mockResolvedValue({
+    status: 200,
+    body: JSON.stringify({ url: 'https://cdn.test/nuevo.jpg' }),
+    headers: {},
+  });
+  mockedRequestCameraPermissionsAsync.mockReset();
+  mockedRequestCameraPermissionsAsync.mockResolvedValue({ granted: true });
+  mockedLaunchCameraAsync.mockReset();
+  mockedLaunchCameraAsync.mockResolvedValue({ canceled: false, assets: [{ uri: 'file://x.jpg' }] });
 });
 
 describe('SaleDetailScreen/detail', () => {
@@ -240,5 +266,142 @@ describe('SaleDetailScreen/edit', () => {
     expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$15.000');
     await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
     expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$22.500');
+  });
+});
+
+// updateSale resuelve `paymentProofRef` como `input.paymentProofRef?.trim() ||
+// null` y `containerReturned` como `input.containerReturned ?? null`: lo que la
+// edicion no manda, la API lo borra. Es la misma forma del agujero de
+// customerId. Sin estos campos en el payload, corregir una cantidad borraba el
+// comprobante de la transferencia y el envase devuelto de esa venta.
+describe('SaleDetailScreen/edit preserves fields the payload would otherwise wipe', () => {
+  it('sends back the payment proof of the sale being edited', async () => {
+    mockedRouteSale = buildSale({ paymentProofRef: 'https://cdn.test/proof.jpg' });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    expect(mockedApiPatch.mock.calls[0][1].paymentProofRef).toBe('https://cdn.test/proof.jpg');
+  });
+
+  it('omits the payment proof entirely when the sale never had one', async () => {
+    mockedRouteSale = buildSale({ paymentProofRef: undefined });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const payload = mockedApiPatch.mock.calls[0][1];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'paymentProofRef')).toBe(false);
+  });
+
+  it('sends back the container-returned answer, including an explicit no', async () => {
+    mockedRouteSale = buildSale({ containerReturned: false });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    // `false` es una respuesta, no una ausencia: no puede colapsar a "no preguntado".
+    expect(mockedApiPatch.mock.calls[0][1].containerReturned).toBe(false);
+  });
+
+  it('leaves container-returned unasked when it was never answered', async () => {
+    mockedRouteSale = buildSale({ containerReturned: undefined });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const payload = mockedApiPatch.mock.calls[0][1];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'containerReturned')).toBe(false);
+  });
+
+  it('carries the note across an edit instead of dropping it', async () => {
+    mockedRouteSale = buildSale({ note: 'Dejar en el porton' });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    expect(mockedApiPatch.mock.calls[0][1].note).toBe('Dejar en el porton');
+  });
+});
+
+// Inicio marca como problema toda venta de hoy cobrada sin efectivo y sin
+// comprobante, y manda al chofer justo aca. Sin forma de adjuntar la foto, ese
+// camino terminaria en una pantalla que solo le dice el problema.
+describe('SaleDetailScreen/adjuntar el comprobante que falta', () => {
+  it('offers to attach a proof on a non-cash sale that has none', async () => {
+    mockedRouteSale = buildSale({ paymentMethod: 'transferencia', paymentProofRef: undefined });
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('sale-detail-attach-proof')).toBeTruthy();
+  });
+
+  it('does not offer it on a cash sale, which has no proof to attach', async () => {
+    mockedRouteSale = buildSale({ paymentMethod: 'efectivo' });
+    await render(<SaleDetailScreen />);
+
+    expect(screen.queryByTestId('sale-detail-attach-proof')).toBeNull();
+  });
+
+  it('does not offer it when the sale already carries its proof', async () => {
+    mockedRouteSale = buildSale({
+      paymentMethod: 'transferencia',
+      paymentProofRef: 'https://cdn.test/ya-esta.jpg',
+    });
+    await render(<SaleDetailScreen />);
+
+    expect(screen.queryByTestId('sale-detail-attach-proof')).toBeNull();
+  });
+
+  it('uploads the photo and saves it against this sale, with its own reason', async () => {
+    mockedRouteSale = buildSale({
+      id: 'sale-proof',
+      paymentMethod: 'transferencia',
+      paymentProofRef: undefined,
+    });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.press(screen.getByTestId('sale-detail-attach-proof'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [path, payload] = mockedApiPatch.mock.calls[0];
+    expect(path).toBe('/sales/sale-proof');
+    expect(payload.paymentProofRef).toBe('https://cdn.test/nuevo.jpg');
+    // El motivo es obligatorio en el PATCH: se pone solo, el chofer no tiene
+    // que escribir por que adjunta lo que faltaba.
+    expect(payload.reason).toBe('Se adjunta el comprobante');
+  });
+
+  it('keeps the sale unchanged when the driver backs out of the camera', async () => {
+    mockedRouteSale = buildSale({ paymentMethod: 'qr', paymentProofRef: undefined });
+    mockedLaunchCameraAsync.mockResolvedValue({ canceled: true, assets: [] });
+
+    await render(<SaleDetailScreen />);
+    await fireEvent.press(screen.getByTestId('sale-detail-attach-proof'));
+
+    await waitFor(() => expect(mockedLaunchCameraAsync).toHaveBeenCalled());
+    expect(mockedApiPatch).not.toHaveBeenCalled();
+  });
+
+  it('says so and changes nothing when the upload fails', async () => {
+    mockedRouteSale = buildSale({ paymentMethod: 'qr', paymentProofRef: undefined });
+    mockUpload.mockResolvedValue({ status: 500, body: 'boom', headers: {} });
+
+    await render(<SaleDetailScreen />);
+    await fireEvent.press(screen.getByTestId('sale-detail-attach-proof'));
+
+    await waitFor(() =>
+      expect(screen.getByText('No se pudo subir el comprobante.')).toBeTruthy(),
+    );
+    expect(mockedApiPatch).not.toHaveBeenCalled();
   });
 });

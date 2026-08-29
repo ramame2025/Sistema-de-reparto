@@ -53,4 +53,18 @@ describe('ExpensesStack', () => {
       title: 'Historial de gastos',
     });
   });
+
+  it('registers ExpenseResult as a plain pushed screen with no header of its own', () => {
+    const element = ExpensesStack() as React.ReactElement<{ children: React.ReactElement[] }>;
+    const children = React.Children.toArray(element.props.children) as React.ReactElement<{
+      name: string;
+      component: unknown;
+      options?: { headerShown?: boolean };
+    }>[];
+    const result = children.find((child) => child.props.name === 'ExpenseResult');
+
+    expect(result).toBeTruthy();
+    // Sin header: la pantalla ya dice que paso y ofrece su propia salida.
+    expect(result?.props.options).toMatchObject({ headerShown: false });
+  });
 });

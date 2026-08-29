@@ -22,12 +22,20 @@ jest.mock('../context/TruckContext', () => ({
   useTruck: jest.fn(),
 }));
 
+// HomeScreen valoriza las ventas encoladas con los precios del catalogo para
+// listarlas como problemas, asi que necesita CatalogContext por el mismo
+// motivo que los de arriba.
+jest.mock('../context/CatalogContext', () => ({
+  useCatalog: jest.fn(),
+}));
+
 import React from 'react';
 import { render, screen } from '@testing-library/react-native';
 import { RootNavigator } from './RootNavigator';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
+import { useCatalog } from '../context/CatalogContext';
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseSync = useSync as jest.Mock;
@@ -50,6 +58,7 @@ const baseSyncValue = {
   pendingSales: [],
   syncing: false,
   daySummary: { activeCount: 0, canceledCount: 0, activeTotal: 0 },
+  todaySales: [],
   summaryLoading: false,
   summaryError: null,
   assignedTruckCode: 'CAMION-01',
@@ -61,6 +70,12 @@ const baseSyncValue = {
 
 beforeEach(() => {
   mockedUseSync.mockReturnValue(baseSyncValue);
+  (useCatalog as jest.Mock).mockReturnValue({
+    products: [],
+    prices: null,
+    stale: false,
+    canSell: false,
+  });
   mockedUseTruck.mockReturnValue({
     truck: {
       assignmentId: 'a-1',

@@ -13,6 +13,12 @@ export type SegmentedPillsProps<T extends string> = {
   options: readonly SegmentedPillOption<T>[];
   value: T;
   onChange: (value: T) => void;
+  /**
+   * Deja que las pastillas ocupen lo que dicen y bajen de fila. Para grupos que
+   * no entran en un renglon: cinco categorias de gasto estiradas dejarian
+   * "Mantenimiento" ilegible al lado de "Peaje".
+   */
+  wrap?: boolean;
   /** Each pill gets `${testID}-${option.value}`. */
   testID?: string;
 };
@@ -27,10 +33,11 @@ export function SegmentedPills<T extends string>({
   options,
   value,
   onChange,
+  wrap = false,
   testID,
 }: SegmentedPillsProps<T>) {
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, wrap && styles.rowWrap]}>
       {options.map((option) => {
         const selected = option.value === value;
 
@@ -41,7 +48,11 @@ export function SegmentedPills<T extends string>({
             accessibilityState={{ selected }}
             onPress={() => onChange(option.value)}
             testID={testID ? `${testID}-${option.value}` : undefined}
-            style={[styles.pill, selected ? styles.pillSelected : styles.pillIdle]}
+            style={[
+              styles.pill,
+              wrap ? styles.pillAuto : styles.pillStretch,
+              selected ? styles.pillSelected : styles.pillIdle,
+            ]}
           >
             <Text style={[styles.label, selected ? styles.labelSelected : styles.labelIdle]}>
               {option.label}
@@ -58,14 +69,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
   },
+  rowWrap: {
+    flexWrap: 'wrap',
+  },
   pill: {
-    flex: 1,
     minHeight: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.xs,
     borderRadius: spacing.sm,
     borderWidth: 1,
+  },
+  pillStretch: {
+    flex: 1,
+  },
+  pillAuto: {
+    paddingHorizontal: spacing.md,
   },
   pillSelected: {
     backgroundColor: colors.primary,

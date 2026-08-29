@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { File, UploadType } from 'expo-file-system';
@@ -8,12 +8,21 @@ import {
   EXPENSE_CATEGORIES,
   type CreateExpenseInput,
   type ExpenseCategory,
+  type ExpenseRecord,
 } from '@distribuidor/shared';
 import type { ExpensesStackParamList } from '../navigation/ExpensesStack';
-import { Button } from '../components/Button';
-import { Card } from '../components/Card';
+import { AmountField } from '../components/AmountField';
+import { EXPENSE_CATEGORY_LABELS } from '../components/ExpenseRow';
+import { ExpenseHeader } from '../components/ExpenseHeader';
+import { useKeyboardAwareField } from '../components/KeyboardAwareField';
 import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner';
+import { ReceiptCard } from '../components/ReceiptCard';
+import { SaleFooterBar } from '../components/SaleFooterBar';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SegmentedPills } from '../components/SegmentedPills';
+import { useTruck } from '../context/TruckContext';
+import { summarizeExpenses } from '../services/expenseTotals';
+import { formatJornadaTitle } from '../utils/jornada';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../services/apiClient';
 import { API_URL } from '../services/config';
@@ -41,8 +50,15 @@ export function ExpensesScreen() {
   const { api, username, requireAuthToken } = useAuth();
   const navigation = useNavigation<ExpensesScreenNavigationProp>();
 
+  const { truck } = useTruck();
+  // "Donde fue" es el ultimo campo del formulario: sin esto el teclado lo tapa
+  // y el chofer escribe sin ver lo que escribe.
+  const noteField = useKeyboardAwareField();
+
   const [category, setCategory] = useState<ExpenseCategory>('combustible');
-  const [amount, setAmount] = useState('0');
+  // Numero, no texto: el campo grande ya normaliza lo que el chofer tipea, y
+  // guardar el string obligaba a reparsearlo en cada lectura.
+  const [amount, setAmount] = useState(0);
   const [note, setNote] = useState('');
   const [receiptRef, setReceiptRef] = useState('');
   const [saving, setSaving] = useState(false);
@@ -55,11 +71,30 @@ export function ExpensesScreen() {
     setMessageTone(tone);
   };
 
+  // Lo gastado hoy encabeza la pantalla mientras se carga el gasto siguiente:
+  // el chofer decide distinto sabiendo si lleva $5.000 o $57.000 en el dia.
+  const [spentToday, setSpentToday] = useState(0);
+
+  const refreshSpentToday = useCallback(async () => {
+    try {
+      const response = await api.get<ExpenseRecord[]>('/expenses/mine', { cache: 'no-store' });
+      setSpentToday(summarizeExpenses(response).todayTotal);
+    } catch {
+      // Silencio deliberado, al reves que el resto de la app: este numero es
+      // contexto, no el trabajo. Que no cargue no puede tapar el formulario ni
+      // impedir registrar el gasto.
+    }
+  }, [api]);
+
+  useEffect(() => {
+    void refreshSpentToday();
+  }, [refreshSpentToday]);
+
   const saveExpense = async () => {
     const payload: CreateExpenseInput = {
       driverName: username,
       category,
-      amount: Number(amount),
+      amount,
       note: note || undefined,
       receiptRef: receiptRef || undefined,
     };
@@ -72,10 +107,13 @@ export function ExpensesScreen() {
     try {
       setSaving(true);
       await api.post('/expenses', payload);
-      setAmount('0');
+      const hadReceipt = receiptRef.length > 0;
+      setAmount(0);
       setNote('');
       setReceiptRef('');
-      showMessage('Gasto guardado correctamente.', 'success');
+      setMessage(null);
+      await refreshSpentToday();
+      navigation.navigate('ExpenseResult', { category, amount, hasReceipt: hadReceipt });
     } catch (error) {
       const cause = error instanceof ApiError ? error.message : 'No se pudo guardar el gasto.';
       showMessage(cause, 'error');
@@ -166,101 +204,94 @@ export function ExpensesScreen() {
     }
   };
 
+  const canSave = amount > 0 && !saving;
+
   return (
-    <ScreenContainer testID="expenses-screen" scroll>
-      <Text style={styles.tag}>Distribuidor · App chofer</Text>
-
-      <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Registrar gasto</Text>
-        <Text style={styles.apiHint}>Chofer: {username}</Text>
-
-        <Text style={styles.fieldLabel}>Categoria</Text>
-        <View style={styles.segmentRow}>
-          {EXPENSE_CATEGORIES.map((item) => (
-            <Button
-              key={item}
-              label={item}
-              variant={category === item ? 'primary' : 'secondary'}
-              onPress={() => setCategory(item)}
-            />
-          ))}
-        </View>
-
-        <TextInput
-          style={styles.input}
-          value={amount}
-          onChangeText={setAmount}
-          placeholder="Monto"
-          keyboardType="numeric"
-          testID="expense-amount"
-        />
-        <TextInput
-          style={styles.input}
-          value={note}
-          onChangeText={setNote}
-          placeholder="Descripcion (opcional)"
-        />
-        <Button
-          label={uploadingReceipt ? 'Subiendo comprobante...' : 'Adjuntar desde galeria'}
-          variant="secondary"
-          onPress={() => void pickReceiptImage()}
-          disabled={uploadingReceipt}
-          testID="expense-pick-gallery"
-        />
-
-        <Button
-          label={uploadingReceipt ? 'Subiendo comprobante...' : 'Sacar foto comprobante'}
-          variant="secondary"
-          onPress={() => void captureReceiptImage()}
-          disabled={uploadingReceipt}
-          testID="expense-capture-camera"
-        />
-
-        {receiptRef.length > 0 && (
-          <View style={styles.receiptPreviewWrap}>
-            <Text style={styles.apiHint}>Comprobante adjunto:</Text>
-            <Image
-              source={{ uri: receiptRef }}
-              style={styles.receiptPreview}
-              resizeMode="cover"
-              testID="expense-receipt-preview"
-            />
-          </View>
-        )}
-
-        <Button
-          label={saving ? 'Guardando gasto...' : 'Guardar gasto'}
+    <ScreenContainer
+      testID="expenses-screen"
+      scroll
+      footer={
+        <SaleFooterBar
+          total={amount}
+          totalLabel="GASTO"
+          actionLabel={saving ? 'Guardando...' : amount > 0 ? 'Guardar gasto' : 'Poné el monto'}
           onPress={() => void saveExpense()}
-          disabled={saving}
-          testID="expense-save-button"
+          disabled={!canSave}
         />
-        <FeedbackBanner message={message} tone={messageTone} />
-      </Card>
+      }
+    >
+      <ExpenseHeader
+        testID="expenses-header"
+        eyebrow={truck ? `NUEVO GASTO · ${truck.code}` : 'NUEVO GASTO'}
+        title={formatJornadaTitle(new Date())}
+        amount={spentToday}
+        amountLabel="gastado hoy"
+      />
 
-      <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Historial</Text>
-        <Button
-          label="Ver historial de gastos"
-          variant="secondary"
-          onPress={() => navigation.navigate('ExpensesHistory')}
-          testID="expenses-history-cta"
-        />
-      </Card>
+      <Text style={styles.sectionLabel}>CATEGORÍA</Text>
+      <SegmentedPills
+        options={EXPENSE_CATEGORIES.map((item) => ({
+          value: item,
+          label: EXPENSE_CATEGORY_LABELS[item],
+        }))}
+        value={category}
+        onChange={setCategory}
+        wrap
+        testID="expense-category"
+      />
+
+      <Text style={styles.sectionLabel}>MONTO</Text>
+      <AmountField value={amount} onChange={setAmount} testID="expense-amount" />
+
+      <View style={styles.sectionRow}>
+        <Text style={styles.sectionLabel}>COMPROBANTE</Text>
+        <Text style={styles.sectionHint}>recomendado</Text>
+      </View>
+      <ReceiptCard
+        receiptRef={receiptRef}
+        uploading={uploadingReceipt}
+        onCapture={() => void captureReceiptImage()}
+        onPickFromGallery={() => void pickReceiptImage()}
+        onRemove={() => setReceiptRef('')}
+        testID="expense-receipt"
+      />
+
+      <View style={styles.sectionRow}>
+        <Text style={styles.sectionLabel}>DÓNDE FUE</Text>
+        <Text style={styles.sectionHint}>opcional</Text>
+      </View>
+      <TextInput
+        ref={noteField.ref}
+        onFocus={noteField.onFocus}
+        style={styles.input}
+        value={note}
+        onChangeText={setNote}
+        placeholder="YPF Ruta 8"
+        testID="expense-note"
+      />
+
+      <FeedbackBanner message={message} tone={messageTone} />
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  tag: {
-    color: colors.primary,
+  sectionLabel: {
+    fontSize: typography.sizes.xs,
     fontWeight: typography.weights.bold,
-    textTransform: 'uppercase',
+    color: colors.textSecondary,
     letterSpacing: 0.7,
+    marginTop: spacing.md,
     marginBottom: spacing.sm,
   },
-  card: {
-    gap: spacing.sm,
-    marginBottom: spacing.md,
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+  },
+  sectionHint: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
   },
   fieldLabel: {
     fontSize: typography.sizes.sm,

@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen, within } from '@testing-library/react-native';
 import { StyleSheet, Text } from 'react-native';
 import { ScreenContainer } from './ScreenContainer';
+import { ScreenScrollContext } from './KeyboardAwareField';
 import { colors } from '../theme/colors';
 
 describe('ScreenContainer', () => {
@@ -99,5 +100,64 @@ describe('ScreenContainer', () => {
     );
 
     expect(screen.queryByTestId('screen-footer')).toBeNull();
+  });
+
+  it('offers pull-to-refresh when the screen knows how to reload itself', async () => {
+    const onRefresh = jest.fn();
+    await render(
+      <ScreenContainer testID="screen" onRefresh={onRefresh} refreshing={false}>
+        <Text>Contenido</Text>
+      </ScreenContainer>
+    );
+
+    const control = screen.getByTestId('screen-scroll').props.refreshControl;
+    expect(control).toBeTruthy();
+    control.props.onRefresh();
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('has no refresh control on a screen that has nothing to reload', async () => {
+    await render(
+      <ScreenContainer testID="screen">
+        <Text>Contenido</Text>
+      </ScreenContainer>
+    );
+
+    expect(screen.getByTestId('screen-scroll').props.refreshControl).toBeUndefined();
+  });
+
+  it('leaves headroom below the last field so the scroll can clear the keyboard', async () => {
+    await render(
+      <ScreenContainer testID="screen" scroll>
+        <Text>Contenido</Text>
+      </ScreenContainer>
+    );
+
+    const style = StyleSheet.flatten(
+      screen.getByTestId('screen-scroll').props.contentContainerStyle
+    );
+    // El ultimo campo no puede subir mas alla del final del contenido: sin este
+    // colchon el scroll topa justo antes de despejarlo del teclado.
+    expect(style.paddingBottom).toBeGreaterThan(style.padding);
+  });
+
+  it('publishes its scroll view so a field can ask to be brought above the keyboard', async () => {
+    // El desplazamiento lo pide el propio campo, via useKeyboardAwareField.
+    // Aca solo se verifica que el contenedor deje el ScrollView disponible.
+    let received: unknown = 'not-provided';
+
+    function Probe() {
+      received = React.useContext(ScreenScrollContext);
+      return <Text>Contenido</Text>;
+    }
+
+    await render(
+      <ScreenContainer testID="screen">
+        <Probe />
+      </ScreenContainer>
+    );
+
+    expect(received).not.toBe('not-provided');
+    expect(received).not.toBeNull();
   });
 });

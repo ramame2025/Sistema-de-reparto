@@ -4,54 +4,61 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 
 jest.mock('../context/TruckContext', () => {
   const actual = jest.requireActual('../context/TruckContext');
-  return {
-    ...actual,
-    useTruck: jest.fn(),
-  };
+  return { ...actual, useTruck: jest.fn() };
 });
 
 jest.mock('../context/SyncContext', () => {
   const actual = jest.requireActual('../context/SyncContext');
-  return {
-    ...actual,
-    useSync: jest.fn(),
-  };
+  return { ...actual, useSync: jest.fn() };
 });
 
-// PR5: HomeScreen now fetches manifest status via useAuth().api.get, and
-// navigates to LoadManifest via useNavigation() — both mocked the same way
-// TruckContext/SyncContext already are above (fully virtualized, no
-// requireActual, so this file stays independent of the real navigation tree
-// and AsyncStorage/fetch chains).
+jest.mock('../context/CatalogContext', () => {
+  const actual = jest.requireActual('../context/CatalogContext');
+  return { ...actual, useCatalog: jest.fn() };
+});
+
 jest.mock('../context/AuthContext', () => {
   const actual = jest.requireActual('../context/AuthContext');
-  return {
-    ...actual,
-    useAuth: jest.fn(),
-  };
+  return { ...actual, useAuth: jest.fn() };
 });
 
 const mockedNavigate = jest.fn();
+const mockedParentNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
   return {
     ...actual,
-    useNavigation: () => ({ navigate: mockedNavigate }),
+    useNavigation: () => ({
+      navigate: mockedNavigate,
+      getParent: () => ({ navigate: mockedParentNavigate }),
+    }),
   };
 });
 
 import React from 'react';
 import { Alert } from 'react-native';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react-native';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import type { LoadManifestRecord, PriceTable, SaleRecord } from '@distribuidor/shared';
 import { HomeScreen } from './HomeScreen';
 import { useAuth } from '../context/AuthContext';
+import { useCatalog } from '../context/CatalogContext';
 import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseSync = useSync as jest.Mock;
 const mockedUseTruck = useTruck as jest.Mock;
+const mockedUseCatalog = useCatalog as jest.Mock;
 let mockedApiGet: jest.Mock;
+let mockedLogout: jest.Mock;
+
+const prices: PriceTable = {
+  final: { G10: 8500 },
+  comercio: { G10: 8200 },
+  distribuidor: { G10: 7900 },
+};
+
+const today = () => new Date().toISOString().slice(0, 10);
 
 const baseTruckValue = {
   truck: {
@@ -70,26 +77,11 @@ const baseTruckValue = {
   reload: jest.fn(),
 };
 
-beforeEach(() => {
-  mockedUseTruck.mockReturnValue(baseTruckValue);
-  mockedNavigate.mockClear();
-  mockedApiGet = jest.fn().mockResolvedValue([]);
-  mockedUseAuth.mockReturnValue({
-    status: 'authenticated' as const,
-    token: 'tok',
-    username: 'chofer1',
-    loading: false,
-    api: { get: mockedApiGet },
-    login: jest.fn(),
-    logout: jest.fn(),
-    requireAuthToken: jest.fn(() => 'tok'),
-  });
-});
-
 const baseSyncValue = {
   pendingSales: [],
   syncing: false,
   daySummary: { activeCount: 0, canceledCount: 0, activeTotal: 0 },
+  todaySales: [] as SaleRecord[],
   summaryLoading: false,
   summaryError: null,
   assignedTruckCode: 'CAMION-01',
@@ -99,96 +91,85 @@ const baseSyncValue = {
   refreshDaySummary: jest.fn().mockResolvedValue(undefined),
 };
 
-describe('HomeScreen/loading', () => {
-  it('renders a loading indicator while summaryLoading is true and refreshes on mount', async () => {
-    const refreshDaySummary = jest.fn().mockResolvedValue(undefined);
-    mockedUseSync.mockReturnValue({ ...baseSyncValue, summaryLoading: true, refreshDaySummary });
+const syncWith = (overrides: Record<string, unknown> = {}) =>
+  mockedUseSync.mockReturnValue({ ...baseSyncValue, ...overrides });
 
-    await render(<HomeScreen />);
+const buildSale = (overrides: Partial<SaleRecord> = {}): SaleRecord => ({
+  id: 's1',
+  createdAt: `${today()}T14:30:00.000Z`,
+  occurredAt: `${today()}T14:30:00.000Z`,
+  status: 'active',
+  driverName: 'chofer1',
+  total: 96000,
+  customerName: 'Distribuidora Sur',
+  customerType: 'comercio',
+  paymentMethod: 'efectivo',
+  items: [],
+  kind: 'sale',
+  ...overrides,
+});
 
-    expect(screen.getByTestId('home-summary-loading')).toBeTruthy();
-    expect(screen.queryByText(/Ventas activas hoy/)).toBeNull();
-    expect(screen.queryByTestId('empty-state-description')).toBeNull();
-    await waitFor(() => expect(refreshDaySummary).toHaveBeenCalledTimes(1));
+const manifestToday = (overrides: Partial<LoadManifestRecord> = {}): LoadManifestRecord => ({
+  id: 'm1',
+  createdAt: `${today()}T07:10:00.000Z`,
+  driverName: 'chofer1',
+  truckId: 'truck-1',
+  items: [
+    { productCode: 'G10', quantity: 50 },
+    { productCode: 'G15', quantity: 21 },
+  ],
+  ...overrides,
+});
+
+/** Rutea las tres llamadas que la portada hace al montarse. */
+const apiReturning = (options: { manifests?: unknown; customers?: unknown } = {}) =>
+  jest.fn().mockImplementation((path: string) => {
+    if (path.startsWith('/load-manifests/mine')) {
+      return Promise.resolve(options.manifests ?? []);
+    }
+    if (path.startsWith('/driver-customer-assignments/me')) {
+      return Promise.resolve(options.customers ?? { date: today(), customers: [] });
+    }
+    return Promise.resolve([]);
+  });
+
+beforeEach(() => {
+  mockedUseTruck.mockReturnValue(baseTruckValue);
+  mockedUseCatalog.mockReturnValue({ products: [], prices, stale: false, canSell: true });
+  mockedNavigate.mockClear();
+  mockedParentNavigate.mockClear();
+  mockedApiGet = apiReturning();
+  mockedLogout = jest.fn();
+  syncWith();
+  mockedUseAuth.mockReturnValue({
+    status: 'authenticated' as const,
+    token: 'tok',
+    username: 'chofer1',
+    loading: false,
+    api: { get: mockedApiGet },
+    login: jest.fn(),
+    logout: mockedLogout,
+    requireAuthToken: jest.fn(() => 'tok'),
   });
 });
 
-describe('HomeScreen/error', () => {
-  it('renders a visible error message when summaryError is set', async () => {
-    mockedUseSync.mockReturnValue({
-      ...baseSyncValue,
-      summaryError: 'No se pudo actualizar el resumen.',
-    });
-
+describe('HomeScreen/encabezado de la jornada', () => {
+  it('names the driver and the truck as soon as the app opens', async () => {
     await render(<HomeScreen />);
 
-    expect(screen.getByText('No se pudo actualizar el resumen.')).toBeTruthy();
-    expect(screen.queryByText(/Ventas activas hoy/)).toBeNull();
-  });
-});
-
-describe('HomeScreen/empty', () => {
-  it('renders a distinct empty state when there are zero sales today', async () => {
-    mockedUseSync.mockReturnValue({
-      ...baseSyncValue,
-      daySummary: { activeCount: 0, canceledCount: 0, activeTotal: 0 },
-    });
-
-    await render(<HomeScreen />);
-
-    expect(screen.getByText('Sin ventas hoy')).toBeTruthy();
-    expect(screen.queryByText(/Ventas activas hoy/)).toBeNull();
-  });
-});
-
-describe('HomeScreen/success', () => {
-  it('renders the populated day summary and the pending-sales indicator', async () => {
-    mockedUseSync.mockReturnValue({
-      ...baseSyncValue,
-      daySummary: { activeCount: 3, canceledCount: 1, activeTotal: 15000 },
-      pendingSales: [{ queueId: 'q1' }, { queueId: 'q2' }],
-    });
-
-    await render(<HomeScreen />);
-
-    expect(screen.getByText('Ventas activas hoy: 3')).toBeTruthy();
-    expect(screen.getByText('Ventas anuladas hoy: 1')).toBeTruthy();
-    expect(screen.getByText('Total activo hoy: $15.000')).toBeTruthy();
-    expect(screen.getByText('Pendientes de sincronizar: 2')).toBeTruthy();
-  });
-});
-
-describe('HomeScreen/manual refresh', () => {
-  it('calls refreshDaySummary again when the manual refresh button is pressed', async () => {
-    const refreshDaySummary = jest.fn().mockResolvedValue(undefined);
-    mockedUseSync.mockReturnValue({ ...baseSyncValue, refreshDaySummary });
-
-    await render(<HomeScreen />);
-    await waitFor(() => expect(refreshDaySummary).toHaveBeenCalledTimes(1));
-
-    await fireEvent.press(screen.getByText('Actualizar resumen'));
-
-    await waitFor(() => expect(refreshDaySummary).toHaveBeenCalledTimes(2));
-  });
-});
-
-describe('HomeScreen/camion del dia', () => {
-  it('shows the assigned truck as soon as the driver opens the app', async () => {
-    await render(<HomeScreen />);
-
-    expect(screen.getByTestId('home-assigned-truck')).toBeTruthy();
-    expect(screen.getByText(/CAMION-01/)).toBeTruthy();
+    expect(screen.getByText('chofer1 · CAMION-01')).toBeTruthy();
+    expect(screen.getByText('AB123CD · 40 u. de capacidad')).toBeTruthy();
   });
 
   it('marks a cobertura explicitly, so the driver notices it is not his usual truck', async () => {
     mockedUseTruck.mockReturnValue({
       ...baseTruckValue,
-      truck: { ...baseTruckValue.truck, kind: 'cobertura' as const, code: 'CAMION-09' },
+      truck: { ...baseTruckValue.truck, kind: 'cobertura' as const },
     });
 
     await render(<HomeScreen />);
 
-    expect(screen.getByText(/cobertura/i)).toBeTruthy();
+    expect(screen.getByText('AB123CD · 40 u. de capacidad · cobertura')).toBeTruthy();
   });
 
   it('says plainly when there is no truck for today', async () => {
@@ -196,230 +177,183 @@ describe('HomeScreen/camion del dia', () => {
 
     await render(<HomeScreen />);
 
-    expect(screen.getByTestId('home-no-truck')).toBeTruthy();
+    expect(screen.getByTestId('jornada-header-no-truck')).toBeTruthy();
   });
 });
 
-describe('HomeScreen/manifest status banner (PR5)', () => {
-  it('fetches manifest status on mount, alongside refreshDaySummary', async () => {
+describe('HomeScreen/carga y error del resumen', () => {
+  it('refreshes on mount and shows an indicator while the summary is in flight', async () => {
     const refreshDaySummary = jest.fn().mockResolvedValue(undefined);
-    mockedUseSync.mockReturnValue({ ...baseSyncValue, refreshDaySummary });
+    syncWith({ summaryLoading: true, refreshDaySummary });
 
     await render(<HomeScreen />);
 
+    expect(screen.getByTestId('home-summary-loading')).toBeTruthy();
+    expect(refreshDaySummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a visible error instead of a silently stale summary', async () => {
+    syncWith({ summaryError: 'No se pudo actualizar el resumen.' });
+
+    await render(<HomeScreen />);
+
+    expect(screen.getByText('No se pudo actualizar el resumen.')).toBeTruthy();
+    expect(screen.queryByTestId('home-day-status')).toBeNull();
+  });
+
+  it('reloads everything on pull-to-refresh, replacing the old refresh button', async () => {
+    const refreshDaySummary = jest.fn().mockResolvedValue(undefined);
+    syncWith({ refreshDaySummary });
+
+    await render(<HomeScreen />);
     await waitFor(() => expect(refreshDaySummary).toHaveBeenCalledTimes(1));
-    await waitFor(() =>
-      expect(mockedApiGet).toHaveBeenCalledWith('/load-manifests/mine', { cache: 'no-store' }),
-    );
-  });
 
-  it('shows a passive banner when no manifest was submitted today', async () => {
-    mockedApiGet.mockResolvedValue([]);
+    screen.getByTestId('home-screen-scroll').props.refreshControl.props.onRefresh();
 
-    await render(<HomeScreen />);
-
-    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
-    expect(screen.queryByTestId('home-manifest-loaded')).toBeNull();
-    expect(screen.queryByTestId('home-manifest-error')).toBeNull();
-  });
-
-  it('shows a different (positive) state when a manifest was already submitted today', async () => {
-    const today = new Date().toISOString();
-    mockedApiGet.mockResolvedValue([
-      {
-        id: 'm1',
-        createdAt: today,
-        driverName: 'chofer1',
-        truckId: 'truck-1',
-        items: [{ productCode: 'G10', quantity: 5 }],
-      },
-    ]);
-
-    await render(<HomeScreen />);
-
-    await waitFor(() => expect(screen.getByTestId('home-manifest-loaded')).toBeTruthy());
-    expect(screen.queryByTestId('home-manifest-missing')).toBeNull();
-  });
-
-  it('ignores manifests from days other than today when deciding the banner', async () => {
-    mockedApiGet.mockResolvedValue([
-      {
-        id: 'm0',
-        createdAt: '2020-01-01T09:00:00.000Z',
-        driverName: 'chofer1',
-        truckId: 'truck-1',
-        items: [{ productCode: 'G10', quantity: 5 }],
-      },
-    ]);
-
-    await render(<HomeScreen />);
-
-    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
-  });
-
-  it('shows a visible error when the manifest fetch fails — no silent catch, same posture as summaryError', async () => {
-    mockedApiGet.mockRejectedValue(new Error('No se pudo conectar con el servidor.'));
-
-    await render(<HomeScreen />);
-
-    await waitFor(() => expect(screen.getByTestId('home-manifest-error')).toBeTruthy());
-    expect(
-      within(screen.getByTestId('home-manifest-error')).getByText(
-        'No se pudo conectar con el servidor.',
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByTestId('home-manifest-missing')).toBeNull();
-    expect(screen.queryByTestId('home-manifest-loaded')).toBeNull();
-  });
-
-  it('does not block the rest of the screen when the manifest fetch fails', async () => {
-    mockedApiGet.mockRejectedValue(new Error('network down'));
-    mockedUseSync.mockReturnValue({
-      ...baseSyncValue,
-      daySummary: { activeCount: 3, canceledCount: 1, activeTotal: 15000 },
-    });
-
-    await render(<HomeScreen />);
-
-    await waitFor(() => expect(screen.getByTestId('home-manifest-error')).toBeTruthy());
-    expect(screen.getByText('Ventas activas hoy: 3')).toBeTruthy();
-  });
-
-  it('navigates to LoadManifest when the CTA is pressed', async () => {
-    mockedApiGet.mockResolvedValue([]);
-
-    await render(<HomeScreen />);
-
-    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
-
-    fireEvent.press(screen.getByTestId('home-manifest-cta'));
-
-    expect(mockedNavigate).toHaveBeenCalledWith('LoadManifest');
+    await waitFor(() => expect(refreshDaySummary).toHaveBeenCalledTimes(2));
+    // Las tres fuentes de la portada, no solo el resumen.
+    expect(mockedApiGet.mock.calls.filter((c) => String(c[0]).startsWith('/load-manifests'))).toHaveLength(2);
   });
 });
 
-describe('HomeScreen/clientes de hoy card (PR4)', () => {
-  // mockedApiGet is a single jest.fn() shared by both the manifest-status
-  // fetch and this new assigned-customers-status fetch (same pattern as
-  // manifest status — a plain useState/useEffect fetch, not a Context).
-  // Tests here configure it with mockImplementation, branching on the URL,
-  // so both fetches resolve independently within the same test.
-  const routeApiGet = (assignedResponse: unknown) =>
-    mockedApiGet.mockImplementation((url: string) => {
-      if (url === '/load-manifests/mine') {
-        return Promise.resolve([]);
-      }
-      if (url.startsWith('/driver-customer-assignments/me')) {
-        return Promise.resolve(assignedResponse);
-      }
-      return Promise.reject(new Error(`unexpected url: ${url}`));
-    });
-
-  it('fetches assigned-customers status on mount, alongside the manifest status fetch', async () => {
-    routeApiGet({ date: '2026-02-11', customers: [] });
+describe('HomeScreen/estado de la jornada', () => {
+  it('reports a clean day when nothing is queued and nothing lacks a proof', async () => {
+    syncWith({ daySummary: { activeCount: 13, canceledCount: 0, activeTotal: 197500 } });
 
     await render(<HomeScreen />);
 
-    await waitFor(() =>
-      expect(mockedApiGet).toHaveBeenCalledWith(
-        expect.stringMatching(/^\/driver-customer-assignments\/me\?date=/),
-        { cache: 'no-store' },
-      ),
+    expect(screen.getByText('Todo en orden')).toBeTruthy();
+    expect(screen.getByTestId('day-status-detail')).toHaveTextContent(
+      '13 ventas enviadas · nada en cola',
     );
   });
 
-  it('shows the assigned count when there are customers assigned today', async () => {
-    routeApiGet({
-      date: '2026-02-11',
-      customers: [
-        { id: 'c1', name: 'Kiosco Norte', customerType: 'comercio' },
-        { id: 'c2', name: 'Juan Perez', customerType: 'final' },
+  it('counts a queued sale and a proofless card payment as one problem each', async () => {
+    syncWith({
+      daySummary: { activeCount: 12, canceledCount: 1, activeTotal: 184500 },
+      pendingSales: [
+        {
+          queueId: 'q1',
+          kind: 'sale',
+          retries: 3,
+          nextRetryAt: 0,
+          createdAt: `${today()}T10:00:00.000Z`,
+          payload: {
+            driverName: 'chofer1',
+            customerName: 'Kiosco La Esquina',
+            customerType: 'comercio',
+            paymentMethod: 'efectivo',
+            items: [{ productCode: 'G10', quantity: 1 }],
+          },
+        },
+      ],
+      todaySales: [buildSale({ id: 's-transfer', paymentMethod: 'transferencia' })],
+    });
+
+    await render(<HomeScreen />);
+
+    expect(screen.getByText('2 ventas con problema')).toBeTruthy();
+    expect(screen.getByTestId('day-status-problem-q1-reason')).toHaveTextContent(
+      'No se pudo enviar · 3 intentos',
+    );
+    expect(screen.getByTestId('day-status-problem-s-transfer-reason')).toHaveTextContent(
+      'Falta el comprobante de la transferencia',
+    );
+  });
+
+  it('sends an unsent sale to the sync queue, which is where it gets retried', async () => {
+    syncWith({
+      pendingSales: [
+        {
+          queueId: 'q1',
+          kind: 'sale',
+          retries: 1,
+          nextRetryAt: 0,
+          createdAt: `${today()}T10:00:00.000Z`,
+          payload: {
+            driverName: 'chofer1',
+            customerName: 'Kiosco La Esquina',
+            customerType: 'comercio',
+            paymentMethod: 'efectivo',
+            items: [],
+          },
+        },
       ],
     });
 
     await render(<HomeScreen />);
+    await fireEvent.press(screen.getByTestId('day-status-problem-q1'));
 
-    await waitFor(() => expect(screen.getByTestId('home-assigned-customers-count')).toBeTruthy());
-    expect(screen.getByText('Tenes 2 clientes asignados hoy.')).toBeTruthy();
+    expect(mockedParentNavigate).toHaveBeenCalledWith('Sincronización');
   });
 
-  it('shows an empty-copy status when there are no customers assigned today', async () => {
-    routeApiGet({ date: '2026-02-11', customers: [] });
+  it('opens the sale itself when what is missing is its proof', async () => {
+    const sale = buildSale({ id: 's-transfer', paymentMethod: 'transferencia' });
+    syncWith({ todaySales: [sale] });
 
     await render(<HomeScreen />);
+    await fireEvent.press(screen.getByTestId('day-status-problem-s-transfer'));
 
-    await waitFor(() =>
-      expect(screen.getByTestId('home-assigned-customers-empty')).toBeTruthy(),
-    );
+    expect(mockedNavigate).toHaveBeenCalledWith('SaleDetail', { sale });
   });
 
-  it('shows a visible error when the assigned-customers fetch fails, without blocking the rest of the screen', async () => {
-    mockedApiGet.mockImplementation((url: string) => {
-      if (url === '/load-manifests/mine') {
-        return Promise.resolve([]);
-      }
-      if (url.startsWith('/driver-customer-assignments/me')) {
-        return Promise.reject(new Error('No se pudo conectar con el servidor.'));
-      }
-      return Promise.reject(new Error(`unexpected url: ${url}`));
+  it('sends "Resolver ahora" to the sale that could still be lost, ahead of the rest', async () => {
+    syncWith({
+      pendingSales: [
+        {
+          queueId: 'q1',
+          kind: 'sale',
+          retries: 1,
+          nextRetryAt: 0,
+          createdAt: `${today()}T10:00:00.000Z`,
+          payload: {
+            driverName: 'chofer1',
+            customerName: 'Kiosco',
+            customerType: 'comercio',
+            paymentMethod: 'efectivo',
+            items: [],
+          },
+        },
+      ],
+      todaySales: [buildSale({ id: 's-transfer', paymentMethod: 'transferencia' })],
     });
-    mockedUseSync.mockReturnValue({
-      ...baseSyncValue,
-      daySummary: { activeCount: 3, canceledCount: 1, activeTotal: 15000 },
-    });
 
     await render(<HomeScreen />);
+    await fireEvent.press(screen.getByTestId('day-status-resolve'));
 
-    await waitFor(() =>
-      expect(screen.getByTestId('home-assigned-customers-error')).toBeTruthy(),
-    );
-    expect(screen.getByText('No se pudo conectar con el servidor.')).toBeTruthy();
-    expect(screen.getByText('Ventas activas hoy: 3')).toBeTruthy();
-  });
-
-  it('navigates to AssignedCustomers when the CTA is pressed', async () => {
-    routeApiGet({ date: '2026-02-11', customers: [] });
-
-    await render(<HomeScreen />);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('home-assigned-customers-empty')).toBeTruthy(),
-    );
-
-    fireEvent.press(screen.getByTestId('home-assigned-customers-cta'));
-
-    expect(mockedNavigate).toHaveBeenCalledWith('AssignedCustomers');
+    // Una venta que el servidor no tiene se pierde con el telefono; una sin
+    // comprobante ya esta guardada.
+    expect(mockedParentNavigate).toHaveBeenCalledWith('Sincronización');
+    expect(mockedNavigate).not.toHaveBeenCalledWith('SaleDetail', expect.anything());
   });
 });
 
-describe('HomeScreen/history CTAs', () => {
-  beforeEach(() => {
-    mockedUseSync.mockReturnValue(baseSyncValue);
-  });
+describe('HomeScreen/cobrado hoy', () => {
+  it('shows the amount charged and the three counters', async () => {
+    syncWith({
+      daySummary: { activeCount: 12, canceledCount: 1, activeTotal: 184500 },
+      pendingSales: [{ queueId: 'q1' }, { queueId: 'q2' }],
+    });
 
-  it('navigates to SalesHistory when the sales-history CTA is pressed', async () => {
     await render(<HomeScreen />);
 
-    fireEvent.press(screen.getByTestId('home-sales-history-cta'));
+    expect(screen.getByTestId('home-cobrado-hoy')).toHaveTextContent('$184.500');
+    expect(screen.getByTestId('home-tile-activas-value')).toHaveTextContent('12');
+    expect(screen.getByTestId('home-tile-anuladas-value')).toHaveTextContent('1');
+    expect(screen.getByTestId('home-tile-cola-value')).toHaveTextContent('2');
+  });
+
+  it('navigates to the full sales list', async () => {
+    await render(<HomeScreen />);
+    await fireEvent.press(screen.getByTestId('home-sales-history-cta'));
 
     expect(mockedNavigate).toHaveBeenCalledWith('SalesHistory');
   });
-
-  it('navigates to ManifestHistory when the manifest-history CTA is pressed', async () => {
-    mockedApiGet.mockResolvedValue([]);
-
-    await render(<HomeScreen />);
-
-    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
-
-    fireEvent.press(screen.getByTestId('home-manifest-history-cta'));
-
-    expect(mockedNavigate).toHaveBeenCalledWith('ManifestHistory');
-  });
 });
 
-describe('HomeScreen/logout', () => {
-  const useAuthWith = (overrides: Record<string, unknown>) => {
+describe('HomeScreen/remito', () => {
+  it('fetches the manifest on mount and counts the units it carried', async () => {
+    mockedApiGet = apiReturning({ manifests: [manifestToday()] });
     mockedUseAuth.mockReturnValue({
       status: 'authenticated' as const,
       token: 'tok',
@@ -427,16 +361,160 @@ describe('HomeScreen/logout', () => {
       loading: false,
       api: { get: mockedApiGet },
       login: jest.fn(),
-      logout: jest.fn(),
+      logout: mockedLogout,
       requireAuthToken: jest.fn(() => 'tok'),
-      ...overrides,
     });
-  };
 
-  beforeEach(() => {
-    mockedUseSync.mockReturnValue(baseSyncValue);
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByText('Remito cargado · 71 envases')).toBeTruthy(),
+    );
+    expect(mockedApiGet).toHaveBeenCalledWith('/load-manifests/mine', { cache: 'no-store' });
   });
 
+  it('prompts to load the truck when today has no manifest, explaining why it matters', async () => {
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
+    expect(screen.getByText('Cargá el camión para que cierren los números')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('home-manifest-missing'));
+    expect(mockedNavigate).toHaveBeenCalledWith('LoadManifest');
+  });
+
+  it('ignores a manifest from another day when deciding what to show', async () => {
+    mockedApiGet = apiReturning({
+      manifests: [manifestToday({ createdAt: '2020-01-01T07:10:00.000Z' })],
+    });
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated' as const,
+      token: 'tok',
+      username: 'chofer1',
+      loading: false,
+      api: { get: mockedApiGet },
+      login: jest.fn(),
+      logout: mockedLogout,
+      requireAuthToken: jest.fn(() => 'tok'),
+    });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
+  });
+
+  it('shows a visible error when the manifest fetch fails, without blocking the rest', async () => {
+    mockedApiGet = jest.fn().mockImplementation((path: string) => {
+      if (path.startsWith('/load-manifests/mine')) {
+        return Promise.reject(new Error('No se pudo verificar el remito de hoy.'));
+      }
+      return Promise.resolve({ date: today(), customers: [] });
+    });
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated' as const,
+      token: 'tok',
+      username: 'chofer1',
+      loading: false,
+      api: { get: mockedApiGet },
+      login: jest.fn(),
+      logout: mockedLogout,
+      requireAuthToken: jest.fn(() => 'tok'),
+    });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-manifest-error')).toBeTruthy());
+    expect(screen.getByTestId('home-cobrado-hoy')).toBeTruthy();
+  });
+});
+
+describe('HomeScreen/clientes de hoy', () => {
+  const withCustomers = (ids: string[], todaySales: SaleRecord[] = []) => {
+    mockedApiGet = apiReturning({
+      customers: { date: today(), customers: ids.map((id) => ({ id, name: id })) },
+    });
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated' as const,
+      token: 'tok',
+      username: 'chofer1',
+      loading: false,
+      api: { get: mockedApiGet },
+      login: jest.fn(),
+      logout: mockedLogout,
+      requireAuthToken: jest.fn(() => 'tok'),
+    });
+    syncWith({ todaySales });
+  };
+
+  it('counts how many of the assigned customers were already visited', async () => {
+    withCustomers(
+      ['c1', 'c2', 'c3'],
+      [buildSale({ id: 'a', customerId: 'c1' }), buildSale({ id: 'b', customerId: 'c2' })],
+    );
+
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-clients-progress')).toHaveTextContent('2 de 3 visitados'),
+    );
+  });
+
+  it('fetches the assignment for today, scoped to the local day', async () => {
+    withCustomers(['c1']);
+
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(mockedApiGet).toHaveBeenCalledWith(
+        expect.stringContaining('/driver-customer-assignments/me?date='),
+        { cache: 'no-store' },
+      ),
+    );
+  });
+
+  it('reads zero of zero rather than crashing when nothing is assigned', async () => {
+    withCustomers([]);
+
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-clients-progress')).toHaveTextContent('0 de 0 visitados'),
+    );
+  });
+
+  it('shows a visible error when the assignment fetch fails, without blocking the rest', async () => {
+    mockedApiGet = jest.fn().mockImplementation((path: string) => {
+      if (path.startsWith('/driver-customer-assignments/me')) {
+        return Promise.reject(new Error('No se pudo verificar tus clientes de hoy.'));
+      }
+      return Promise.resolve([]);
+    });
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated' as const,
+      token: 'tok',
+      username: 'chofer1',
+      loading: false,
+      api: { get: mockedApiGet },
+      login: jest.fn(),
+      logout: mockedLogout,
+      requireAuthToken: jest.fn(() => 'tok'),
+    });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('home-assigned-customers-error')).toBeTruthy());
+    expect(screen.getByTestId('home-cobrado-hoy')).toBeTruthy();
+  });
+
+  it('navigates to the assigned-customers list', async () => {
+    await render(<HomeScreen />);
+    await fireEvent.press(screen.getByTestId('home-assigned-customers-cta'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('AssignedCustomers');
+  });
+});
+
+describe('HomeScreen/logout', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
@@ -448,69 +526,52 @@ describe('HomeScreen/logout', () => {
     expect(screen.getByTestId('home-logout-button')).toBeTruthy();
   });
 
-  it('asks for confirmation and only calls logout() once the user confirms', async () => {
-    const logout = jest.fn().mockResolvedValue(undefined);
-    useAuthWith({ logout });
-    const alertSpy = jest.spyOn(Alert, 'alert');
+  it('asks for confirmation and only calls logout() once the driver confirms', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
     await render(<HomeScreen />);
+    await fireEvent.press(screen.getByTestId('home-logout-button'));
 
-    fireEvent.press(screen.getByTestId('home-logout-button'));
+    const [, , buttons] = alertSpy.mock.calls[0];
+    expect(mockedLogout).not.toHaveBeenCalled();
 
-    expect(alertSpy).toHaveBeenCalledTimes(1);
-    expect(logout).not.toHaveBeenCalled();
+    (buttons as { text: string; onPress?: () => void }[])
+      .find((button) => button.text === 'Cerrar sesión')
+      ?.onPress?.();
 
-    const buttons = alertSpy.mock.calls[0][2] as Array<{
-      text?: string;
-      style?: string;
-      onPress?: () => void;
-    }>;
-    const confirm = buttons.find((button) => button.style === 'destructive');
-    expect(confirm).toBeDefined();
-    confirm?.onPress?.();
-
-    expect(logout).toHaveBeenCalledTimes(1);
+    expect(mockedLogout).toHaveBeenCalledTimes(1);
   });
 
   it('does not call logout() when the confirmation is dismissed', async () => {
-    const logout = jest.fn().mockResolvedValue(undefined);
-    useAuthWith({ logout });
-    const alertSpy = jest.spyOn(Alert, 'alert');
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
     await render(<HomeScreen />);
+    await fireEvent.press(screen.getByTestId('home-logout-button'));
 
-    fireEvent.press(screen.getByTestId('home-logout-button'));
+    const [, , buttons] = alertSpy.mock.calls[0];
+    (buttons as { text: string; onPress?: () => void }[])
+      .find((button) => button.text === 'Cancelar')
+      ?.onPress?.();
 
-    const buttons = alertSpy.mock.calls[0][2] as Array<{ style?: string }>;
-    expect(buttons.some((button) => button.style === 'cancel')).toBe(true);
-    expect(logout).not.toHaveBeenCalled();
+    expect(mockedLogout).not.toHaveBeenCalled();
   });
 
-  it('warns about unsynced sales in the confirmation when the queue is not empty', async () => {
-    mockedUseSync.mockReturnValue({
-      ...baseSyncValue,
-      pendingSales: [{ queueId: 'q1' }, { queueId: 'q2' }],
-    });
-    const alertSpy = jest.spyOn(Alert, 'alert');
+  it('warns about unsynced sales, which a logout would strand on this phone', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    syncWith({ pendingSales: [{ queueId: 'q1' }, { queueId: 'q2' }] });
 
     await render(<HomeScreen />);
+    await fireEvent.press(screen.getByTestId('home-logout-button'));
 
-    fireEvent.press(screen.getByTestId('home-logout-button'));
-
-    const message = alertSpy.mock.calls[0][1] as string;
-    expect(message).toContain('2');
-    expect(message).toMatch(/sin sincronizar/i);
+    expect(String(alertSpy.mock.calls[0][1])).toContain('2 ventas sin sincronizar');
   });
 
   it('does not mention unsynced sales when the queue is empty', async () => {
-    mockedUseSync.mockReturnValue({ ...baseSyncValue, pendingSales: [] });
-    const alertSpy = jest.spyOn(Alert, 'alert');
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
     await render(<HomeScreen />);
+    await fireEvent.press(screen.getByTestId('home-logout-button'));
 
-    fireEvent.press(screen.getByTestId('home-logout-button'));
-
-    const message = alertSpy.mock.calls[0][1] as string;
-    expect(message).not.toMatch(/sin sincronizar/i);
+    expect(String(alertSpy.mock.calls[0][1])).not.toContain('sin sincronizar');
   });
 });

@@ -557,6 +557,59 @@ describe('SyncContext/10.3 driver-scoped sales endpoint (PR10)', () => {
   });
 });
 
+describe('SyncContext/ventas de hoy expuestas para Inicio', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  const saleOn = (id: string, createdAt: string): SaleRecord => ({
+    id,
+    createdAt,
+    occurredAt: createdAt,
+    status: 'active',
+    driverName: 'chofer1',
+    total: 1000,
+    customerName: 'Kiosco Sur',
+    customerType: 'final',
+    paymentMethod: 'efectivo',
+    items: [],
+    kind: 'sale',
+  });
+
+  it('exposes the same rows it counted, so Inicio does not fetch /sales/mine a second time', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    globalThis.fetch = makeFetchRouter({
+      getSales: () =>
+        Promise.resolve(
+          jsonResponse([
+            saleOn('today-1', `${today}T09:00:00.000Z`),
+            saleOn('old-1', '2020-01-01T09:00:00.000Z'),
+          ]),
+        ),
+    });
+
+    const result = await renderAuthenticated();
+
+    await waitFor(() => expect(result.current.sync.todaySales).toHaveLength(1));
+    expect(result.current.sync.todaySales[0].id).toBe('today-1');
+    // Un solo pedido: el resumen y el detalle salen de la misma respuesta.
+    const salesCalls = (globalThis.fetch as jest.Mock).mock.calls.filter(
+      (call) => call[0] === 'http://localhost:4000/sales/mine',
+    );
+    expect(salesCalls).toHaveLength(1);
+  });
+
+  it('starts empty rather than undefined, so a consumer can filter before the first fetch lands', async () => {
+    globalThis.fetch = makeFetchRouter({
+      getSales: () => Promise.resolve(emptySalesResponse()),
+    });
+
+    const result = await renderAuthenticated();
+
+    expect(result.current.sync.todaySales).toEqual([]);
+  });
+});
+
 describe('SyncContext/5.x churn action reuses the offline queue (visit-container-model Unit 4)', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();

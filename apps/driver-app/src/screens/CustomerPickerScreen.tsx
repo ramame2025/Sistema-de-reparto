@@ -15,6 +15,7 @@ import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { useKeyboardAwareField } from '../components/KeyboardAwareField';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../services/apiClient';
@@ -163,6 +164,8 @@ export function CustomerPickerScreen() {
   // El alta rapida arranca cerrada: la accion normal es elegir de la lista,
   // y un formulario siempre abierto empujaba la lista fuera de la pantalla.
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  // El alta rapida se abre al pie de la lista, que es justo donde pega el teclado.
+  const quickCreateField = useKeyboardAwareField();
 
   const subtitleFor = (customer: CustomerRecord): string => {
     const type = CUSTOMER_TYPE_LABELS[customer.customerType] ?? customer.customerType;
@@ -298,6 +301,8 @@ export function CustomerPickerScreen() {
       <Card style={styles.card}>
         <Text style={styles.fieldLabel}>Cliente nuevo</Text>
         <TextInput
+          ref={quickCreateField.ref}
+          onFocus={quickCreateField.onFocus}
           style={styles.input}
           value={quickCreateName}
           onChangeText={setQuickCreateName}

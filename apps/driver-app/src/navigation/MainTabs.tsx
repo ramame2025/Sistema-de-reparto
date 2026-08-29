@@ -4,6 +4,7 @@ import { SyncScreen } from '../screens/SyncScreen';
 import { ExpensesStack } from './ExpensesStack';
 import { HomeStack } from './HomeStack';
 import { NewSaleStack } from './NewSaleStack';
+import { useSync } from '../context/SyncContext';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
 
@@ -31,6 +32,10 @@ const makeTabIcon =
  * carries primary visual emphasis (distinct active tint + bold label).
  */
 export function MainTabs() {
+  // El contador va en la barra y no dentro de la pantalla de Sincronizacion:
+  // una venta que sigue en el telefono hay que verla sin entrar a buscarla.
+  const { pendingSales } = useSync();
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -71,6 +76,9 @@ export function MainTabs() {
         component={SyncScreen}
         options={{
           tabBarIcon: makeTabIcon('sync-outline', 'tab-icon-sincronizacion'),
+          // undefined y no 0: un badge con un cero seguiria pidiendo atencion
+          // cuando ya no hay nada pendiente.
+          tabBarBadge: pendingSales.length > 0 ? pendingSales.length : undefined,
         }}
       />
     </Tab.Navigator>

@@ -1,9 +1,17 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ExpensesScreen } from '../screens/ExpensesScreen';
 import { ExpensesHistoryScreen } from '../screens/ExpensesHistoryScreen';
+import { ExpenseResultScreen } from '../screens/ExpenseResultScreen';
+import type { ExpenseCategory } from '@distribuidor/shared';
 
 export type ExpensesStackParamList = {
   Expenses: undefined;
+  /**
+   * Solo el gasto recien guardado. El resto de la pantalla (total del dia,
+   * lista, semana) se relee de la API, para que no dependa de un parametro que
+   * envejece si el chofer se queda ahi.
+   */
+  ExpenseResult: { category: ExpenseCategory; amount: number; hasReceipt: boolean };
   ExpensesHistory: undefined;
 };
 
@@ -25,6 +33,11 @@ export function ExpensesStack() {
   return (
     <Stack.Navigator initialRouteName="Expenses" screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Expenses" component={ExpensesScreen} />
+      <Stack.Screen
+        name="ExpenseResult"
+        component={ExpenseResultScreen}
+        options={{ headerShown: false }}
+      />
       <Stack.Screen
         name="ExpensesHistory"
         component={ExpensesHistoryScreen}
