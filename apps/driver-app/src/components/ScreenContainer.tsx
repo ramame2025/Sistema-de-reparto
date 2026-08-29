@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
+import { ScreenScrollContext } from './KeyboardAwareField';
 
 export type ScreenContainerProps = {
   children: React.ReactNode;
@@ -54,7 +55,10 @@ export function ScreenContainer({
   refreshing = false,
   testID,
 }: ScreenContainerProps) {
+  const scrollRef = useRef<ScrollView>(null);
+
   return (
+    <ScreenScrollContext.Provider value={scrollRef}>
     <SafeAreaView testID={testID} style={styles.container}>
       <KeyboardAvoidingView
         testID={testID ? `${testID}-keyboard-avoid` : undefined}
@@ -65,6 +69,7 @@ export function ScreenContainer({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
+          ref={scrollRef}
           testID={testID ? `${testID}-scroll` : undefined}
           contentContainerStyle={[
             styles.content,
@@ -90,6 +95,7 @@ export function ScreenContainer({
         ) : null}
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </ScreenScrollContext.Provider>
   );
 }
 
@@ -103,5 +109,10 @@ const styles = StyleSheet.create({
   },
   padded: {
     padding: spacing.md,
+    // Mas aire abajo que a los costados, a proposito: el ultimo campo de un
+    // formulario no puede subir mas alla del final del contenido. Sin este
+    // colchon, el scroll queda topado justo antes de despejarlo del teclado y
+    // el campo se ve a medias por unos pocos pixeles.
+    paddingBottom: spacing.md + spacing.lg,
   },
 });

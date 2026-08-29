@@ -14,6 +14,7 @@ import type { ExpensesStackParamList } from '../navigation/ExpensesStack';
 import { AmountField } from '../components/AmountField';
 import { EXPENSE_CATEGORY_LABELS } from '../components/ExpenseRow';
 import { ExpenseHeader } from '../components/ExpenseHeader';
+import { useKeyboardAwareField } from '../components/KeyboardAwareField';
 import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner';
 import { ReceiptCard } from '../components/ReceiptCard';
 import { SaleFooterBar } from '../components/SaleFooterBar';
@@ -50,6 +51,9 @@ export function ExpensesScreen() {
   const navigation = useNavigation<ExpensesScreenNavigationProp>();
 
   const { truck } = useTruck();
+  // "Donde fue" es el ultimo campo del formulario: sin esto el teclado lo tapa
+  // y el chofer escribe sin ver lo que escribe.
+  const noteField = useKeyboardAwareField();
 
   const [category, setCategory] = useState<ExpenseCategory>('combustible');
   // Numero, no texto: el campo grande ya normaliza lo que el chofer tipea, y
@@ -257,6 +261,8 @@ export function ExpensesScreen() {
         <Text style={styles.sectionHint}>opcional</Text>
       </View>
       <TextInput
+        ref={noteField.ref}
+        onFocus={noteField.onFocus}
         style={styles.input}
         value={note}
         onChangeText={setNote}

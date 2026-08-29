@@ -14,6 +14,7 @@ import {
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner';
+import { useKeyboardAwareField } from '../components/KeyboardAwareField';
 import { ProductRow } from '../components/ProductRow';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SegmentedPills } from '../components/SegmentedPills';
@@ -103,6 +104,9 @@ export function SaleDetailScreen() {
   const [canceling, setCanceling] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<FeedbackTone>('info');
+  // Los dos motivos viven al fondo de la pantalla, debajo de los productos.
+  const editReasonField = useKeyboardAwareField();
+  const cancelReasonField = useKeyboardAwareField();
 
   const showMessage = (text: string, tone: FeedbackTone) => {
     setMessage(text);
@@ -367,6 +371,8 @@ export function SaleDetailScreen() {
 
           <Text style={styles.fieldLabel}>Motivo de la edicion</Text>
           <TextInput
+            ref={editReasonField.ref}
+            onFocus={editReasonField.onFocus}
             style={styles.input}
             value={editReason}
             onChangeText={setEditReason}
@@ -386,6 +392,8 @@ export function SaleDetailScreen() {
         <Card style={styles.card}>
           <Text style={styles.fieldLabel}>Anular esta venta</Text>
           <TextInput
+            ref={cancelReasonField.ref}
+            onFocus={cancelReasonField.onFocus}
             style={styles.input}
             value={cancelReason}
             onChangeText={setCancelReason}
