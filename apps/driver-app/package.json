@@ -38,7 +38,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "eas-build-post-install": "cd ../.. && pnpm --filter @distribuidor/shared build"
   },
   "private": true,
   "jest": {
