@@ -21,6 +21,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "5d9d778e-840d-4253-81e6-77630a6b051a"
+      }
+    },
+    "owner": "ramame2023s-team"
   }
 }

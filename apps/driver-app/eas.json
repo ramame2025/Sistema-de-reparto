@@ -21,7 +21,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REEMPLAZAR-api-staging.up.railway.app"
+        "EXPO_PUBLIC_API_URL": "https://api-staging-a14a.up.railway.app"
       }
     },
     "production": {
