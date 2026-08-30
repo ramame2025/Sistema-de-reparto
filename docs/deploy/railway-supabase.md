@@ -132,22 +132,27 @@ Desde ahora: `main` → staging, `production` → prod.
 
 ### 5.2 Configurar el servicio `api` (env staging)
 
+> **Config as Code (`railway.json`) está deprecado** y los servicios nuevos no
+> lo leen (hard cutoff 2026-12-01). Toda la config va a mano en la UI. El
+> `Dockerfile` sigue viviendo en el repo — eso no cambia.
+
 Service `api` → **Settings**:
 
-| Setting | Valor |
-|---|---|
-| **Root Directory** | *(vacío — la raíz del repo; el build necesita el workspace entero)* |
-| **Railway Config File** | `apps/api/railway.json` |
-| **Builder** | Dockerfile *(lo toma del railway.json)* |
+| Sección | Campo | Valor |
+|---|---|---|
+| — | **Root Directory** | *(vacío — la raíz del repo; el build necesita el workspace entero)* |
+| — | **Railway Config File** | *(vacío — no apuntar a ningún `railway.json`)* |
+| Build | Builder | **Dockerfile** |
+| Build | Dockerfile Path | `apps/api/Dockerfile` |
+| Build | Watch Paths | `apps/api/**`, `packages/shared/**`, `pnpm-lock.yaml`, `package.json` |
+| Deploy | Custom Start Command | `node dist/main` |
+| Deploy | Pre-Deploy Command | `pnpm --filter api exec prisma migrate deploy` |
+| Deploy | Healthcheck Path | `/health` |
+| Deploy | Healthcheck Timeout | `120` |
+| Deploy | Restart Policy | `On Failure`, max `5` |
 
-Si tu versión de Railway no tiene el campo "Railway Config File", configurá a
-mano con estos valores (equivalen al `railway.json`):
-
-- Build → Builder: **Dockerfile**, path `apps/api/Dockerfile`
-- Deploy → Custom Start Command: `node dist/main`
-- Deploy → Pre-Deploy Command: `pnpm --filter api exec prisma migrate deploy`
-- Deploy → Healthcheck Path: `/health`
-- Deploy → Restart Policy: `On Failure`, max 5
+> Migrar a Infrastructure as Code (`.railway/railway.ts`) queda como follow-up
+> (§9). Para el primer deploy, la config en la UI alcanza y sobra.
 
 Service `api` → **Variables** (env staging) — pegá los del Supabase **staging**:
 
@@ -176,15 +181,18 @@ URL, ej. `https://api-staging-distribuidor.up.railway.app`.
 
 1. En el mismo environment: **+ New** → **GitHub Repo** → `distribuidor` otra vez.
 2. Renombralo a `dashboard`.
-3. Settings:
+3. Settings (a mano, mismo criterio que el `api` — sin `railway.json`):
 
-| Setting | Valor |
-|---|---|
-| **Root Directory** | *(vacío)* |
-| **Railway Config File** | `apps/dashboard/railway.json` |
-
-   (o a mano: Dockerfile `apps/dashboard/Dockerfile`, start `pnpm run start`,
-   healthcheck `/`)
+| Sección | Campo | Valor |
+|---|---|---|
+| — | **Root Directory** | *(vacío)* |
+| — | **Railway Config File** | *(vacío)* |
+| Build | Builder | **Dockerfile** |
+| Build | Dockerfile Path | `apps/dashboard/Dockerfile` |
+| Build | Watch Paths | `apps/dashboard/**`, `packages/shared/**`, `pnpm-lock.yaml`, `package.json` |
+| Deploy | Custom Start Command | `pnpm run start` |
+| Deploy | Healthcheck Path | `/` |
+| Deploy | Restart Policy | `On Failure`, max `5` |
 
 4. Variables (env staging):
 
@@ -336,4 +344,9 @@ de EAS. Eso es otro runbook; queda fuera de este.
 - **`ADMIN_PASSWORD` post-arranque**: el seed (`AuthService.ensureDefaultUsers`)
   solo crea el usuario si no existe; cambiarle la password después se hace por
   `PATCH /users/:id/password`, no tocando la env var.
+- **Infrastructure as Code** (`.railway/railway.ts`): reemplaza a la config
+  manual de la UI y al `railway.json` deprecado. Con el Railway CLI:
+  `npm i -g @railway/cli`, `railway login`, y desde la raíz del repo
+  `railway config migrate --apply`. Deja la config del deploy versionada y
+  revisable en el repo.
 ```
