@@ -2,35 +2,27 @@ import {
   BadRequestException,
   Controller,
   Post,
-  Req,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { FileFilterCallback } from 'multer';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { memoryStorage } from 'multer';
+import type { Request } from 'express';
 import { Roles } from '../auth/roles.decorator';
+import { StorageService } from './storage.service';
 
 @Controller('uploads')
 export class UploadsController {
+  constructor(private readonly storage: StorageService) {}
+
   @Roles('admin', 'chofer')
   @Post('receipt')
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: 'uploads',
-        filename: (
-          _req: Request,
-          file: Express.Multer.File,
-          callback: (error: Error | null, filename: string) => void,
-        ) => {
-          const extension = extname(file.originalname || '.jpg');
-          const unique = `receipt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          callback(null, `${unique}${extension}`);
-        },
-      }),
+      // Buffer in memory, then hand off to Supabase Storage. Nothing touches
+      // the local disk — Railway wipes it on every deploy.
+      storage: memoryStorage(),
       limits: {
         fileSize: 5 * 1024 * 1024,
       },
@@ -48,22 +40,18 @@ export class UploadsController {
       },
     }),
   )
-  uploadReceipt(@UploadedFile() file: Express.Multer.File, @Req() req: Request) {
+  async uploadReceipt(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('file is required');
     }
 
-    const forwardedProto = req.headers['x-forwarded-proto'];
-    const protocol =
-      typeof forwardedProto === 'string' && forwardedProto.length > 0
-        ? forwardedProto
-        : 'http';
-    const host = req.headers.host;
-    const publicUrl = `${protocol}://${host}/uploads/${file.filename}`;
+    const stored = await this.storage.uploadReceipt(file);
 
+    // `filename` kept for backwards compatibility with the mobile client,
+    // which reads `url` and stores it verbatim as the receipt reference.
     return {
-      filename: file.filename,
-      url: publicUrl,
+      filename: stored.path,
+      url: stored.url,
     };
   }
 }

@@ -1,0 +1,27 @@
+# Build context is the repo root (pnpm workspace). Keep it lean.
+**/node_modules
+**/.turbo
+**/dist
+**/.next
+**/coverage
+**/*.log
+
+# Not deployed as a service — it's an Expo mobile app.
+apps/driver-app
+
+# Local-only / generated
+apps/api/uploads
+.git
+.github
+.vscode
+.idea
+.atl
+.codegraph
+docs
+*.md
+!apps/api/README.md
+
+# Secrets never enter an image
+.env
+.env.*
+!.env.example
