@@ -320,13 +320,67 @@ Nunca se commitea directo a `production`. Solo llega ahí lo que ya pasó por
 
 ## 8. Parte F — driver-app (Expo / EAS)
 
-No va a Railway. Para que la app del chofer pegue contra estos backends:
+**No va a Railway.** Es una app nativa: corre en el teléfono del chofer, no en
+un servidor. No hay "environment de staging" — hay una **build de la app** que
+apunta a la API de staging. `EXPO_PUBLIC_API_URL` se **incrusta en el bundle**
+en tiempo de build (igual que `NEXT_PUBLIC_*` en el dashboard), así que cada
+perfil de `eas.json` lleva su propia URL adentro.
 
-- **Build de staging / QA**: `EXPO_PUBLIC_API_URL = <URL API staging>`.
-- **Build de producción**: `EXPO_PUBLIC_API_URL = <URL API producción>`.
+### 8.1 Plomería del repo (ya commiteada)
 
-Se configura en `eas.json` (perfiles `preview` / `production`) o como variable
-de EAS. Eso es otro runbook; queda fuera de este.
+| Archivo | Qué hace |
+|---|---|
+| `apps/driver-app/metro.config.js` | Metro ve la raíz del monorepo y resuelve `@distribuidor/shared` |
+| `apps/driver-app/eas.json` | Perfiles `development` / `preview` (staging) / `production` |
+| script `eas-build-post-install` en `package.json` | Compila `packages/shared` en el server de EAS antes del bundle (su `dist/` no está commiteado) |
+
+> El perfil `development` usa `developmentClient: true` y necesita el paquete
+> `expo-dev-client` (`pnpm --filter driver-app add expo-dev-client`). `preview`
+> y `production` NO lo necesitan.
+
+### 8.2 Setup por única vez
+
+```bash
+npm i -g eas-cli
+eas login                         # cuenta gratis en expo.dev
+cd apps/driver-app
+eas init                          # linkea el proyecto Expo, escribe extra.eas.projectId en app.json
+```
+
+Editá `apps/driver-app/eas.json` y reemplazá los placeholders:
+
+- `preview.env.EXPO_PUBLIC_API_URL` → dominio del servicio `api` de **staging**
+  (Railway → api → Settings → Networking → Generate Domain).
+- `production.env.EXPO_PUBLIC_API_URL` → dominio del `api` de **producción**.
+
+Commiteá el `app.json` que tocó `eas init` y el `eas.json` con las URLs reales.
+
+### 8.3 Build de staging (APK para pasar a los choferes)
+
+```bash
+cd apps/driver-app
+eas build -p android --profile preview
+```
+
+EAS compila en su nube (~10-20 min) y devuelve un **link de instalación**.
+Los choferes abren ese link en el teléfono Android e instalan el APK
+directo — sin Play Store (`distribution: "internal"`).
+
+Verificá: abrí la app instalada → login chofer → cargá una venta con foto →
+la foto tiene que subir a Supabase Storage del ambiente staging.
+
+### 8.4 Build de producción
+
+```bash
+eas build -p android --profile production   # genera un .aab para Play Store
+eas submit -p android --profile production  # (cuando tengas la cuenta de Play Console)
+```
+
+### 8.5 iOS
+
+`eas build -p ios --profile preview` necesita cuenta de Apple Developer
+(99 USD/año) para firmar. Queda fuera del alcance inicial; el negocio es
+Android-first.
 
 ---
 
