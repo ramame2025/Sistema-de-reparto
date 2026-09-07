@@ -21,6 +21,14 @@ export type ScreenContainerProps = {
   /** Agrega el padding de una pantalla larga. El scroll existe siempre. */
   scroll?: boolean;
   /**
+   * Separacion vertical entre los hijos directos de la pantalla. Es el ritmo
+   * que antes cada pantalla resolvia a mano y distinto: unas con `marginTop`,
+   * otras con `marginBottom`, otras apoyandose en el margen de un label. Aca
+   * queda en un solo lugar. `spacing.md` por defecto; pasar otro token, o 0
+   * para que la pantalla maneje su propio espaciado.
+   */
+  gap?: number;
+  /**
    * Barra fija al pie, fuera del ScrollView. Para la accion principal de una
    * pantalla larga: en Nueva Venta el chofer tiene que poder guardar sin
    * bajar hasta el final de un catalogo que crece con cada producto que el
@@ -50,6 +58,7 @@ export type ScreenContainerProps = {
 export function ScreenContainer({
   children,
   scroll = false,
+  gap = spacing.md,
   footer,
   onRefresh,
   refreshing = false,
@@ -74,6 +83,7 @@ export function ScreenContainer({
           contentContainerStyle={[
             styles.content,
             scroll ? styles.padded : null,
+            gap ? { gap } : null,
           ]}
           // Sin esto el primer toque sobre un boton solo cierra el teclado, y
           // hay que tocar dos veces para que la accion ocurra.
