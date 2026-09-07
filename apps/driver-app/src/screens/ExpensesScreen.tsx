@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { File, UploadType } from 'expo-file-system';
@@ -19,7 +19,9 @@ import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner'
 import { ReceiptCard } from '../components/ReceiptCard';
 import { SaleFooterBar } from '../components/SaleFooterBar';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SectionLabel } from '../components/SectionLabel';
 import { SegmentedPills } from '../components/SegmentedPills';
+import { TextField } from '../components/TextField';
 import { useTruck } from '../context/TruckContext';
 import { summarizeExpenses } from '../services/expenseTotals';
 import { formatJornadaTitle } from '../utils/jornada';
@@ -228,47 +230,54 @@ export function ExpensesScreen() {
         amountLabel="gastado hoy"
       />
 
-      <Text style={styles.sectionLabel}>CATEGORÍA</Text>
-      <SegmentedPills
-        options={EXPENSE_CATEGORIES.map((item) => ({
-          value: item,
-          label: EXPENSE_CATEGORY_LABELS[item],
-        }))}
-        value={category}
-        onChange={setCategory}
-        wrap
-        testID="expense-category"
-      />
-
-      <Text style={styles.sectionLabel}>MONTO</Text>
-      <AmountField value={amount} onChange={setAmount} testID="expense-amount" />
-
-      <View style={styles.sectionRow}>
-        <Text style={styles.sectionLabel}>COMPROBANTE</Text>
-        <Text style={styles.sectionHint}>recomendado</Text>
+      <View style={styles.field}>
+        <SectionLabel>CATEGORÍA</SectionLabel>
+        <SegmentedPills
+          options={EXPENSE_CATEGORIES.map((item) => ({
+            value: item,
+            label: EXPENSE_CATEGORY_LABELS[item],
+          }))}
+          value={category}
+          onChange={setCategory}
+          wrap
+          testID="expense-category"
+        />
       </View>
-      <ReceiptCard
-        receiptRef={receiptRef}
-        uploading={uploadingReceipt}
-        onCapture={() => void captureReceiptImage()}
-        onPickFromGallery={() => void pickReceiptImage()}
-        onRemove={() => setReceiptRef('')}
-        testID="expense-receipt"
-      />
 
-      <View style={styles.sectionRow}>
-        <Text style={styles.sectionLabel}>DÓNDE FUE</Text>
-        <Text style={styles.sectionHint}>opcional</Text>
+      <View style={styles.field}>
+        <SectionLabel>MONTO</SectionLabel>
+        <AmountField value={amount} onChange={setAmount} testID="expense-amount" />
       </View>
-      <TextInput
-        ref={noteField.ref}
-        onFocus={noteField.onFocus}
-        style={styles.input}
-        value={note}
-        onChangeText={setNote}
-        placeholder="YPF Ruta 8"
-        testID="expense-note"
-      />
+
+      <View style={styles.field}>
+        <View style={styles.sectionRow}>
+          <SectionLabel>COMPROBANTE</SectionLabel>
+          <Text style={styles.sectionHint}>recomendado</Text>
+        </View>
+        <ReceiptCard
+          receiptRef={receiptRef}
+          uploading={uploadingReceipt}
+          onCapture={() => void captureReceiptImage()}
+          onPickFromGallery={() => void pickReceiptImage()}
+          onRemove={() => setReceiptRef('')}
+          testID="expense-receipt"
+        />
+      </View>
+
+      <View style={styles.field}>
+        <View style={styles.sectionRow}>
+          <SectionLabel>DÓNDE FUE</SectionLabel>
+          <Text style={styles.sectionHint}>opcional</Text>
+        </View>
+        <TextField
+          ref={noteField.ref}
+          onFocus={noteField.onFocus}
+          value={note}
+          onChangeText={setNote}
+          placeholder="YPF Ruta 8"
+          testID="expense-note"
+        />
+      </View>
 
       <FeedbackBanner message={message} tone={messageTone} />
     </ScreenContainer>
@@ -276,13 +285,10 @@ export function ExpensesScreen() {
 }
 
 const styles = StyleSheet.create({
-  sectionLabel: {
-    fontSize: typography.sizes.xs,
-    fontWeight: typography.weights.bold,
-    color: colors.textSecondary,
-    letterSpacing: 0.7,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
+  // Bloque "label + control": el label pega con su control; la separacion con
+  // el bloque siguiente la pone el `gap` de ScreenContainer.
+  field: {
+    gap: spacing.sm,
   },
   sectionRow: {
     flexDirection: 'row',
@@ -292,38 +298,5 @@ const styles = StyleSheet.create({
   sectionHint: {
     fontSize: typography.sizes.xs,
     color: colors.textSecondary,
-  },
-  fieldLabel: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  apiHint: {
-    fontSize: typography.sizes.xs,
-    color: colors.textSecondary,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.surface,
-  },
-  segmentRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  receiptPreviewWrap: {
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
-  },
-  receiptPreview: {
-    width: '100%',
-    height: 160,
-    borderRadius: 10,
-    marginTop: spacing.xs,
   },
 });

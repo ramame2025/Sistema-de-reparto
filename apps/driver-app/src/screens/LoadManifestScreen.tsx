@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -11,6 +11,9 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { ScreenHeading } from '../components/ScreenHeading';
+import { SectionLabel } from '../components/SectionLabel';
+import { TextField } from '../components/TextField';
 import { useAuth } from '../context/AuthContext';
 import { useTruck } from '../context/TruckContext';
 import { useCatalog } from '../context/CatalogContext';
@@ -196,10 +199,10 @@ export function LoadManifestScreen() {
 
   return (
     <ScreenContainer testID="load-manifest-screen" scroll>
-      <Text style={styles.tag}>Distribuidor · App chofer</Text>
+      <ScreenHeading eyebrow="Distribuidor · App chofer" />
 
       <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Cargar camion</Text>
+        <SectionLabel variant="field">Cargar camion</SectionLabel>
         <Text style={styles.apiHint}>Chofer: {username}</Text>
         {truck && (
           <Text style={styles.assignedTruck} testID="load-manifest-assigned-truck">
@@ -221,7 +224,7 @@ export function LoadManifestScreen() {
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Productos</Text>
+        <SectionLabel variant="field">Productos</SectionLabel>
         {products.map((product) => (
           <View key={product.code} style={styles.productRow}>
             <Text style={styles.productName}>{product.name}</Text>
@@ -250,7 +253,7 @@ export function LoadManifestScreen() {
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Foto del remito (opcional)</Text>
+        <SectionLabel variant="field">Foto del remito (opcional)</SectionLabel>
         <Button
           label={uploadingPhoto ? 'Subiendo foto...' : 'Adjuntar desde galeria'}
           variant="secondary"
@@ -279,9 +282,8 @@ export function LoadManifestScreen() {
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Nota (opcional)</Text>
-        <TextInput
-          style={styles.input}
+        <SectionLabel variant="field">Nota (opcional)</SectionLabel>
+        <TextField
           value={note}
           onChangeText={setNote}
           placeholder="Nota (opcional)"
@@ -303,41 +305,22 @@ export function LoadManifestScreen() {
 }
 
 const styles = StyleSheet.create({
-  tag: {
-    color: colors.primary,
-    fontWeight: typography.weights.bold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
-    marginBottom: spacing.sm,
-  },
+  // El espaciado ENTRE cards lo pone el `gap` de ScreenContainer; la card solo
+  // define la separacion de su contenido interno.
   card: {
     gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  fieldLabel: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
   },
   assignedTruck: {
-    fontWeight: '600',
-    marginBottom: 8,
+    fontWeight: typography.weights.semibold,
+    color: colors.textPrimary,
   },
   truckProblem: {
-    marginBottom: 8,
+    color: colors.error,
+    fontSize: typography.sizes.sm,
   },
   apiHint: {
     fontSize: typography.sizes.xs,
     color: colors.textSecondary,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.surface,
   },
   photoPreviewWrap: {
     marginTop: spacing.xs,

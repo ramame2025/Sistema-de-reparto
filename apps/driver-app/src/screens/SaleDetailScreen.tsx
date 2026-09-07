@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -17,7 +17,9 @@ import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner'
 import { useKeyboardAwareField } from '../components/KeyboardAwareField';
 import { ProductRow } from '../components/ProductRow';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SectionLabel } from '../components/SectionLabel';
 import { SegmentedPills } from '../components/SegmentedPills';
+import { TextField } from '../components/TextField';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import type { HomeStackParamList } from '../navigation/HomeStack';
@@ -329,7 +331,7 @@ export function SaleDetailScreen() {
 
       {sale.items.length > 0 && (
         <Card style={styles.card}>
-          <Text style={styles.fieldLabel}>Productos</Text>
+          <SectionLabel variant="field">Productos</SectionLabel>
           {sale.items.map((item) => (
             <ProductRow
               key={item.productCode}
@@ -346,7 +348,7 @@ export function SaleDetailScreen() {
 
       {isEditable && sale.paymentMethod !== 'efectivo' && !proofRef && (
         <Card style={styles.card}>
-          <Text style={styles.fieldLabel}>Falta el comprobante</Text>
+          <SectionLabel variant="field">Falta el comprobante</SectionLabel>
           <Text style={styles.meta}>
             Esta venta no se cobró en efectivo y no tiene comprobante adjunto.
           </Text>
@@ -361,7 +363,7 @@ export function SaleDetailScreen() {
 
       {isEditable && (
         <Card style={styles.card}>
-          <Text style={styles.fieldLabel}>Cobro</Text>
+          <SectionLabel variant="field">Cobro</SectionLabel>
           <SegmentedPills
             options={PAYMENT_OPTIONS}
             value={paymentMethod}
@@ -369,11 +371,10 @@ export function SaleDetailScreen() {
             testID="sale-detail-payment"
           />
 
-          <Text style={styles.fieldLabel}>Motivo de la edicion</Text>
-          <TextInput
+          <SectionLabel variant="field">Motivo de la edicion</SectionLabel>
+          <TextField
             ref={editReasonField.ref}
             onFocus={editReasonField.onFocus}
-            style={styles.input}
             value={editReason}
             onChangeText={setEditReason}
             placeholder="Por que cambia esta venta"
@@ -390,11 +391,10 @@ export function SaleDetailScreen() {
 
       {!isCanceled && (
         <Card style={styles.card}>
-          <Text style={styles.fieldLabel}>Anular esta venta</Text>
-          <TextInput
+          <SectionLabel variant="field">Anular esta venta</SectionLabel>
+          <TextField
             ref={cancelReasonField.ref}
             onFocus={cancelReasonField.onFocus}
-            style={styles.input}
             value={cancelReason}
             onChangeText={setCancelReason}
             placeholder="Motivo de anulacion"
@@ -425,12 +425,6 @@ export function SaleDetailScreen() {
 const styles = StyleSheet.create({
   card: {
     gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  fieldLabel: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
   },
   customer: {
     fontSize: typography.sizes.lg,
@@ -459,13 +453,5 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.bold,
     color: colors.error,
     letterSpacing: 0.7,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.surface,
   },
 });

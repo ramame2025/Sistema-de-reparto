@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { ApiError } from '../services/apiClient';
 import { AuthRoleError, useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
@@ -7,9 +7,10 @@ import { Card } from '../components/Card';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { PasswordInput } from '../components/PasswordInput';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { colors } from '../theme/colors';
+import { ScreenHeading } from '../components/ScreenHeading';
+import { SectionLabel } from '../components/SectionLabel';
+import { TextField } from '../components/TextField';
 import { spacing } from '../theme/spacing';
-import { typography } from '../theme/typography';
 
 export function LoginScreen() {
   const { login, loading } = useAuth();
@@ -33,11 +34,10 @@ export function LoginScreen() {
   return (
     <ScreenContainer testID="login-screen">
       <View style={styles.centered}>
-        <Text style={styles.tag}>Distribuidor · App chofer</Text>
+        <ScreenHeading eyebrow="Distribuidor · App chofer" />
         <Card style={styles.card}>
-          <Text style={styles.fieldLabel}>Login chofer</Text>
-          <TextInput
-            style={styles.input}
+          <SectionLabel variant="field">Login chofer</SectionLabel>
+          <TextField
             value={username}
             onChangeText={setUsername}
             placeholder="Usuario"
@@ -67,31 +67,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
-  },
-  tag: {
-    color: colors.primary,
-    fontWeight: typography.weights.bold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
-    marginBottom: spacing.sm,
+    gap: spacing.md,
   },
   card: {
     gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  fieldLabel: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.sm,
-    backgroundColor: colors.surface,
   },
 });

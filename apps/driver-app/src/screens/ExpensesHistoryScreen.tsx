@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
 import type { ExpenseCategory, ExpenseRecord } from '@distribuidor/shared';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
+import { LoadingRow } from '../components/LoadingRow';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { ScreenHeading } from '../components/ScreenHeading';
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
@@ -79,15 +81,12 @@ export function ExpensesHistoryScreen() {
   return (
     <ScreenContainer testID="expenses-history-screen">
       <View style={styles.wrap}>
-        <Text style={styles.fieldLabel}>Historial de gastos</Text>
+        <ScreenHeading title="Historial de gastos" />
 
         {error ? (
           <FeedbackBanner message={error} tone="error" />
         ) : loading ? (
-          <View style={styles.loadingRow} testID="expenses-history-loading">
-            <ActivityIndicator color={colors.primary} />
-            <Text style={styles.loadingText}>Cargando tu historial...</Text>
-          </View>
+          <LoadingRow label="Cargando tu historial..." testID="expenses-history-loading" />
         ) : expenses.length === 0 ? (
           <EmptyState
             title="Todavía no registraste gastos"
@@ -124,27 +123,15 @@ export function ExpensesHistoryScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Historial sin `scroll`: el FlatList es el unico contenedor scrolleable.
+  // El `gap` iguala la separacion heading <-> lista al resto de la app.
   wrap: {
     flex: 1,
     padding: spacing.md,
-  },
-  fieldLabel: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
+    gap: spacing.md,
   },
   listContent: {
     paddingBottom: spacing.md,
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
   },
   row: {
     borderBottomWidth: 1,
