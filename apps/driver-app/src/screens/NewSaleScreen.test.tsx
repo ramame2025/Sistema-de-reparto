@@ -52,7 +52,7 @@ jest.mock('@react-navigation/native', () => {
 });
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import * as ExpoFileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -244,6 +244,46 @@ describe('NewSaleScreen/online success', () => {
     });
     expect(screen.getByTestId('sale-footer-total')).toHaveTextContent('$0');
     expect(mockedRefreshDaySummary).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('NewSaleScreen/doble-tap en Guardar venta', () => {
+  // El bug: entre el tap y el momento en que el boton se ponia gris habia un
+  // await captureDeviceLocation() de hasta 8s. Durante esa ventana el boton
+  // seguia vivo, y cada tap extra generaba un clientGeneratedId nuevo -> una
+  // venta distinta por cada vez que el chofer apreto.
+  it('ignores taps while the first sale is still in flight, sending it only once', async () => {
+    // La primera venta queda colgada en trySendSale (promesa controlada): es
+    // la ventana donde antes el boton seguia vivo. El candado sincronico ya
+    // esta tomado -- se tomo antes del await del GPS -- asi que los taps
+    // siguientes tienen que rebotar sin generar otra venta.
+    let resolveSale: (value: string) => void = () => {};
+    mockedTrySendSale.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveSale = resolve;
+        }),
+    );
+
+    await renderSaleScreen('Kiosco La Esquina');
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+
+    const action = screen.getByTestId('sale-footer-action');
+    await fireEvent.press(action);
+    await fireEvent.press(action);
+    await fireEvent.press(action);
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveSale('sale-1');
+    });
+
+    await waitFor(() =>
+      expect(mockedNavigate).toHaveBeenCalledWith('SaleResult', expect.anything()),
+    );
+    expect(mockedTrySendSale).toHaveBeenCalledTimes(1);
+    expect(mockedEnqueueSale).not.toHaveBeenCalled();
   });
 });
 

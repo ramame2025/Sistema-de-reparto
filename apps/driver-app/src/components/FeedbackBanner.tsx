@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -39,8 +40,10 @@ export function FeedbackBanner({ message, tone, testID }: FeedbackBannerProps) {
 const styles = StyleSheet.create({
   banner: {
     padding: spacing.sm,
-    borderRadius: spacing.xs,
-    marginBottom: spacing.sm,
+    borderRadius: radii.sm,
+    // Sin marginBottom propio: el espaciado entre bloques lo pone el `gap` de
+    // ScreenContainer. Cuando no hay mensaje el componente devuelve null y el
+    // gap no deja hueco fantasma.
   },
   text: {
     color: colors.surface,

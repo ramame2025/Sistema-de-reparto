@@ -1,4 +1,5 @@
 import { colors } from './colors';
+import { radii } from './radii';
 import { spacing, MIN_TOUCH_TARGET } from './spacing';
 
 describe('theme/colors', () => {
@@ -36,11 +37,17 @@ describe('theme/colors', () => {
 });
 
 describe('theme/spacing', () => {
-  it('exposes the 4/8/16/24 spacing scale', () => {
-    expect(spacing).toEqual({ xs: 4, sm: 8, md: 16, lg: 24 });
+  it('exposes the 4/8/16/24/32 spacing scale', () => {
+    expect(spacing).toEqual({ xs: 4, sm: 8, md: 16, lg: 24, xl: 32 });
   });
 
   it('exposes MIN_TOUCH_TARGET as 48', () => {
     expect(MIN_TOUCH_TARGET).toBe(48);
+  });
+});
+
+describe('theme/radii', () => {
+  it('exposes the named border-radius scale', () => {
+    expect(radii).toEqual({ sm: 8, md: 10, lg: 16, pill: 999 });
   });
 });

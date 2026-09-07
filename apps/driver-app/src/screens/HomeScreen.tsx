@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { LoadManifestRecord, MyAssignedCustomersResponse } from '@distribuidor/shared';
@@ -7,8 +7,10 @@ import { Card } from '../components/Card';
 import { DayStatusCard } from '../components/DayStatusCard';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { JornadaHeader } from '../components/JornadaHeader';
+import { LoadingRow } from '../components/LoadingRow';
 import { ProgressBar } from '../components/ProgressBar';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SectionLabel } from '../components/SectionLabel';
 import { StatTile } from '../components/StatTile';
 import { SummaryRow } from '../components/SummaryRow';
 import { useAuth } from '../context/AuthContext';
@@ -205,10 +207,7 @@ export function HomeScreen() {
       {summaryError ? (
         <FeedbackBanner message={summaryError} tone="error" />
       ) : summaryLoading ? (
-        <View style={styles.loadingRow} testID="home-summary-loading">
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Actualizando resumen...</Text>
-        </View>
+        <LoadingRow label="Actualizando resumen..." testID="home-summary-loading" />
       ) : (
         <DayStatusCard
           testID="home-day-status"
@@ -222,7 +221,7 @@ export function HomeScreen() {
       <Card style={styles.card}>
         <View style={styles.cobradoRow}>
           <View>
-            <Text style={styles.sectionLabel}>COBRADO HOY</Text>
+            <SectionLabel>COBRADO HOY</SectionLabel>
             <Text style={styles.cobrado} testID="home-cobrado-hoy">
               {formatArs(daySummary.activeTotal)}
             </Text>
@@ -318,15 +317,9 @@ export function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  // La separacion ENTRE cards la pone el `gap` de ScreenContainer.
   card: {
     gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  sectionLabel: {
-    fontSize: typography.sizes.xs,
-    fontWeight: typography.weights.bold,
-    color: colors.textSecondary,
-    letterSpacing: 0.7,
   },
   cobradoRow: {
     flexDirection: 'row',
@@ -355,21 +348,13 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.xs,
     color: colors.textSecondary,
   },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
+  // La zona de cuenta/sesion se separa a proposito mas que el resto: cierra la
+  // pantalla y no compite con el contenido del dia.
   session: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
   },
   sessionLine: {
     fontSize: typography.sizes.xs,

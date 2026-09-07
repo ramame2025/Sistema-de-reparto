@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,12 +9,15 @@ import { Card } from '../components/Card';
 import { EXPENSE_CATEGORY_LABELS, ExpenseRow } from '../components/ExpenseRow';
 import { ExpenseHeader } from '../components/ExpenseHeader';
 import { FeedbackBanner } from '../components/FeedbackBanner';
+import { LoadingRow } from '../components/LoadingRow';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SectionLabel } from '../components/SectionLabel';
 import { SummaryRow } from '../components/SummaryRow';
 import { useAuth } from '../context/AuthContext';
 import type { ExpensesStackParamList } from '../navigation/ExpensesStack';
 import { summarizeExpenses, todayExpensesOf } from '../services/expenseTotals';
 import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -117,13 +120,10 @@ export function ExpenseResultScreen() {
           <FeedbackBanner message={error} tone="error" />
         </View>
       ) : loading && expenses.length === 0 ? (
-        <View style={styles.loadingRow} testID="expense-result-loading">
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Cargando tus gastos...</Text>
-        </View>
+        <LoadingRow label="Cargando tus gastos..." testID="expense-result-loading" />
       ) : (
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>HOY</Text>
+          <SectionLabel>HOY</SectionLabel>
           {today.map((expense) => (
             <ExpenseRow
               key={expense.id}
@@ -165,10 +165,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderLeftColor: colors.success,
     borderLeftWidth: 4,
-    borderRadius: spacing.sm,
+    borderRadius: radii.sm,
     padding: spacing.md,
-    marginTop: spacing.md,
-    marginBottom: spacing.md,
   },
   savedBadge: {
     width: 32,
@@ -193,27 +191,9 @@ const styles = StyleSheet.create({
   },
   section: {
     gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  sectionLabel: {
-    fontSize: typography.sizes.xs,
-    fontWeight: typography.weights.bold,
-    color: colors.textSecondary,
-    letterSpacing: 0.7,
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
   },
   weekCard: {
     gap: spacing.sm,
-    marginTop: spacing.md,
   },
   weekRow: {
     flexDirection: 'row',

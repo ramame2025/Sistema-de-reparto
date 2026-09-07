@@ -5,6 +5,8 @@ import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { ScreenHeading } from '../components/ScreenHeading';
+import { SectionLabel } from '../components/SectionLabel';
 import { StatusBadge } from '../components/StatusBadge';
 import { useSync } from '../context/SyncContext';
 import { colors } from '../theme/colors';
@@ -56,10 +58,10 @@ export function SyncScreen() {
 
   return (
     <ScreenContainer testID="sync-screen" scroll>
-      <Text style={styles.tag}>Distribuidor · App chofer</Text>
+      <ScreenHeading eyebrow="Distribuidor · App chofer" />
 
       <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Cola de sincronizacion</Text>
+        <SectionLabel variant="field">Cola de sincronizacion</SectionLabel>
 
         {pendingSales.length === 0 ? (
           <EmptyState
@@ -104,25 +106,11 @@ export function SyncScreen() {
 }
 
 const styles = StyleSheet.create({
-  tag: {
-    color: colors.primary,
-    fontWeight: typography.weights.bold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
-    marginBottom: spacing.sm,
-  },
   card: {
     gap: spacing.sm,
   },
-  fieldLabel: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
   list: {
     gap: spacing.sm,
-    marginBottom: spacing.sm,
   },
   entryCard: {
     gap: spacing.xs,

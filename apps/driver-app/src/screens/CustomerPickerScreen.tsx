@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -14,7 +14,10 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
+import { LoadingRow } from '../components/LoadingRow';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SectionLabel } from '../components/SectionLabel';
+import { TextField } from '../components/TextField';
 import { useKeyboardAwareField } from '../components/KeyboardAwareField';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAuth } from '../context/AuthContext';
@@ -23,6 +26,7 @@ import { captureDeviceLocation, type CapturedLocation } from '../services/locati
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { formatDistance } from '../utils/distance';
 import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -230,8 +234,7 @@ export function CustomerPickerScreen() {
 
   return (
     <ScreenContainer testID="customer-picker-screen" scroll>
-      <TextInput
-        style={styles.search}
+      <TextField
         value={searchText}
         onChangeText={setSearchText}
         placeholder="Buscar por nombre"
@@ -241,10 +244,7 @@ export function CustomerPickerScreen() {
       {error && <FeedbackBanner message={error} tone="error" />}
 
       {loading ? (
-        <View style={styles.loadingRow} testID="customer-picker-loading">
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Cargando clientes...</Text>
-        </View>
+        <LoadingRow label="Cargando clientes..." testID="customer-picker-loading" />
       ) : visibleCustomers.length === 0 ? (
         <EmptyState
           title="Sin resultados"
@@ -299,11 +299,10 @@ export function CustomerPickerScreen() {
 
       {quickCreateOpen && (
       <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Cliente nuevo</Text>
-        <TextInput
+        <SectionLabel variant="field">Cliente nuevo</SectionLabel>
+        <TextField
           ref={quickCreateField.ref}
           onFocus={quickCreateField.onFocus}
-          style={styles.input}
           value={quickCreateName}
           onChangeText={setQuickCreateName}
           placeholder="Nombre del cliente nuevo"
@@ -366,42 +365,8 @@ const CUSTOMER_TYPE_LABELS: Record<string, string> = {
 };
 
 const styles = StyleSheet.create({
-  search: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.surface,
-    marginBottom: spacing.md,
-  },
   card: {
     gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  fieldLabel: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.surface,
   },
   customerRow: {
     flexDirection: 'row',
@@ -433,7 +398,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.warning,
     backgroundColor: colors.surface,
-    borderRadius: 10,
+    borderRadius: radii.md,
     padding: spacing.sm,
     gap: spacing.sm,
   },

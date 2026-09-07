@@ -6,6 +6,7 @@ import type { PaymentMethod } from '@distribuidor/shared';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SectionLabel } from '../components/SectionLabel';
 import { useSync } from '../context/SyncContext';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { colors } from '../theme/colors';
@@ -74,14 +75,14 @@ export function SaleResultScreen() {
       <Card style={styles.card}>
         {sent ? (
           <>
-            <Text style={styles.cardLabel}>JORNADA</Text>
+            <SectionLabel>JORNADA</SectionLabel>
             <Text style={styles.cardValue} testID="sale-result-day">
               {dayLine}
             </Text>
           </>
         ) : (
           <>
-            <Text style={styles.cardLabel}>EN COLA</Text>
+            <SectionLabel>EN COLA</SectionLabel>
             <Text style={styles.cardValue} testID="sale-result-queue">
               {queuedCount} {queuedCount === 1 ? 'venta esperando' : 'ventas esperando'}
             </Text>
@@ -153,13 +154,6 @@ const styles = StyleSheet.create({
   },
   card: {
     gap: spacing.xs,
-    marginBottom: spacing.md,
-  },
-  cardLabel: {
-    fontSize: typography.sizes.xs,
-    fontWeight: typography.weights.bold,
-    color: colors.textSecondary,
-    letterSpacing: 0.7,
   },
   cardValue: {
     fontSize: typography.sizes.md,
@@ -170,7 +164,6 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET,
     textAlignVertical: 'center',
     textAlign: 'center',
-    paddingTop: spacing.md,
     fontSize: typography.sizes.sm,
     fontWeight: typography.weights.bold,
     color: colors.secondary,

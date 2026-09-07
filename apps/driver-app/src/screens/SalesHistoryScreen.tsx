@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { PaymentMethod, SaleRecord } from '@distribuidor/shared';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
+import { LoadingRow } from '../components/LoadingRow';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { ScreenHeading } from '../components/ScreenHeading';
 import { useAuth } from '../context/AuthContext';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { colors } from '../theme/colors';
@@ -84,15 +86,12 @@ export function SalesHistoryScreen() {
   return (
     <ScreenContainer testID="sales-history-screen">
       <View style={styles.wrap}>
-        <Text style={styles.fieldLabel}>Historial de ventas</Text>
+        <ScreenHeading title="Historial de ventas" />
 
         {error ? (
           <FeedbackBanner message={error} tone="error" />
         ) : loading ? (
-          <View style={styles.loadingRow} testID="sales-history-loading">
-            <ActivityIndicator color={colors.primary} />
-            <Text style={styles.loadingText}>Cargando tu historial...</Text>
-          </View>
+          <LoadingRow label="Cargando tu historial..." testID="sales-history-loading" />
         ) : sales.length === 0 ? (
           <EmptyState
             title="Todavía no registraste ventas"
@@ -139,27 +138,16 @@ export function SalesHistoryScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Estas pantallas de historial NO usan `scroll`: el FlatList es el unico
+  // contenedor scrolleable (no anidar VirtualizedList). El `wrap` con flex:1
+  // le da altura; el `gap` iguala la separacion heading <-> lista al resto.
   wrap: {
     flex: 1,
     padding: spacing.md,
-  },
-  fieldLabel: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
+    gap: spacing.md,
   },
   listContent: {
     paddingBottom: spacing.md,
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
   },
   row: {
     borderBottomWidth: 1,

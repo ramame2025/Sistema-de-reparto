@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 import { spacing, MIN_TOUCH_TARGET } from '../theme/spacing';
 
 const ICON_SIZE = 22;
@@ -69,14 +70,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 10,
+    borderRadius: radii.md,
     backgroundColor: colors.surface,
-    marginBottom: spacing.sm,
   },
   input: {
     flex: 1,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    color: colors.textPrimary,
+    minHeight: 44,
   },
   toggle: {
     minWidth: MIN_TOUCH_TARGET,

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
 import type { CustomerRecord, MyAssignedCustomersResponse } from '@distribuidor/shared';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
+import { LoadingRow } from '../components/LoadingRow';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SectionLabel } from '../components/SectionLabel';
 import { useAuth } from '../context/AuthContext';
 import { localDay } from '../context/TruckContext';
 import { colors } from '../theme/colors';
@@ -68,15 +70,12 @@ export function AssignedCustomersScreen() {
   return (
     <ScreenContainer testID="assigned-customers-screen" scroll>
       <Card style={styles.card}>
-        <Text style={styles.fieldLabel}>Clientes de hoy</Text>
+        <SectionLabel variant="field">Clientes de hoy</SectionLabel>
 
         {error ? (
           <FeedbackBanner message={error} tone="error" />
         ) : loading ? (
-          <View style={styles.loadingRow} testID="assigned-customers-loading">
-            <ActivityIndicator color={colors.primary} />
-            <Text style={styles.loadingText}>Cargando clientes de hoy...</Text>
-          </View>
+          <LoadingRow label="Cargando clientes de hoy..." testID="assigned-customers-loading" />
         ) : customers.length === 0 ? (
           <EmptyState
             title="No tenes clientes asignados hoy"
@@ -103,21 +102,6 @@ export function AssignedCustomersScreen() {
 const styles = StyleSheet.create({
   card: {
     gap: spacing.sm,
-  },
-  fieldLabel: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
   },
   customerRow: {
     flexDirection: 'row',
