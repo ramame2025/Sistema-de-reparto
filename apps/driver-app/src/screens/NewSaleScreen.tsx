@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -22,6 +22,7 @@ import { ProductRow } from '../components/ProductRow';
 import { SaleFooterBar } from '../components/SaleFooterBar';
 import { SaleHeader } from '../components/SaleHeader';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SectionLabel } from '../components/SectionLabel';
 import { SegmentedPills } from '../components/SegmentedPills';
 import { ToggleRow } from '../components/ToggleRow';
 import { useAuth } from '../context/AuthContext';
@@ -33,6 +34,7 @@ import { ApiError } from '../services/apiClient';
 import { API_URL } from '../services/config';
 import { captureDeviceLocation } from '../services/location';
 import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -113,6 +115,12 @@ export function NewSaleScreen() {
   const [uploadingProof, setUploadingProof] = useState(false);
   const [saving, setSaving] = useState(false);
   const [recordingVisit, setRecordingVisit] = useState(false);
+  // Candado SINCRONICO contra el doble-tap. `saving`/`recordingVisit` son
+  // estado de React (asincrono): entre el tap y el re-render que pinta el
+  // boton gris caben varios taps mas, y cada uno dispara otra venta con su
+  // propio clientGeneratedId. Un ref se setea en el acto, sin esperar render,
+  // asi que corta la reentrancy antes de que empiece el await del GPS.
+  const submittingRef = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<FeedbackTone>('info');
   const [lastSale, setLastSale] = useState<{ customerName: string; total: number } | null>(null);
@@ -271,6 +279,13 @@ export function NewSaleScreen() {
   };
 
   const saveSale = async () => {
+    // Primera linea: si ya hay una venta en vuelo, este tap no existe. Corta
+    // antes de generar un clientGeneratedId nuevo y antes del await del GPS,
+    // que es la ventana de ~8s donde el chofer alcanzaba a apretar 3 o 4
+    // veces mas y grababa la venta una vez por tap.
+    if (submittingRef.current) {
+      return;
+    }
     setMessage(null);
 
     // Sin camion asignado la venta quedaria sin unidad: se corta antes de
@@ -290,6 +305,12 @@ export function NewSaleScreen() {
       showMessage('Agrega al menos un producto antes de guardar.', 'error');
       return;
     }
+
+    // A partir de aca la venta va a intentarse de verdad. Tomamos el candado
+    // sincronico y pintamos el boton ANTES del await del GPS, no despues: ese
+    // era el bug -- setSaving(true) vivia recien despues de captureDeviceLocation.
+    submittingRef.current = true;
+    setSaving(true);
 
     // Punto en el tiempo (point-in-time-geolocation): se captura aca, justo
     // antes de armar el payload final, no al montar la pantalla -- ver el
@@ -329,13 +350,14 @@ export function NewSaleScreen() {
     const validationErrors = validateCreateSaleInput(payload);
     if (validationErrors.length > 0) {
       showMessage(validationErrors[0], 'error');
+      submittingRef.current = false;
+      setSaving(false);
       return;
     }
 
     const soldTotal = total;
 
     try {
-      setSaving(true);
       await trySendSale(payload);
       setLastSale({ customerName, total: soldTotal });
       resetAfterSale();
@@ -362,6 +384,7 @@ export function NewSaleScreen() {
         paymentMethod,
       });
     } finally {
+      submittingRef.current = false;
       setSaving(false);
     }
   };
@@ -375,6 +398,11 @@ export function NewSaleScreen() {
    * en SyncContext) para que tambien funcione sin señal.
    */
   const recordVisit = async () => {
+    // Mismo candado que saveSale: es el mismo boton del pie, y un doble-tap
+    // aca encolaba/mandaba la visita sin venta dos veces.
+    if (submittingRef.current) {
+      return;
+    }
     setMessage(null);
 
     if (!truck) {
@@ -404,6 +432,8 @@ export function NewSaleScreen() {
       return;
     }
 
+    submittingRef.current = true;
+
     try {
       setRecordingVisit(true);
       const visitId = await trySendEmptyVisit(payload);
@@ -421,6 +451,7 @@ export function NewSaleScreen() {
       );
       resetAfterSale();
     } finally {
+      submittingRef.current = false;
       setRecordingVisit(false);
     }
   };
@@ -538,18 +569,20 @@ export function NewSaleScreen() {
         ))}
       </View>
 
-      <Text style={styles.sectionLabel}>COBRO</Text>
-      <SegmentedPills
-        options={PAYMENT_OPTIONS}
-        value={paymentMethod}
-        onChange={setPaymentMethod}
-        testID="new-sale-payment"
-      />
+      <View style={styles.field}>
+        <SectionLabel>COBRO</SectionLabel>
+        <SegmentedPills
+          options={PAYMENT_OPTIONS}
+          value={paymentMethod}
+          onChange={setPaymentMethod}
+          testID="new-sale-payment"
+        />
+      </View>
 
       {paymentMethod !== 'efectivo' && (
         <View style={styles.proof}>
           <View style={styles.sectionRow}>
-            <Text style={styles.sectionLabel}>COMPROBANTE</Text>
+            <SectionLabel>COMPROBANTE</SectionLabel>
             <Text style={styles.optional}>opcional</Text>
           </View>
           <View style={styles.proofButtons}>
@@ -607,15 +640,11 @@ export function NewSaleScreen() {
 const styles = StyleSheet.create({
   products: {
     gap: spacing.sm,
-    marginTop: spacing.md,
   },
-  sectionLabel: {
-    fontSize: typography.sizes.xs,
-    fontWeight: typography.weights.bold,
-    color: colors.textSecondary,
-    letterSpacing: 0.7,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
+  // Un bloque "label + control": el label pega con su control (gap chico), y
+  // la separacion con el bloque siguiente la pone el `gap` de ScreenContainer.
+  field: {
+    gap: spacing.sm,
   },
   sectionRow: {
     flexDirection: 'row',
@@ -643,12 +672,11 @@ const styles = StyleSheet.create({
   receiptPreview: {
     width: '100%',
     height: 160,
-    borderRadius: 10,
+    borderRadius: radii.md,
     marginTop: spacing.xs,
   },
   lastSale: {
     fontSize: typography.sizes.xs,
     color: colors.textSecondary,
-    marginTop: spacing.md,
   },
 });
