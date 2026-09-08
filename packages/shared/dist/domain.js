@@ -43,6 +43,7 @@ export const EXPENSE_CATEGORIES = [
 export const USER_ROLES = ['admin', 'chofer'];
 export const ASSIGNMENT_KINDS = ['titular', 'cobertura'];
 export const SALE_KINDS = ['sale', 'churn'];
+export const DRIVER_CUSTOMER_ASSIGNMENT_HISTORY_PAGE_SIZE = 15;
 export const DEFAULT_PRICE_TABLE = {
     final: { G10: 8500, G15: 13000, G45: 39000, G15_AUTO: 14500 },
     comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },

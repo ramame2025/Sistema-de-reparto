@@ -1,9 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import type {
-  CreateDriverCustomerAssignmentInput,
-  CustomerRecord,
-  CustomerType,
-  DriverCustomerAssignmentRecord,
+import {
+  DRIVER_CUSTOMER_ASSIGNMENT_HISTORY_PAGE_SIZE,
+  type CreateDriverCustomerAssignmentInput,
+  type CustomerRecord,
+  type CustomerType,
+  type DriverCustomerAssignmentHistoryQuery,
+  type DriverCustomerAssignmentHistoryResponse,
+  type DriverCustomerAssignmentRecord,
 } from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -110,6 +113,63 @@ export class DriverCustomerAssignmentsService {
     }
 
     return assignment.entries.map((entry) => this.toCustomerRecord(entry.customer));
+  }
+
+  /**
+   * Historial paginado para la vista admin: siempre 15 por pagina, mas nuevo
+   * primero. `page`, `total` y `totalPages` salen ya normalizados (page >= 1,
+   * totalPages >= 1) para que el pager del dashboard no recalcule nada.
+   * `count` y `findMany` comparten el mismo `where` para que el total sea
+   * coherente con la pagina.
+   */
+  async listAssignmentHistory(
+    query: DriverCustomerAssignmentHistoryQuery,
+  ): Promise<DriverCustomerAssignmentHistoryResponse> {
+    const pageSize = DRIVER_CUSTOMER_ASSIGNMENT_HISTORY_PAGE_SIZE;
+    const requestedPage = query.page;
+    const page =
+      typeof requestedPage === 'number' &&
+      Number.isFinite(requestedPage) &&
+      requestedPage >= 1
+        ? Math.floor(requestedPage)
+        : 1;
+
+    const dateRange: { gte?: Date; lte?: Date } = {};
+    if (query.from) {
+      dateRange.gte = toUtcDay(query.from);
+    }
+    if (query.to) {
+      dateRange.lte = toUtcDay(query.to);
+    }
+
+    const where = {
+      ...(query.driverId ? { driverId: query.driverId } : {}),
+      ...(dateRange.gte || dateRange.lte ? { date: dateRange } : {}),
+      ...(query.customerId
+        ? { entries: { some: { customerId: query.customerId } } }
+        : {}),
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.driverCustomerAssignment.count({ where }),
+      this.prisma.driverCustomerAssignment.findMany({
+        where,
+        include: {
+          entries: { include: { customer: true }, orderBy: { position: 'asc' } },
+        },
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }) as Promise<AssignmentRow[]>,
+    ]);
+
+    return {
+      items: rows.map((row) => this.toRecord(row)),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    };
   }
 
   async listAssignments(

@@ -11,7 +11,14 @@ import {
 } from "@distribuidor/shared";
 import { useApiClient } from "../../../context/AuthContext";
 import { LocationPicker, type LocationValue } from "../../../components/LocationPicker";
+import { Pager } from "../../../components/Pager";
 import { ApiError } from "../../../lib/api-client";
+
+/** Filas por pagina en el listado. Solo presentacion: los filtros siguen
+ * corriendo sobre todo el padron. */
+const PAGE_SIZE = 15;
+
+type TypeFilter = "all" | CustomerType;
 
 type CreateForm = {
   name: string;
@@ -74,6 +81,9 @@ export default function ClientesPage() {
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM);
   const [search, setSearch] = useState("");
   const [onlyWithoutLocation, setOnlyWithoutLocation] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [zoneFilter, setZoneFilter] = useState("all");
+  const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [duplicate, setDuplicate] = useState<DuplicateConflict | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -89,12 +99,30 @@ export default function ClientesPage() {
 
   const error = actionError ?? (loadError ? "No se pudo cargar clientes." : null);
 
+  // Las zonas del <select> salen del padron real, no de una lista fija: una
+  // zona la escribe el admin a mano al crear el cliente.
+  const zones = useMemo(() => {
+    const set = new Set<string>();
+    for (const customer of customers) {
+      if (customer.zone && customer.zone.trim().length > 0) {
+        set.add(customer.zone);
+      }
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "es"));
+  }, [customers]);
+
   const visibleCustomers = useMemo(() => {
     const needle = normalizeCustomerName(search);
 
-    // Los dos filtros se combinan; el de ubicacion no reemplaza al buscador.
+    // Todos los filtros se combinan; ninguno reemplaza al buscador.
     return customers.filter((customer) => {
       if (onlyWithoutLocation && isLocated(customer)) {
+        return false;
+      }
+      if (typeFilter !== "all" && customer.customerType !== typeFilter) {
+        return false;
+      }
+      if (zoneFilter !== "all" && (customer.zone ?? "") !== zoneFilter) {
         return false;
       }
       if (needle.length === 0) {
@@ -102,7 +130,31 @@ export default function ClientesPage() {
       }
       return normalizeCustomerName(customer.name).includes(needle);
     });
-  }, [customers, search, onlyWithoutLocation]);
+  }, [customers, search, onlyWithoutLocation, typeFilter, zoneFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(visibleCustomers.length / PAGE_SIZE));
+
+  // Cualquier cambio de filtro vuelve a la pagina 1, ajustando estado durante
+  // el render (no con useEffect) para no encadenar renders -- patron "you
+  // might not need an effect" de React.
+  const filterKey = `${search}|${onlyWithoutLocation}|${typeFilter}|${zoneFilter}`;
+  const [lastFilterKey, setLastFilterKey] = useState(filterKey);
+  if (filterKey !== lastFilterKey) {
+    setLastFilterKey(filterKey);
+    setPage(1);
+  }
+
+  // Clamp: si el padron se achico entre renders (una baja, una revalidacion
+  // de SWR), no dejar `page` fuera de rango.
+  const currentPage = Math.min(page, totalPages);
+  const pagedCustomers = useMemo(
+    () =>
+      visibleCustomers.slice(
+        (currentPage - 1) * PAGE_SIZE,
+        currentPage * PAGE_SIZE,
+      ),
+    [visibleCustomers, currentPage],
+  );
 
   // Un cliente sin pin no aparece en "Cerca tuyo" para el chofer. Contarlos
   // evita que el padron se degrade en silencio.
@@ -313,6 +365,36 @@ export default function ClientesPage() {
               Solo sin ubicacion
             </label>
             <label className="text-sm text-slate-600">
+              Filtrar por tipo
+              <select
+                value={typeFilter}
+                onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}
+                className="ml-2 rounded border border-slate-300 px-3 py-1"
+              >
+                <option value="all">Todos</option>
+                {CUSTOMER_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm text-slate-600">
+              Filtrar por zona
+              <select
+                value={zoneFilter}
+                onChange={(event) => setZoneFilter(event.target.value)}
+                className="ml-2 rounded border border-slate-300 px-3 py-1"
+              >
+                <option value="all">Todas</option>
+                {zones.map((zone) => (
+                  <option key={zone} value={zone}>
+                    {zone}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm text-slate-600">
               Buscar
               <input
                 type="text"
@@ -346,7 +428,7 @@ export default function ClientesPage() {
                 </tr>
               </thead>
               <tbody>
-                {visibleCustomers.map((customer) => (
+                {pagedCustomers.map((customer) => (
                   <CustomerRow
                     key={customer.id}
                     customer={customer}
@@ -359,6 +441,15 @@ export default function ClientesPage() {
                 ))}
               </tbody>
             </table>
+
+            <Pager
+              page={currentPage}
+              totalPages={totalPages}
+              totalItems={visibleCustomers.length}
+              itemLabel="clientes"
+              onPrev={() => setPage((prev) => Math.max(1, prev - 1))}
+              onNext={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            />
           </div>
         )}
       </section>

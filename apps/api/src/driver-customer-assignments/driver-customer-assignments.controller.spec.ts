@@ -10,6 +10,7 @@ describe('DriverCustomerAssignmentsController', () => {
   let controller: DriverCustomerAssignmentsController;
   let service: {
     listAssignments: jest.Mock;
+    listAssignmentHistory: jest.Mock;
     getMyAssignment: jest.Mock;
     replaceAssignment: jest.Mock;
   };
@@ -23,6 +24,7 @@ describe('DriverCustomerAssignmentsController', () => {
   beforeEach(async () => {
     service = {
       listAssignments: jest.fn(),
+      listAssignmentHistory: jest.fn(),
       getMyAssignment: jest.fn(),
       replaceAssignment: jest.fn(),
     };
@@ -52,6 +54,64 @@ describe('DriverCustomerAssignmentsController', () => {
 
       expect(service.listAssignments).toHaveBeenCalledTimes(1);
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('listAssignmentHistory', () => {
+    it('inherits the class-level admin-only restriction (no per-route override)', () => {
+      const roles = Reflect.getMetadata(
+        ROLES_KEY,
+        DriverCustomerAssignmentsController.prototype.listAssignmentHistory,
+      );
+      expect(roles).toBeUndefined();
+    });
+
+    it('forwards trimmed filters and a parsed page to the service', async () => {
+      const pageEnvelope = {
+        items: [],
+        page: 2,
+        pageSize: 15,
+        total: 0,
+        totalPages: 1,
+      };
+      service.listAssignmentHistory.mockResolvedValue(pageEnvelope);
+
+      const result = await controller.listAssignmentHistory(
+        ' driver-1 ',
+        '2026-08-01',
+        '2026-08-31',
+        ' customer-2 ',
+        '2',
+      );
+
+      expect(service.listAssignmentHistory).toHaveBeenCalledWith({
+        driverId: 'driver-1',
+        from: '2026-08-01',
+        to: '2026-08-31',
+        customerId: 'customer-2',
+        page: 2,
+      });
+      expect(result).toBe(pageEnvelope);
+    });
+
+    it('passes undefined for blank filters and a non-numeric page', async () => {
+      service.listAssignmentHistory.mockResolvedValue({
+        items: [],
+        page: 1,
+        pageSize: 15,
+        total: 0,
+        totalPages: 1,
+      });
+
+      await controller.listAssignmentHistory('', '  ', undefined, '', 'abc');
+
+      expect(service.listAssignmentHistory).toHaveBeenCalledWith({
+        driverId: undefined,
+        from: undefined,
+        to: undefined,
+        customerId: undefined,
+        page: undefined,
+      });
     });
   });
 
