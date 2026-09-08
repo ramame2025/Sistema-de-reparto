@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import useSWR from "swr";
 import { useApiClient } from "../../../context/AuthContext";
 import { ApiError } from "../../../lib/api-client";
@@ -439,5 +439,115 @@ describe("ClientesPage", () => {
     render(<ClientesPage />);
 
     expect(screen.getByTestId("customers-empty")).toBeInTheDocument();
+  });
+
+  describe("filtros de tipo y zona + paginacion", () => {
+    const withCustomers = (data: unknown[]) => {
+      mockedUseSWR.mockReturnValue({
+        data,
+        isLoading: false,
+        error: undefined,
+        mutate,
+      });
+      render(<ClientesPage />);
+    };
+
+    const makeCustomers = (count: number, overrides: Record<string, unknown> = {}) =>
+      Array.from({ length: count }, (_, i) => ({
+        id: `p${i + 1}`,
+        name: `Cliente ${String(i + 1).padStart(2, "0")}`,
+        customerType: "comercio",
+        zone: "Centro",
+        isActive: true,
+        createdAt: "",
+        updatedAt: "",
+        ...overrides,
+      }));
+
+    const rowCount = () =>
+      screen.getAllByRole("button", { name: "Editar" }).length;
+
+    it("filters the directory by customer type", () => {
+      withCustomers(CUSTOMERS);
+
+      fireEvent.change(screen.getByLabelText("Filtrar por tipo"), {
+        target: { value: "comercio" },
+      });
+
+      expect(screen.getByText("Almacen Norte")).toBeInTheDocument();
+      expect(screen.queryByText("Kiosco Sur")).not.toBeInTheDocument();
+    });
+
+    it("filters the directory by zone, offering only zones present in the padron", () => {
+      withCustomers(CUSTOMERS);
+
+      const zoneSelect = screen.getByLabelText("Filtrar por zona");
+      expect(
+        within(zoneSelect).getByRole("option", { name: "Norte" }),
+      ).toBeInTheDocument();
+      expect(
+        within(zoneSelect).queryByRole("option", { name: "Sur" }),
+      ).not.toBeInTheDocument();
+
+      fireEvent.change(zoneSelect, { target: { value: "Norte" } });
+
+      expect(screen.getByText("Almacen Norte")).toBeInTheDocument();
+      expect(screen.queryByText("Kiosco Sur")).not.toBeInTheDocument();
+    });
+
+    it("combines the type and zone filters with the search box", () => {
+      withCustomers([
+        ...CUSTOMERS,
+        {
+          id: "c3",
+          name: "Almacen Centro",
+          customerType: "comercio",
+          zone: "Norte",
+          isActive: true,
+          createdAt: "",
+          updatedAt: "",
+        },
+      ]);
+
+      fireEvent.change(screen.getByLabelText("Filtrar por zona"), {
+        target: { value: "Norte" },
+      });
+      fireEvent.change(screen.getByLabelText("Buscar"), {
+        target: { value: "centro" },
+      });
+
+      expect(screen.getByText("Almacen Centro")).toBeInTheDocument();
+      expect(screen.queryByText("Almacen Norte")).not.toBeInTheDocument();
+    });
+
+    it("shows at most 15 rows per page and pages through the rest", () => {
+      withCustomers(makeCustomers(20));
+
+      expect(rowCount()).toBe(15);
+      expect(
+        screen.getByText(/P[aá]gina 1 de 2 \(20 clientes\)/),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Anterior" })).toBeDisabled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Siguiente" }));
+
+      expect(rowCount()).toBe(5);
+      expect(screen.getByText(/P[aá]gina 2 de 2/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Siguiente" })).toBeDisabled();
+    });
+
+    it("returns to page 1 when a filter changes", () => {
+      withCustomers(makeCustomers(20));
+
+      fireEvent.click(screen.getByRole("button", { name: "Siguiente" }));
+      expect(screen.getByText(/P[aá]gina 2 de 2/)).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText("Filtrar por tipo"), {
+        target: { value: "comercio" },
+      });
+
+      expect(screen.getByText(/P[aá]gina 1 de 2/)).toBeInTheDocument();
+      expect(rowCount()).toBe(15);
+    });
   });
 });

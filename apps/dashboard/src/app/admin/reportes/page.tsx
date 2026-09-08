@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { useApiClient, useAuth } from "../../../context/AuthContext";
+import { Pager } from "../../../components/Pager";
 import { resolveReceiptUrl } from "../../../lib/api-client";
 import { downloadCsvReport } from "../../../lib/csv";
+import { isoDateDaysAgo, todayIsoDate } from "../../../lib/dates";
 import { formatPaymentMethod } from "../../../lib/format";
 import {
   EXPENSE_CATEGORIES,
@@ -26,6 +28,14 @@ type ProductFilter = "all" | ProductCode;
 type ExpenseCategoryFilter = "all" | ExpenseCategory;
 
 type Tab = "ingresos" | "gastos";
+
+/**
+ * Cuantas filas se muestran por pagina. El filtrado sigue siendo en memoria
+ * sobre todo el dataset; esto es solo presentacion para no renderizar una
+ * tabla infinita (y el CSV sigue exportando el set filtrado completo, no la
+ * pagina visible).
+ */
+const PAGE_SIZE = 15;
 
 export default function ReportesPage() {
   const { token: authToken } = useAuth();
@@ -55,26 +65,38 @@ export default function ReportesPage() {
     isLoading: expensesLoading,
     error: expensesLoadError,
   } = useSWR<ExpenseRecord[]>("/expenses");
-  const [saleDateFrom, setSaleDateFrom] = useState("");
-  const [saleDateTo, setSaleDateTo] = useState("");
+  // Por defecto, la ultima semana: el cierre habitual mira lo reciente, no
+  // todo el historico. Editable como cualquier filtro.
+  const [saleDateFrom, setSaleDateFrom] = useState(() => isoDateDaysAgo(7));
+  const [saleDateTo, setSaleDateTo] = useState(() => todayIsoDate());
   const [saleStatusFilter, setSaleStatusFilter] = useState<SaleStatusFilter>("all");
   const [salePaymentFilter, setSalePaymentFilter] = useState<PaymentFilter>("all");
   const [saleProductFilter, setSaleProductFilter] = useState<ProductFilter>("all");
   const [saleDriverFilter, setSaleDriverFilter] = useState("");
   const [saleTruckFilter, setSaleTruckFilter] = useState("");
   const [saleSearch, setSaleSearch] = useState("");
-  const [expenseDateFrom, setExpenseDateFrom] = useState("");
-  const [expenseDateTo, setExpenseDateTo] = useState("");
+  const [expenseDateFrom, setExpenseDateFrom] = useState(() => isoDateDaysAgo(7));
+  const [expenseDateTo, setExpenseDateTo] = useState(() => todayIsoDate());
   const [expenseCategoryFilter, setExpenseCategoryFilter] =
     useState<ExpenseCategoryFilter>("all");
   const [selectedSaleForAudit, setSelectedSaleForAudit] = useState<SaleRecord | null>(null);
   const [saleActionError, setSaleActionError] = useState<string | null>(null);
+  const [salesPage, setSalesPage] = useState(1);
+  const [expensesPage, setExpensesPage] = useState(1);
 
   // La auditoria se pide sola al elegir una venta: con la clave en null,
   // SWR simplemente no dispara la request.
   const { data: audits = [], isLoading: auditLoading } = useSWR<SaleAuditRecord[]>(
     selectedSaleForAudit ? `/sales/${selectedSaleForAudit.id}/audits` : null,
   );
+
+  // El comprobante de pago que sube el chofer al cobrar (transferencia/QR)
+  // viaja en `paymentProofRef`, igual que `receiptRef` en los gastos. Se
+  // resuelve aca para que el modal lo muestre: hasta ahora el dato llegaba
+  // del backend pero no se renderizaba en ningun lado.
+  const selectedSaleProofUrl = selectedSaleForAudit
+    ? resolveReceiptUrl(selectedSaleForAudit.paymentProofRef)
+    : null;
 
   const loading = salesLoading || expensesLoading;
   const error =
@@ -191,6 +213,66 @@ export default function ReportesPage() {
       return true;
     });
   }, [expenses, expenseDateFrom, expenseDateTo, expenseCategoryFilter]);
+
+  // Cualquier cambio de filtro vuelve a la pagina 1: quedarse en la pagina 7
+  // de un resultado que ahora tiene 2 paginas mostraria vacio. Se hace
+  // ajustando estado durante el render (no con useEffect) para no disparar
+  // un render en cascada -- patron "you might not need an effect" de React.
+  const saleFilterKey = [
+    saleDateFrom,
+    saleDateTo,
+    saleStatusFilter,
+    salePaymentFilter,
+    saleProductFilter,
+    saleDriverFilter,
+    saleTruckFilter,
+    saleSearch,
+  ].join("|");
+  const [lastSaleFilterKey, setLastSaleFilterKey] = useState(saleFilterKey);
+  if (saleFilterKey !== lastSaleFilterKey) {
+    setLastSaleFilterKey(saleFilterKey);
+    setSalesPage(1);
+  }
+
+  const expenseFilterKey = [
+    expenseDateFrom,
+    expenseDateTo,
+    expenseCategoryFilter,
+  ].join("|");
+  const [lastExpenseFilterKey, setLastExpenseFilterKey] = useState(expenseFilterKey);
+  if (expenseFilterKey !== lastExpenseFilterKey) {
+    setLastExpenseFilterKey(expenseFilterKey);
+    setExpensesPage(1);
+  }
+
+  const salesTotalPages = Math.max(1, Math.ceil(filteredSales.length / PAGE_SIZE));
+  const expensesTotalPages = Math.max(
+    1,
+    Math.ceil(filteredExpenses.length / PAGE_SIZE),
+  );
+
+  // Clamp: si el dataset se achico entre renders, no dejar `salesPage`
+  // apuntando fuera de rango (el useEffect ya cubre el caso "cambio un
+  // filtro", esto cubre "los datos de SWR se revalidaron y trajeron menos").
+  const currentSalesPage = Math.min(salesPage, salesTotalPages);
+  const currentExpensesPage = Math.min(expensesPage, expensesTotalPages);
+
+  const pagedSales = useMemo(
+    () =>
+      filteredSales.slice(
+        (currentSalesPage - 1) * PAGE_SIZE,
+        currentSalesPage * PAGE_SIZE,
+      ),
+    [filteredSales, currentSalesPage],
+  );
+  const pagedExpenses = useMemo(
+    () =>
+      filteredExpenses.slice(
+        (currentExpensesPage - 1) * PAGE_SIZE,
+        currentExpensesPage * PAGE_SIZE,
+      ),
+    [filteredExpenses, currentExpensesPage],
+  );
 
   const totalFacturadoFiltrado = useMemo(
     () => filteredSales.reduce((acc, sale) => acc + sale.total, 0),
@@ -437,7 +519,7 @@ export default function ReportesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredSales.map((sale) => (
+                {pagedSales.map((sale) => (
                   <tr key={sale.id} className="border-b border-slate-100">
                     <td className="py-2 pr-4">
                       {new Date(sale.createdAt).toLocaleString("es-AR")}
@@ -490,6 +572,17 @@ export default function ReportesPage() {
                 ))}
               </tbody>
             </table>
+
+            <Pager
+              page={currentSalesPage}
+              totalPages={salesTotalPages}
+              totalItems={filteredSales.length}
+              itemLabel="ventas"
+              onPrev={() => setSalesPage((prev) => Math.max(1, prev - 1))}
+              onNext={() =>
+                setSalesPage((prev) => Math.min(salesTotalPages, prev + 1))
+              }
+            />
           </div>
         )}
       </section>
@@ -577,7 +670,7 @@ export default function ReportesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredExpenses.map((expense) => {
+                {pagedExpenses.map((expense) => {
                   const receiptUrl = resolveReceiptUrl(expense.receiptRef);
 
                   return (
@@ -615,6 +708,17 @@ export default function ReportesPage() {
                 })}
               </tbody>
             </table>
+
+            <Pager
+              page={currentExpensesPage}
+              totalPages={expensesTotalPages}
+              totalItems={filteredExpenses.length}
+              itemLabel="gastos"
+              onPrev={() => setExpensesPage((prev) => Math.max(1, prev - 1))}
+              onNext={() =>
+                setExpensesPage((prev) => Math.min(expensesTotalPages, prev + 1))
+              }
+            />
           </div>
         )}
       </section>
@@ -624,7 +728,7 @@ export default function ReportesPage() {
           <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-xl font-semibold">Auditoria de venta</h3>
+                <h3 className="text-xl font-semibold">Detalle de venta</h3>
                 <p className="mt-1 text-sm text-slate-600">
                   Cliente: {selectedSaleForAudit.customerName} · ID: {selectedSaleForAudit.id}
                 </p>
@@ -637,6 +741,34 @@ export default function ReportesPage() {
                 Cerrar
               </button>
             </div>
+
+            <section className="mt-4">
+              <h4 className="text-sm font-semibold text-slate-700">Comprobante de pago</h4>
+              {selectedSaleProofUrl ? (
+                <a
+                  href={selectedSaleProofUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-flex items-center gap-3 text-sky-700 hover:text-sky-900"
+                >
+                  <img
+                    src={selectedSaleProofUrl}
+                    alt="Comprobante de pago"
+                    className="h-24 w-24 rounded-md border border-slate-200 object-cover"
+                  />
+                  <span className="text-xs font-semibold">Abrir en pestana nueva</span>
+                </a>
+              ) : (
+                <p className="mt-1 text-sm text-slate-500">
+                  {selectedSaleForAudit.paymentMethod === null ||
+                  selectedSaleForAudit.paymentMethod === "efectivo"
+                    ? "Sin comprobante (pago en efectivo, no aplica)."
+                    : "El chofer no adjunto comprobante para esta venta."}
+                </p>
+              )}
+            </section>
+
+            <h4 className="mt-6 text-sm font-semibold text-slate-700">Auditoria</h4>
 
             {auditLoading && <p className="mt-4 text-slate-600">Cargando auditoria...</p>}
 

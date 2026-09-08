@@ -9,26 +9,13 @@ import type {
   UserSummary,
 } from "@distribuidor/shared";
 import { useApiClient } from "../../../context/AuthContext";
-
-const pad = (value: number) => String(value).padStart(2, "0");
-
-const toIso = (date: Date) =>
-  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-
-const todayIso = () => toIso(new Date());
-
-/** `days` atras respecto de hoy, en fecha local (no UTC). */
-const isoDaysAgo = (days: number) => {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return toIso(date);
-};
+import { isoDateDaysAgo, todayIsoDate } from "../../../lib/dates";
 
 export default function ClientesAsignadosPage() {
   const api = useApiClient();
 
   const [driverId, setDriverId] = useState("");
-  const [date, setDate] = useState(todayIso());
+  const [date, setDate] = useState(todayIsoDate());
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
@@ -242,8 +229,8 @@ function AssignmentHistory({ drivers, customers }: AssignmentHistoryProps) {
   const [filterDriverId, setFilterDriverId] = useState("");
   // Por defecto, la ultima semana: el caso comun es "que asigne esta semana",
   // no todo el historico.
-  const [from, setFrom] = useState(() => isoDaysAgo(7));
-  const [to, setTo] = useState(() => todayIso());
+  const [from, setFrom] = useState(() => isoDateDaysAgo(7));
+  const [to, setTo] = useState(() => todayIsoDate());
   const [filterCustomerId, setFilterCustomerId] = useState("");
   const [page, setPage] = useState(1);
 
