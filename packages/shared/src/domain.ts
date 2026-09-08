@@ -437,6 +437,37 @@ export type MyAssignedCustomersResponse = {
   customers: CustomerRecord[];
 };
 
+/** Tamano de pagina fijo del historial de asignaciones (vista admin). */
+export const DRIVER_CUSTOMER_ASSIGNMENT_HISTORY_PAGE_SIZE = 15;
+
+/**
+ * Filtros del historial paginado de asignaciones. Todos opcionales: sin
+ * filtros devuelve la primera pagina de todo el historial, mas nuevo primero.
+ * `from`/`to` son inclusivos y se comparan por dia entero (misma convencion
+ * UTC-midnight que el resto del servicio). `customerId` matchea las
+ * asignaciones cuya lista del dia incluye a ese cliente.
+ */
+export type DriverCustomerAssignmentHistoryQuery = {
+  driverId?: string;
+  from?: string; // YYYY-MM-DD
+  to?: string; // YYYY-MM-DD
+  customerId?: string;
+  page?: number; // 1-based
+};
+
+/**
+ * Una pagina del historial. `page` y `totalPages` vienen ya normalizados por
+ * el servidor (page >= 1, totalPages >= 1) para que el pager del dashboard no
+ * tenga que recalcularlos.
+ */
+export type DriverCustomerAssignmentHistoryResponse = {
+  items: DriverCustomerAssignmentRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
 export const DEFAULT_PRICE_TABLE: PriceTable = {
   final: { G10: 8500, G15: 13000, G45: 39000, G15_AUTO: 14500 },
   comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },

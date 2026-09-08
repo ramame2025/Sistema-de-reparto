@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import {
   type CreateDriverCustomerAssignmentInput,
+  type DriverCustomerAssignmentHistoryResponse,
   type MyAssignedCustomersResponse,
   validateCreateDriverCustomerAssignmentInput,
 } from '@distribuidor/shared';
@@ -45,6 +46,30 @@ export class DriverCustomerAssignmentsController {
     @Query('date') date?: string,
   ) {
     return this.assignmentsService.listAssignments(driverId, date);
+  }
+
+  /**
+   * Historial paginado (15 por pagina) para la vista admin. Filtros
+   * opcionales por chofer, rango de fechas y cliente incluido en la lista.
+   * Hereda el `admin`-only de la clase: no hay override de rol.
+   */
+  @Get('history')
+  async listAssignmentHistory(
+    @Query('driverId') driverId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('customerId') customerId?: string,
+    @Query('page') page?: string,
+  ): Promise<DriverCustomerAssignmentHistoryResponse> {
+    const parsedPage = page ? Number.parseInt(page, 10) : NaN;
+
+    return this.assignmentsService.listAssignmentHistory({
+      driverId: driverId?.trim() || undefined,
+      from: from?.trim() || undefined,
+      to: to?.trim() || undefined,
+      customerId: customerId?.trim() || undefined,
+      page: Number.isNaN(parsedPage) ? undefined : parsedPage,
+    });
   }
 
   /**

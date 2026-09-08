@@ -370,6 +370,22 @@ export type MyAssignedCustomersResponse = {
     date: string;
     customers: CustomerRecord[];
 };
+/** Tamano de pagina fijo del historial de asignaciones (vista admin). */
+export declare const DRIVER_CUSTOMER_ASSIGNMENT_HISTORY_PAGE_SIZE = 15;
+export type DriverCustomerAssignmentHistoryQuery = {
+    driverId?: string;
+    from?: string;
+    to?: string;
+    customerId?: string;
+    page?: number;
+};
+export type DriverCustomerAssignmentHistoryResponse = {
+    items: DriverCustomerAssignmentRecord[];
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+};
 export declare const DEFAULT_PRICE_TABLE: PriceTable;
 export declare function calculateSaleTotal(customerType: CustomerType, items: SaleItemInput[], prices: PriceTable): number;
 export declare function validateCreateSaleInput(input: CreateSaleInput): string[];

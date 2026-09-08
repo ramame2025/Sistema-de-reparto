@@ -37,6 +37,7 @@ describe('DriverCustomerAssignmentsService', () => {
       upsert: jest.Mock;
       findUnique: jest.Mock;
       findMany: jest.Mock;
+      count: jest.Mock;
     };
     driverCustomerAssignmentEntry: {
       deleteMany: jest.Mock;
@@ -51,6 +52,7 @@ describe('DriverCustomerAssignmentsService', () => {
         upsert: jest.fn(),
         findUnique: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn(),
       },
       driverCustomerAssignmentEntry: {
         deleteMany: jest.fn(),
@@ -155,6 +157,104 @@ describe('DriverCustomerAssignmentsService', () => {
       });
       expect(prisma.driverCustomerAssignmentEntry.createMany).not.toHaveBeenCalled();
       expect(result.customers).toEqual([]);
+    });
+  });
+
+  describe('listAssignmentHistory', () => {
+    beforeEach(() => {
+      prisma.driverCustomerAssignment.count.mockResolvedValue(0);
+      prisma.driverCustomerAssignment.findMany.mockResolvedValue([]);
+    });
+
+    it('paginates by 15 and reports normalized page/total metadata', async () => {
+      prisma.driverCustomerAssignment.count.mockResolvedValue(63);
+      prisma.driverCustomerAssignment.findMany.mockResolvedValue([
+        buildAssignment({ id: 'assignment-1' }),
+        buildAssignment({ id: 'assignment-2' }),
+      ]);
+
+      const result = await service.listAssignmentHistory({ page: 2 });
+
+      expect(prisma.driverCustomerAssignment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 15, take: 15 }),
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          page: 2,
+          pageSize: 15,
+          total: 63,
+          totalPages: 5,
+        }),
+      );
+      expect(result.items.map((item) => item.id)).toEqual([
+        'assignment-1',
+        'assignment-2',
+      ]);
+    });
+
+    it('defaults an absent, zero or negative page to the first page', async () => {
+      await service.listAssignmentHistory({});
+      await service.listAssignmentHistory({ page: 0 });
+      await service.listAssignmentHistory({ page: -4 });
+
+      for (let nth = 1; nth <= 3; nth += 1) {
+        expect(prisma.driverCustomerAssignment.findMany).toHaveBeenNthCalledWith(
+          nth,
+          expect.objectContaining({ skip: 0, take: 15 }),
+        );
+      }
+    });
+
+    it('reports at least one page even when the history is empty', async () => {
+      prisma.driverCustomerAssignment.count.mockResolvedValue(0);
+
+      const result = await service.listAssignmentHistory({});
+
+      expect(result.totalPages).toBe(1);
+      expect(result.items).toEqual([]);
+    });
+
+    it('builds a where clause from driver, inclusive date range and customer filters', async () => {
+      await service.listAssignmentHistory({
+        driverId: 'driver-1',
+        from: '2026-08-01',
+        to: '2026-08-31',
+        customerId: 'customer-2',
+      });
+
+      const expectedWhere = {
+        driverId: 'driver-1',
+        date: {
+          gte: new Date('2026-08-01T00:00:00.000Z'),
+          lte: new Date('2026-08-31T00:00:00.000Z'),
+        },
+        entries: { some: { customerId: 'customer-2' } },
+      };
+      expect(prisma.driverCustomerAssignment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expectedWhere }),
+      );
+      // El count usa exactamente el mismo filtro que la pagina.
+      expect(prisma.driverCustomerAssignment.count).toHaveBeenCalledWith({
+        where: expectedWhere,
+      });
+    });
+
+    it('omits every unset filter from the where clause', async () => {
+      await service.listAssignmentHistory({});
+
+      expect(prisma.driverCustomerAssignment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: {} }),
+      );
+    });
+
+    it('orders newest day first', async () => {
+      await service.listAssignmentHistory({});
+
+      expect(prisma.driverCustomerAssignment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+        }),
+      );
     });
   });
 
