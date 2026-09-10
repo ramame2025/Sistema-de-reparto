@@ -12,12 +12,6 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-enum CustomerType {
-  final
-  comercio
-  distribuidor
-}
-
 enum PaymentMethod {
   efectivo
   transferencia
@@ -78,7 +72,12 @@ model Sale {
   truckCode         String?
   total             Int
   customerName      String
-  customerType      CustomerType
+  /// Texto congelado, SIN foreign key a `CustomerCategory`, a proposito. La
+  /// venta registra lo que el cliente ERA en ese momento: si la categoria se
+  /// renombra o se da de baja despues, esta fila no se tiene que enterar. Con
+  /// una FK un `ON UPDATE CASCADE` reescribiria el historial de ventas ya
+  /// cobradas, que es exactamente lo que no puede pasar.
+  customerType      String
   paymentMethod     PaymentMethod?
   note              String?
   customerId        String?
@@ -158,8 +157,11 @@ model UserAccount {
 model Customer {
   id                String                          @id @default(cuid())
   name              String
-  customerType      CustomerType
-  zone              String?
+  /// Codigo de la categoria del cliente. Conserva el nombre de columna que
+  /// tenia como enum: ya viaja dentro de los payloads de venta encolados en
+  /// los telefonos, igual que `productCode`.
+  customerType      String
+  zoneId            String?
   /// Human-readable street address. Independent from latitude/longitude:
   /// a customer may have a pin, an address, both, or neither. Nothing
   /// geocodes one into the other.
@@ -171,23 +173,59 @@ model Customer {
   updatedAt         DateTime                        @updatedAt
   sales             Sale[]
   assignmentEntries DriverCustomerAssignmentEntry[]
+  /// Restrict, no Cascade: una zona que algun cliente referencia no se puede
+  /// borrar nunca. Se da de baja con isActive, igual que un producto.
+  zoneRef           Zone?                           @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+  /// Restrict, no Cascade: una categoria que algun cliente referencia no se
+  /// puede borrar nunca. Se da de baja con isActive.
+  category          CustomerCategory                @relation(fields: [customerType], references: [code], onDelete: Restrict)
 
   @@index([isActive, name])
+  @@index([zoneId])
+  @@index([customerType])
 }
 
 model Truck {
   id            String                  @id @default(cuid())
   code          String                  @unique
   plate         String                  @unique
-  capacity      Int
   isActive      Boolean                 @default(true)
   createdAt     DateTime                @default(now())
   updatedAt     DateTime                @updatedAt
   sales         Sale[]
   assignments   DriverTruckAssignment[]
   loadManifests LoadManifest[]
+  capacities    TruckCapacity[]
 
   @@index([isActive, code])
+}
+
+/// Cuantas unidades de cada producto entran en el camion. Reemplaza al total
+/// unico `Truck.capacity`, que no decia QUE carga entra y no se podia repartir
+/// entre productos sin inventar el reparto.
+///
+/// La ausencia de fila significa "sin detallar", y una fila con `units = 0`
+/// significa "este producto no viaja en este camion". Son estados distintos, y
+/// por eso el cero se guarda en vez de omitirse.
+///
+/// Sigue siendo INFORMATIVA: nada valida un remito contra esta grilla.
+model TruckCapacity {
+  id          String   @id @default(cuid())
+  truckId     String
+  productCode String
+  units       Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  /// Cascade, no Restrict: la capacidad es una propiedad DEL camion y no
+  /// significa nada sin el. Es la unica relacion del schema donde el borrado
+  /// en cascada es lo correcto.
+  truck       Truck    @relation(fields: [truckId], references: [id], onDelete: Cascade)
+  /// Restrict, como toda referencia a producto en este schema: un producto que
+  /// alguien referencia no se borra nunca, se da de baja con isActive.
+  product     Product  @relation(fields: [productCode], references: [code], onDelete: Restrict)
+
+  @@unique([truckId, productCode])
+  @@index([truckId])
 }
 
 model DriverTruckAssignment {
@@ -267,16 +305,54 @@ model LoadManifestItem {
 /// que viaja por la API y que ya esta persistida en los payloads encolados en
 /// los telefonos de los choferes, asi que es inmutable una vez creada.
 model Product {
-  id            String             @id @default(cuid())
-  code          String             @unique
-  name          String
-  isActive      Boolean            @default(true)
-  sortOrder     Int                @default(0)
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  prices        ProductPrice[]
-  saleItems     SaleItem[]
-  manifestItems LoadManifestItem[]
+  id              String             @id @default(cuid())
+  code            String             @unique
+  name            String
+  isActive        Boolean            @default(true)
+  sortOrder       Int                @default(0)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  prices          ProductPrice[]
+  saleItems       SaleItem[]
+  manifestItems   LoadManifestItem[]
+  truckCapacities TruckCapacity[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// Zonas de reparto, editables por el admin. `code` es la clave estable e
+/// inmutable de la zona, igual que la del producto: el `name` se puede
+/// renombrar sin que nada quede colgado.
+model Zone {
+  id        String     @id @default(cuid())
+  code      String     @unique
+  name      String
+  isActive  Boolean    @default(true)
+  sortOrder Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  customers Customer[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// Categorias de cliente (antes el enum `CustomerType`), editables por el
+/// admin. `code` es la clave estable e inmutable que viaja por la API y que
+/// ya esta persistida en los payloads de venta encolados en los telefonos,
+/// asi que se renombra el `name` y nunca el `code`.
+///
+/// Una categoria nueva NACE SIN PRECIOS: no se copian los de otra categoria.
+/// Un precio heredado miente en silencio; una celda vacia se ve.
+model CustomerCategory {
+  id        String         @id @default(cuid())
+  code      String         @unique
+  name      String
+  isActive  Boolean        @default(true)
+  sortOrder Int            @default(0)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  customers Customer[]
+  prices    ProductPrice[]
 
   @@index([isActive, sortOrder])
 }
@@ -287,14 +363,17 @@ model Product {
 /// "cuanto valia esto el lunes", que es lo que necesita una venta encolada.
 /// El historial de quien cambio que precio sale gratis de este mismo diseno.
 model ProductPrice {
-  id           String       @id @default(cuid())
+  id           String           @id @default(cuid())
   productCode  String
-  customerType CustomerType
+  customerType String
   amount       Int
-  validFrom    DateTime     @default(now())
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  product      Product      @relation(fields: [productCode], references: [code], onDelete: Restrict)
+  validFrom    DateTime         @default(now())
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  product      Product          @relation(fields: [productCode], references: [code], onDelete: Restrict)
+  /// Restrict, no Cascade: una categoria que alguna vez tuvo un precio no se
+  /// puede borrar nunca. Se da de baja con isActive.
+  category     CustomerCategory @relation(fields: [customerType], references: [code], onDelete: Restrict)
 
   @@unique([productCode, customerType, validFrom])
   @@index([productCode, customerType, validFrom])

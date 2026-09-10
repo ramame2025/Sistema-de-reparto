@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type {
   CreateSaleInput,
@@ -9,6 +9,7 @@ import type {
 } from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
 import { ProductsService } from '../products/products.service';
 import { SalesService } from './sales.service';
 
@@ -16,6 +17,14 @@ const CUSTOM_PRICE_TABLE: PriceTable = {
   final: { G10: 100, G15: 200, G45: 300, G15_AUTO: 400 },
   comercio: { G10: 90, G15: 180, G45: 270, G15_AUTO: 360 },
   distribuidor: { G10: 80, G15: 160, G45: 240, G15_AUTO: 320 },
+};
+
+/**
+ * Una tabla con agujeros, que ahora es un estado legitimo: un tipo de cliente
+ * existe antes de tener todos sus precios cargados.
+ */
+const SPARSE_PRICE_TABLE: PriceTable = {
+  final: { G10: 100 },
 };
 
 function buildSaleRow(overrides: Record<string, unknown> = {}) {
@@ -97,6 +106,7 @@ describe('SalesService', () => {
   };
   let pricesService: { getPriceTable: jest.Mock; getPriceTableAt: jest.Mock };
   let productsService: { assertProductCodesExist: jest.Mock };
+  let categoriesService: { assertCategoryCodesExist: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -112,6 +122,9 @@ describe('SalesService', () => {
       getPriceTableAt: jest.fn().mockResolvedValue(CUSTOM_PRICE_TABLE),
     };
     productsService = { assertProductCodesExist: jest.fn().mockResolvedValue(undefined) };
+    categoriesService = {
+      assertCategoryCodesExist: jest.fn().mockResolvedValue(undefined),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -119,6 +132,7 @@ describe('SalesService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: PricesService, useValue: pricesService },
         { provide: ProductsService, useValue: productsService },
+        { provide: CustomerCategoriesService, useValue: categoriesService },
       ],
     }).compile();
 
@@ -339,6 +353,30 @@ describe('SalesService', () => {
       expect(productsService.assertProductCodesExist).toHaveBeenCalledWith(['G10']);
     });
 
+    // La validacion pura ya no puede comprobar pertenencia -- las categorias
+    // las define el admin en runtime -- asi que la existencia se verifica aca,
+    // igual que la del producto.
+    it('verifies the customerType against the categories table before writing', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(buildCreateInput({ customerType: 'comercio' }));
+
+      expect(categoriesService.assertCategoryCodesExist).toHaveBeenCalledWith([
+        'comercio',
+      ]);
+    });
+
+    it('does not write anything when the customerType does not exist', async () => {
+      categoriesService.assertCategoryCodesExist.mockRejectedValue(
+        new Error('Unknown customerType: fantasma'),
+      );
+
+      await expect(
+        service.createSale(buildCreateInput({ customerType: 'fantasma' })),
+      ).rejects.toThrow(/fantasma/);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
     it('does not write anything when a productCode is not in the catalogue', async () => {
       productsService.assertProductCodesExist.mockRejectedValue(
         new Error('Unknown productCode: G99'),
@@ -348,6 +386,42 @@ describe('SalesService', () => {
         service.createSale(buildCreateInput({ items: [{ productCode: 'G99', quantity: 1 }] })),
       ).rejects.toThrow(/G99/);
       expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    // Un par sin precio es una configuracion incompleta del admin, no una
+    // falla del servidor: 400 con el par nombrado, y ni una fila escrita.
+    // Congelar un unitPrice en cero seria regalar la mercaderia en silencio.
+    it('rejects the sale with a 400 naming the unpriced pair, and writes nothing', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue(SPARSE_PRICE_TABLE);
+
+      await expect(
+        service.createSale(buildCreateInput({ items: [{ productCode: 'G15', quantity: 2 }] })),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    it('names the customerType and the productCode of the unpriced pair', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue(SPARSE_PRICE_TABLE);
+
+      await expect(
+        service.createSale(buildCreateInput({ items: [{ productCode: 'G15', quantity: 2 }] })),
+      ).rejects.toThrow('No price for customerType=final productCode=G15');
+    });
+
+    it('names every unpriced pair at once, not just the first', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue(SPARSE_PRICE_TABLE);
+
+      await expect(
+        service.createSale(
+          buildCreateInput({
+            items: [
+              { productCode: 'G15', quantity: 1 },
+              { productCode: 'G10', quantity: 1 },
+              { productCode: 'G45', quantity: 1 },
+            ],
+          }),
+        ),
+      ).rejects.toThrow(/G15.*G45/);
     });
 
     it('computes the total from PricesService.getPriceTable, not DEFAULT_PRICE_TABLE', async () => {
@@ -554,6 +628,43 @@ describe('SalesService', () => {
         { productCode: 'G10', quantity: 2, unitPrice: 100 },
       ]);
       expect(call.data.total).toBe(200);
+    });
+
+    // Misma regla que en createSale: una correccion tampoco puede congelar un
+    // precio inventado, y la venta original queda intacta.
+    it('rejects the edit with a 400 naming the unpriced pair, and writes nothing', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue(SPARSE_PRICE_TABLE);
+
+      await expect(
+        service.updateSale(
+          'sale-1',
+          buildUpdateInput({ items: [{ productCode: 'G15', quantity: 2 }] }),
+        ),
+      ).rejects.toThrow('No price for customerType=final productCode=G15');
+      expect(prisma.sale.update).not.toHaveBeenCalled();
+      expect(prisma.saleItem.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.saleAudit.create).not.toHaveBeenCalled();
+    });
+
+    // Un churn no tiene items, asi que no hay nada que cotizar: la falta de
+    // precios no puede bloquear su edicion.
+    it('edits a churn row even when the customer type has no prices at all', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue({});
+      prisma.sale.findUnique.mockResolvedValue(buildChurnRow());
+      prisma.sale.update.mockResolvedValue(buildChurnRow({ customerName: 'Nuevo nombre' }));
+
+      const result = await service.updateSale('sale-1', {
+        driverName: 'Juan',
+        customerName: 'Nuevo nombre',
+        customerType: 'final',
+        paymentMethod: 'efectivo',
+        items: [],
+        kind: 'churn',
+        reason: 'Corrección de visita',
+      });
+
+      expect(result.customerName).toBe('Nuevo nombre');
+      expect(prisma.sale.update).toHaveBeenCalled();
     });
 
     it('computes the total from PricesService.getPriceTable, not DEFAULT_PRICE_TABLE', async () => {

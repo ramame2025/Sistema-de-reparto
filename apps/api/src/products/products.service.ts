@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  CUSTOMER_TYPES,
   type CreateProductInput,
   type ProductRecord,
   type UpdateProductInput,
@@ -53,6 +52,40 @@ export class ProductsService {
       throw new ConflictException(`Product code ${code} already exists`);
     }
 
+    // Las categorias se leen EN EL MOMENTO DEL PEDIDO, no de una lista fija de
+    // tres: el admin pudo crear una hace un minuto. Solo las activas, porque
+    // exigirle precio a una categoria dada de baja seria pedir un dato muerto.
+    const categories: { code: string }[] =
+      await this.prisma.customerCategory.findMany({
+        where: { isActive: true },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        select: { code: true },
+      });
+
+    // "Nace completo o no nace" sigue rigiendo para el producto. Un producto
+    // sin uno de sus precios ya no rompe la tabla entera -- `getPriceTableAt`
+    // omite la celda faltante -- pero deja al chofer sin poder venderlo a esa
+    // categoria, y con un error que solo aparece frente al cliente. Que se
+    // evite aca es barato; que aparezca en la calle no.
+    //
+    // El caso inverso, una categoria NUEVA, es deliberadamente el opuesto:
+    // nace sin ningun precio y nadie backfillea los productos existentes. La
+    // asimetria es intencional -- crear un producto es un formulario que el
+    // admin esta completando ahora, y crear una categoria abre una columna
+    // entera que se llena despues, celda por celda.
+    const missing = categories
+      .map((category) => category.code)
+      .filter((code) => input.prices?.[code] === undefined);
+
+    if (missing.length > 0) {
+      // La categoria culpable va en el mensaje, no solo en `errors`: quien lee
+      // un log o un banner tiene que saber CUAL falta sin abrir el JSON.
+      throw new BadRequestException({
+        message: `Missing price for customerType: ${missing.join(', ')}`,
+        errors: missing.map((code) => `prices.${code} is required`),
+      });
+    }
+
     const created = await this.prisma.$transaction(async (tx) => {
       const product: ProductRow = await tx.product.create({
         data: {
@@ -63,14 +96,13 @@ export class ProductsService {
         },
       });
 
-      // Misma transaccion, a proposito: un producto sin sus tres precios haria
-      // fallar getPriceTable, y con ella TODAS las ventas del sistema, no solo
-      // las de este producto.
+      // Misma transaccion, a proposito: el producto y sus precios nacen juntos
+      // o no nace ninguno.
       await tx.productPrice.createMany({
-        data: CUSTOMER_TYPES.map((customerType) => ({
+        data: categories.map((category) => ({
           productCode: code,
-          customerType,
-          amount: input.prices[customerType],
+          customerType: category.code,
+          amount: input.prices[category.code],
         })),
       });
 

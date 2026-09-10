@@ -3,11 +3,12 @@
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import {
-  CUSTOMER_TYPES,
   normalizeCustomerName,
+  type CustomerCategoryRecord,
   type CustomerRecord,
   type CustomerType,
   type UpdateCustomerInput,
+  type ZoneRecord,
 } from "@distribuidor/shared";
 import { useApiClient } from "../../../context/AuthContext";
 import { LocationPicker, type LocationValue } from "../../../components/LocationPicker";
@@ -23,18 +24,67 @@ type TypeFilter = "all" | CustomerType;
 type CreateForm = {
   name: string;
   customerType: CustomerType;
-  zone: string;
+  /** Id de la zona elegida; cadena vacia significa "sin zona". */
+  zoneId: string;
   address: string;
   latitude?: number;
   longitude?: number;
 };
 
+/**
+ * `customerType` arranca vacio, no en "final": las categorias las define el
+ * admin en runtime, asi que cual es la primera solo se sabe cuando la lista
+ * llego. Hasta entonces el select toma la primera activa.
+ */
 const EMPTY_FORM: CreateForm = {
   name: "",
-  customerType: "final",
-  zone: "",
+  customerType: "",
+  zoneId: "",
   address: "",
 };
+
+/**
+ * Una categoria dada de baja ya no viene en la lista, pero el cliente que la
+ * tiene asignada la sigue teniendo. Sin esta opcion el select se veria vacio, y
+ * editar cualquier otro campo pareceria estarle cambiando la categoria. Mismo
+ * criterio que `zoneOptions`.
+ *
+ * La etiqueta cae al codigo crudo porque el cliente solo guarda el codigo: el
+ * nombre para mostrar vive en la categoria, y esa ya no esta en la lista.
+ */
+function categoryOptions(
+  categories: CustomerCategoryRecord[],
+  customer?: CustomerRecord,
+) {
+  const options = categories.map((category) => ({
+    code: category.code,
+    name: category.name,
+  }));
+
+  if (
+    customer?.customerType &&
+    !categories.some((category) => category.code === customer.customerType)
+  ) {
+    options.unshift({ code: customer.customerType, name: customer.customerType });
+  }
+
+  return options;
+}
+
+/**
+ * Una zona dada de baja ya no viene en la lista, pero el cliente que la tiene
+ * asignada la sigue teniendo. Sin esta opcion el select se veria vacio, y
+ * editar cualquier otro campo pareceria estarle sacando la zona.
+ */
+function zoneOptions(zones: ZoneRecord[], customer?: CustomerRecord) {
+  const options = zones.map((zone) => ({ id: zone.id, name: zone.name }));
+
+  if (customer?.zoneId && !zones.some((zone) => zone.id === customer.zoneId)) {
+    options.unshift({ id: customer.zoneId, name: customer.zone ?? customer.zoneId });
+  }
+
+  return options;
+}
 
 /**
  * El par de coordenadas se aplica entero o no se aplica: la API rechaza una
@@ -97,19 +147,20 @@ export default function ClientesPage() {
     mutate: reloadCustomers,
   } = useSWR<CustomerRecord[]>("/customers");
 
-  const error = actionError ?? (loadError ? "No se pudo cargar clientes." : null);
+  // Solo las zonas vigentes: asignar una dada de baja es un error, y la API
+  // lo rechaza igual.
+  const { data: zones = [] } = useSWR<ZoneRecord[]>("/zones");
 
-  // Las zonas del <select> salen del padron real, no de una lista fija: una
-  // zona la escribe el admin a mano al crear el cliente.
-  const zones = useMemo(() => {
-    const set = new Set<string>();
-    for (const customer of customers) {
-      if (customer.zone && customer.zone.trim().length > 0) {
-        set.add(customer.zone);
-      }
-    }
-    return [...set].sort((a, b) => a.localeCompare(b, "es"));
-  }, [customers]);
+  // Solo las categorias vigentes: asignar una dada de baja es un error, y la
+  // API lo rechaza igual.
+  const { data: categories = [] } =
+    useSWR<CustomerCategoryRecord[]>("/customer-categories");
+
+  // Mientras la lista no llego no hay categoria por defecto que elegir; en
+  // cuanto llega, la primera activa es la que el select muestra.
+  const selectedCustomerType = form.customerType || categories[0]?.code || "";
+
+  const error = actionError ?? (loadError ? "No se pudo cargar clientes." : null);
 
   const visibleCustomers = useMemo(() => {
     const needle = normalizeCustomerName(search);
@@ -165,8 +216,8 @@ export default function ClientesPage() {
 
   const buildCreatePayload = () => ({
     name: form.name.trim(),
-    customerType: form.customerType,
-    ...(optionalText(form.zone) ? { zone: optionalText(form.zone) } : {}),
+    customerType: selectedCustomerType,
+    ...(form.zoneId ? { zoneId: form.zoneId } : {}),
     ...(optionalText(form.address) ? { address: optionalText(form.address) } : {}),
     ...(form.latitude !== undefined && form.longitude !== undefined
       ? { latitude: form.latitude, longitude: form.longitude }
@@ -263,27 +314,33 @@ export default function ClientesPage() {
           <label className="text-sm text-slate-600">
             Tipo
             <select
-              value={form.customerType}
+              value={selectedCustomerType}
               onChange={(event) =>
                 setForm({ ...form, customerType: event.target.value as CustomerType })
               }
               className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
             >
-              {CUSTOMER_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
+              {categoryOptions(categories).map((category) => (
+                <option key={category.code} value={category.code}>
+                  {category.name}
                 </option>
               ))}
             </select>
           </label>
           <label className="text-sm text-slate-600">
             Zona
-            <input
-              type="text"
-              value={form.zone}
-              onChange={(event) => setForm({ ...form, zone: event.target.value })}
+            <select
+              value={form.zoneId}
+              onChange={(event) => setForm({ ...form, zoneId: event.target.value })}
               className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            />
+            >
+              <option value="">Sin zona</option>
+              {zoneOptions(zones).map((zone) => (
+                <option key={zone.id} value={zone.id}>
+                  {zone.name}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="text-sm text-slate-600">
             Direccion
@@ -372,9 +429,9 @@ export default function ClientesPage() {
                 className="ml-2 rounded border border-slate-300 px-3 py-1"
               >
                 <option value="all">Todos</option>
-                {CUSTOMER_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
+                {categories.map((category) => (
+                  <option key={category.code} value={category.code}>
+                    {category.name}
                   </option>
                 ))}
               </select>
@@ -388,8 +445,8 @@ export default function ClientesPage() {
               >
                 <option value="all">Todas</option>
                 {zones.map((zone) => (
-                  <option key={zone} value={zone}>
-                    {zone}
+                  <option key={zone.id} value={zone.name}>
+                    {zone.name}
                   </option>
                 ))}
               </select>
@@ -432,6 +489,8 @@ export default function ClientesPage() {
                   <CustomerRow
                     key={customer.id}
                     customer={customer}
+                    zones={zones}
+                    categories={categories}
                     editing={editingId === customer.id}
                     onEdit={() => setEditingId(customer.id)}
                     onCancel={() => setEditingId(null)}
@@ -459,6 +518,8 @@ export default function ClientesPage() {
 
 type CustomerRowProps = {
   customer: CustomerRecord;
+  zones: ZoneRecord[];
+  categories: CustomerCategoryRecord[];
   editing: boolean;
   onEdit: () => void;
   onCancel: () => void;
@@ -468,6 +529,8 @@ type CustomerRowProps = {
 
 function CustomerRow({
   customer,
+  zones,
+  categories,
   editing,
   onEdit,
   onCancel,
@@ -476,7 +539,7 @@ function CustomerRow({
 }: CustomerRowProps) {
   const [name, setName] = useState(customer.name);
   const [customerType, setCustomerType] = useState<CustomerType>(customer.customerType);
-  const [zone, setZone] = useState(customer.zone ?? "");
+  const [zoneId, setZoneId] = useState(customer.zoneId ?? "");
   const [address, setAddress] = useState(customer.address ?? "");
   // `undefined` significa "no se toco el pin"; un LocationValue significa que
   // el admin lo movio o lo saco, incluso si vuelve a coincidir con lo guardado.
@@ -498,8 +561,8 @@ function CustomerRow({
     }
     // Vaciar el campo limpia el valor guardado, y eso solo se puede expresar
     // con null: undefined significaria "no lo toques".
-    if (zone.trim() !== (customer.zone ?? "")) {
-      patch.zone = zone.trim().length > 0 ? zone.trim() : null;
+    if (zoneId !== (customer.zoneId ?? "")) {
+      patch.zoneId = zoneId.length > 0 ? zoneId : null;
     }
     if (address.trim() !== (customer.address ?? "")) {
       patch.address = address.trim().length > 0 ? address.trim() : null;
@@ -575,9 +638,9 @@ function CustomerRow({
             onChange={(event) => setCustomerType(event.target.value as CustomerType)}
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1"
           >
-            {CUSTOMER_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {type}
+            {categoryOptions(categories, customer).map((category) => (
+              <option key={category.code} value={category.code}>
+                {category.name}
               </option>
             ))}
           </select>
@@ -586,12 +649,18 @@ function CustomerRow({
       <td className="py-2 pr-4">
         <label className="text-xs text-slate-600">
           Zona del cliente
-          <input
-            type="text"
-            value={zone}
-            onChange={(event) => setZone(event.target.value)}
+          <select
+            value={zoneId}
+            onChange={(event) => setZoneId(event.target.value)}
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1"
-          />
+          >
+            <option value="">Sin zona</option>
+            {zoneOptions(zones, customer).map((zone) => (
+              <option key={zone.id} value={zone.id}>
+                {zone.name}
+              </option>
+            ))}
+          </select>
         </label>
       </td>
       <td className="py-2 pr-4" colSpan={2}>

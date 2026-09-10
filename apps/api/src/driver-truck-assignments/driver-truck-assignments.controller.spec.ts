@@ -105,7 +105,7 @@ describe('DriverTruckAssignmentsController', () => {
     });
 
     it('reports the resolved date back, so the client knows which day it answered for', async () => {
-      const truck = { truckId: 'truck-1', code: 'T-01', capacity: 40, kind: 'titular' };
+      const truck = { truckId: 'truck-1', code: 'T-01', capacities: [], kind: 'titular' };
       service.resolveMyTruckForDate.mockResolvedValue(truck);
       const req = { user: { sub: 'pedro' } } as unknown as AuthRequest;
 

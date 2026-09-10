@@ -6,7 +6,12 @@ import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
 
 export type SaleFooterBarProps = {
-  total: number;
+  /**
+   * `undefined` = no hay con que calcularlo (faltan precios). Se muestra un
+   * guion, no un cero: un "$0" se leeria como un importe real y la pantalla
+   * estaria mintiendo por defecto justo donde hay plata en juego.
+   */
+  total: number | undefined;
   /** Como se llama el numero en esta pantalla. En Gastos sale, no entra. */
   totalLabel?: string;
   /**
@@ -34,7 +39,7 @@ export function SaleFooterBar({
       <View style={styles.totalWrap}>
         <Text style={styles.totalLabel}>{totalLabel}</Text>
         <Text style={styles.totalValue} testID="sale-footer-total">
-          {formatArs(total)}
+          {total === undefined ? '—' : formatArs(total)}
         </Text>
       </View>
 

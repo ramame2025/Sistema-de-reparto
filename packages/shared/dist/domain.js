@@ -26,7 +26,31 @@ export const PRODUCT_CODES = [
 export function isWellFormedProductCode(code) {
     return typeof code === "string" && code.trim().length > 0;
 }
-export const CUSTOMER_TYPES = ["final", "comercio", "distribuidor"];
+/**
+ * Tan largo como el codigo de una zona o un producto, y por la misma razon:
+ * es una clave que se teclea y se lee, no un texto libre.
+ */
+export const CUSTOMER_TYPE_MAX_LENGTH = 20;
+/**
+ * Valida la FORMA de una categoria de cliente, no su pertenencia al catalogo.
+ *
+ * Mismo criterio que `isWellFormedProductCode`, y por el mismo motivo:
+ * `packages/shared` corre en el telefono y en el navegador, y ninguno de los
+ * dos conoce la lista de categorias. Comprobar pertenencia aca rechazaria toda
+ * categoria nueva y legitima, y peor: rechazaria una venta encolada con una
+ * categoria creada despues de la ultima sincronizacion. Que la categoria
+ * EXISTA se verifica contra la tabla, del lado del servidor.
+ *
+ * A proposito NO se exige mayusculas: las tres categorias semilla ('final',
+ * 'comercio', 'distribuidor') vienen del enum viejo y su codigo es inmutable.
+ */
+export function isWellFormedCustomerType(value) {
+    if (typeof value !== "string") {
+        return false;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 && trimmed.length <= CUSTOMER_TYPE_MAX_LENGTH;
+}
 export const PAYMENT_METHODS = [
     "efectivo",
     "transferencia",
@@ -43,17 +67,66 @@ export const EXPENSE_CATEGORIES = [
 export const USER_ROLES = ['admin', 'chofer'];
 export const ASSIGNMENT_KINDS = ['titular', 'cobertura'];
 export const SALE_KINDS = ['sale', 'churn'];
+/** Tamano de pagina fijo del historial de asignaciones (vista admin). */
 export const DRIVER_CUSTOMER_ASSIGNMENT_HISTORY_PAGE_SIZE = 15;
 export const DEFAULT_PRICE_TABLE = {
     final: { G10: 8500, G15: 13000, G45: 39000, G15_AUTO: 14500 },
     comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },
     distribuidor: { G10: 7900, G15: 12100, G45: 36500, G15_AUTO: 13600 },
 };
-export function calculateSaleTotal(customerType, items, prices) {
-    return items.reduce((total, item) => {
-        const unitPrice = prices[customerType][item.productCode] ?? 0;
-        return total + unitPrice * item.quantity;
-    }, 0);
+/**
+ * La UNICA forma sancionada de leer un precio en todo el codigo.
+ *
+ * Existe para que "no hay precio" no se pueda confundir nunca con "el precio
+ * es cero": cero es un precio real que el admin puede fijar, y un `?? 0` que
+ * los mezcla vende gratis sin que nadie se entere. Devolver el par faltante,
+ * y no solo un `undefined`, es lo que despues permite decir exactamente que
+ * falta cargar.
+ */
+export function findUnitPrice(prices, customerType, productCode) {
+    const unitPrice = prices[customerType]?.[productCode];
+    if (unitPrice === undefined) {
+        return { ok: false, missing: { customerType, productCode } };
+    }
+    return { ok: true, unitPrice };
+}
+/**
+ * Valoriza una venta entera, o dice que pares le faltan.
+ *
+ * Devuelve las lineas Y el total juntos porque el total se deriva de esas
+ * mismas lineas: asi total e items no pueden discrepar nunca, que es la
+ * invariante de la que ya dependia la API al grabar la venta.
+ *
+ * Informa TODOS los pares faltantes, no el primero: quien tiene que cargar
+ * los precios los ve de una sola vez, en lugar de descubrirlos de a uno por
+ * intento de venta.
+ */
+export function priceSaleItems(customerType, items, prices) {
+    const priced = [];
+    const missing = [];
+    const alreadyReported = new Set();
+    for (const item of items) {
+        const result = findUnitPrice(prices, customerType, item.productCode);
+        if (!result.ok) {
+            // El mismo producto repetido en dos lineas es un solo precio faltante:
+            // repetirlo solo ensuciaria el mensaje de error.
+            if (!alreadyReported.has(item.productCode)) {
+                alreadyReported.add(item.productCode);
+                missing.push(result.missing);
+            }
+            continue;
+        }
+        priced.push({
+            productCode: item.productCode,
+            quantity: item.quantity,
+            unitPrice: result.unitPrice,
+        });
+    }
+    if (missing.length > 0) {
+        return { ok: false, missing };
+    }
+    const total = priced.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+    return { ok: true, items: priced, total };
 }
 export function validateCreateSaleInput(input) {
     const errors = [];
@@ -76,7 +149,7 @@ export function validateCreateSaleInput(input) {
     if (input.truckId !== undefined && input.truckId.trim().length === 0) {
         errors.push('truckId must not be empty when provided');
     }
-    if (!CUSTOMER_TYPES.includes(input.customerType)) {
+    if (!isWellFormedCustomerType(input.customerType)) {
         errors.push("customerType is invalid");
     }
     if (!PAYMENT_METHODS.includes(input.paymentMethod)) {
@@ -132,7 +205,7 @@ export function validateRecordEmptyVisitInput(input) {
     if (input.truckId !== undefined && input.truckId.trim().length === 0) {
         errors.push('truckId must not be empty when provided');
     }
-    if (!CUSTOMER_TYPES.includes(input.customerType)) {
+    if (!isWellFormedCustomerType(input.customerType)) {
         errors.push("customerType is invalid");
     }
     return errors;
@@ -158,7 +231,7 @@ function validateSaleIdentityFields(input) {
     if (input.truckId !== undefined && input.truckId.trim().length === 0) {
         errors.push('truckId must not be empty when provided');
     }
-    if (!CUSTOMER_TYPES.includes(input.customerType)) {
+    if (!isWellFormedCustomerType(input.customerType)) {
         errors.push("customerType is invalid");
     }
     return errors;
@@ -281,11 +354,11 @@ export function validateCreateCustomerInput(input) {
     if (!input.name || input.name.trim().length < 2) {
         errors.push('name must have at least 2 characters');
     }
-    if (!CUSTOMER_TYPES.includes(input.customerType)) {
+    if (!isWellFormedCustomerType(input.customerType)) {
         errors.push('customerType is invalid');
     }
-    if (input.zone !== undefined && input.zone.trim().length === 0) {
-        errors.push('zone must not be empty when provided');
+    if (input.zoneId !== undefined && input.zoneId.trim().length === 0) {
+        errors.push('zoneId must not be empty when provided');
     }
     if (input.address !== undefined && input.address.trim().length === 0) {
         errors.push('address must not be empty when provided');
@@ -308,7 +381,7 @@ export function validateUpdateCustomerInput(input) {
     const errors = [];
     const touched = input.name !== undefined ||
         input.customerType !== undefined ||
-        input.zone !== undefined ||
+        input.zoneId !== undefined ||
         input.address !== undefined ||
         input.latitude !== undefined ||
         input.longitude !== undefined ||
@@ -319,11 +392,14 @@ export function validateUpdateCustomerInput(input) {
     if (input.name !== undefined && input.name.trim().length < 2) {
         errors.push('name must have at least 2 characters');
     }
-    if (input.customerType !== undefined && !CUSTOMER_TYPES.includes(input.customerType)) {
+    if (input.customerType !== undefined &&
+        !isWellFormedCustomerType(input.customerType)) {
         errors.push('customerType is invalid');
     }
-    if (input.zone !== undefined && input.zone !== null && input.zone.trim().length === 0) {
-        errors.push('zone must not be empty when provided');
+    if (input.zoneId !== undefined &&
+        input.zoneId !== null &&
+        input.zoneId.trim().length === 0) {
+        errors.push('zoneId must not be empty when provided');
     }
     if (input.address !== undefined &&
         input.address !== null &&
@@ -358,8 +434,38 @@ export function validateCreateTruckInput(input) {
     if (!input.plate || input.plate.trim().length < 1) {
         errors.push('plate must have at least 1 character');
     }
-    if (!Number.isInteger(input.capacity) || input.capacity < 0) {
-        errors.push('capacity must be a non-negative integer');
+    return errors;
+}
+/**
+ * Valida la grilla de capacidad. Como en todo el paquete, de los codigos de
+ * producto se comprueba la FORMA y no la pertenencia: el catalogo lo define el
+ * admin en runtime y ni el telefono ni el navegador lo conocen. Que el
+ * producto EXISTA lo asegura el servidor con `assertProductCodesExist`.
+ */
+export function validateSetTruckCapacitiesInput(input) {
+    const errors = [];
+    if (!Array.isArray(input.capacities)) {
+        errors.push('capacities must be an array');
+        return errors;
+    }
+    const seen = new Set();
+    for (const entry of input.capacities) {
+        if (!isWellFormedProductCode(entry?.productCode)) {
+            errors.push('productCode is invalid');
+            continue;
+        }
+        // Dos filas del mismo producto no tienen respuesta posible: cual de las
+        // dos seria la capacidad? Se rechaza aca y no se deja que lo haga el
+        // unique de la base, que contestaria un 500 sin nombrar el producto.
+        if (seen.has(entry.productCode)) {
+            errors.push(`productCode ${entry.productCode} is duplicated`);
+        }
+        seen.add(entry.productCode);
+        // 0 es una capacidad valida y significativa, asi que se compara contra
+        // el numero y nunca con un `if (!entry.units)`.
+        if (!Number.isInteger(entry.units) || entry.units < 0) {
+            errors.push('units must be a non-negative integer');
+        }
     }
     return errors;
 }
@@ -367,7 +473,6 @@ export function validateUpdateTruckInput(input) {
     const errors = [];
     const touched = input.code !== undefined ||
         input.plate !== undefined ||
-        input.capacity !== undefined ||
         input.isActive !== undefined;
     if (!touched) {
         errors.push('at least one field must be provided');
@@ -377,10 +482,6 @@ export function validateUpdateTruckInput(input) {
     }
     if (input.plate !== undefined && input.plate.trim().length < 1) {
         errors.push('plate must have at least 1 character');
-    }
-    if (input.capacity !== undefined &&
-        (!Number.isInteger(input.capacity) || input.capacity < 0)) {
-        errors.push('capacity must be a non-negative integer');
     }
     if (input.isActive !== undefined && typeof input.isActive !== 'boolean') {
         errors.push('isActive must be a boolean');
@@ -449,12 +550,7 @@ export function validateCreateDriverCustomerAssignmentInput(input) {
 }
 const PRODUCT_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_]*$/;
 const PRODUCT_CODE_MAX_LENGTH = 20;
-function validateProductPrice(prices, customerType, errors) {
-    const amount = prices[customerType];
-    if (amount === undefined || amount === null) {
-        errors.push(`prices.${customerType} is required`);
-        return;
-    }
+function validateProductPrice(customerType, amount, errors) {
     if (!Number.isInteger(amount) || amount < 0) {
         errors.push(`prices.${customerType} must be a non-negative integer`);
     }
@@ -479,17 +575,116 @@ export function validateCreateProductInput(input) {
     if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
         errors.push("sortOrder must be an integer");
     }
+    // Se valida cada precio QUE VINO, no que hayan venido todos: la lista de
+    // categorias vive en la base y este validador no la conoce. Completitud la
+    // exige el servidor, que si puede nombrar las que faltan.
     if (!input.prices) {
         errors.push("prices is required");
     }
     else {
-        for (const customerType of CUSTOMER_TYPES) {
-            validateProductPrice(input.prices, customerType, errors);
+        for (const [customerType, amount] of Object.entries(input.prices)) {
+            validateProductPrice(customerType, amount, errors);
         }
     }
     return errors;
 }
 export function validateUpdateProductInput(input) {
+    const errors = [];
+    const touched = input.name !== undefined ||
+        input.isActive !== undefined ||
+        input.sortOrder !== undefined;
+    if (!touched) {
+        errors.push("at least one field must be provided");
+    }
+    if (input.name !== undefined && input.name.trim().length < 2) {
+        errors.push("name must have at least 2 characters");
+    }
+    if (input.isActive !== undefined && typeof input.isActive !== "boolean") {
+        errors.push("isActive must be a boolean");
+    }
+    if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+        errors.push("sortOrder must be an integer");
+    }
+    return errors;
+}
+/**
+ * Misma forma que el codigo de producto, y por la misma razon: es la clave
+ * estable de la fila, la que sobrevive a cualquier renombre del `name`.
+ */
+const ZONE_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_]*$/;
+const ZONE_CODE_MAX_LENGTH = 20;
+export function validateCreateZoneInput(input) {
+    const errors = [];
+    const code = input.code?.trim() ?? "";
+    if (code.length === 0) {
+        errors.push("code is required");
+    }
+    else {
+        if (code.length > ZONE_CODE_MAX_LENGTH) {
+            errors.push(`code must be at most ${ZONE_CODE_MAX_LENGTH} characters`);
+        }
+        if (!ZONE_CODE_PATTERN.test(code)) {
+            errors.push("code must be uppercase letters, digits or underscore");
+        }
+    }
+    if (!input.name || input.name.trim().length < 2) {
+        errors.push("name must have at least 2 characters");
+    }
+    if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+        errors.push("sortOrder must be an integer");
+    }
+    return errors;
+}
+export function validateUpdateZoneInput(input) {
+    const errors = [];
+    const touched = input.name !== undefined ||
+        input.isActive !== undefined ||
+        input.sortOrder !== undefined;
+    if (!touched) {
+        errors.push("at least one field must be provided");
+    }
+    if (input.name !== undefined && input.name.trim().length < 2) {
+        errors.push("name must have at least 2 characters");
+    }
+    if (input.isActive !== undefined && typeof input.isActive !== "boolean") {
+        errors.push("isActive must be a boolean");
+    }
+    if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+        errors.push("sortOrder must be an integer");
+    }
+    return errors;
+}
+/**
+ * A diferencia del codigo de zona y del de producto, aca se aceptan
+ * minusculas. Las tres categorias semilla son los valores del enum viejo
+ * ('final', 'comercio', 'distribuidor'), ya persistidos en ventas encoladas y
+ * por lo tanto inmutables: forzar mayusculas para las nuevas dejaria la
+ * columna partida en dos convenciones para siempre.
+ */
+const CUSTOMER_CATEGORY_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_]*$/;
+export function validateCreateCustomerCategoryInput(input) {
+    const errors = [];
+    const code = input.code?.trim() ?? "";
+    if (code.length === 0) {
+        errors.push("code is required");
+    }
+    else {
+        if (code.length > CUSTOMER_TYPE_MAX_LENGTH) {
+            errors.push(`code must be at most ${CUSTOMER_TYPE_MAX_LENGTH} characters`);
+        }
+        if (!CUSTOMER_CATEGORY_CODE_PATTERN.test(code)) {
+            errors.push("code must be letters, digits or underscore");
+        }
+    }
+    if (!input.name || input.name.trim().length < 2) {
+        errors.push("name must have at least 2 characters");
+    }
+    if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+        errors.push("sortOrder must be an integer");
+    }
+    return errors;
+}
+export function validateUpdateCustomerCategoryInput(input) {
     const errors = [];
     const touched = input.name !== undefined ||
         input.isActive !== undefined ||

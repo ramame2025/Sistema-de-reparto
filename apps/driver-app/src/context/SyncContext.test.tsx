@@ -63,7 +63,7 @@ const makeFetchRouter = (
                 truckId: 'truck-1',
                 code: 'CAMION-01',
                 plate: 'AB123CD',
-                capacity: 40,
+                capacities: [],
                 startDate: '2026-02-01T00:00:00.000Z',
                 endDate: null,
               },

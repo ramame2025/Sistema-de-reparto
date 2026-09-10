@@ -678,7 +678,7 @@ describe('DriverTruckAssignmentsService', () => {
     });
   });
   describe('resolveMyTruckForDate', () => {
-    it('returns the truck the driver actually drives that day, with its capacity', async () => {
+    it('returns the truck the driver actually drives that day, with its per-product capacity grid', async () => {
       prisma.driverTruckAssignment.findMany.mockResolvedValue([
         buildAssignmentRow({
           id: 'tit-1',
@@ -701,20 +701,54 @@ describe('DriverTruckAssignmentsService', () => {
         id: 'truck-1',
         code: 'T-01',
         plate: 'AB123CD',
-        capacity: 40,
+        capacities: [
+          { productCode: 'G10', units: 30 },
+          { productCode: 'G45', units: 0 },
+        ],
         isActive: true,
       });
 
       const result = await service.resolveMyTruckForDate('pedro', '2026-02-11');
 
       // Ese dia Pedro cubre el truck-1, no maneja su titular truck-2.
-      expect(prisma.truck.findUnique).toHaveBeenCalledWith({ where: { id: 'truck-1' } });
+      expect(prisma.truck.findUnique).toHaveBeenCalledWith({
+        where: { id: 'truck-1' },
+        include: {
+          capacities: {
+            select: { productCode: true, units: true },
+            orderBy: [{ product: { sortOrder: 'asc' } }, { productCode: 'asc' }],
+          },
+        },
+      });
       expect(result).toMatchObject({
         truckId: 'truck-1',
         code: 'T-01',
-        capacity: 40,
         kind: 'cobertura',
       });
+      expect(result?.capacities).toEqual([
+        { productCode: 'G10', units: 30 },
+        { productCode: 'G45', units: 0 },
+      ]);
+    });
+
+    // Un camion cuya grilla nadie cargo todavia devuelve un array vacio, que
+    // la app lee como "sin detallar". Nunca un total en 0, que diria que el
+    // camion no carga nada.
+    it('returns an empty grid for a truck whose capacity was never filled in', async () => {
+      prisma.driverTruckAssignment.findMany.mockResolvedValue([
+        buildAssignmentRow({ driverId: 'pedro', truckId: 'truck-1', kind: 'titular' }),
+      ]);
+      prisma.truck.findUnique.mockResolvedValue({
+        id: 'truck-1',
+        code: 'T-01',
+        plate: 'AB123CD',
+        capacities: [],
+        isActive: true,
+      });
+
+      const result = await service.resolveMyTruckForDate('pedro', '2026-02-11');
+
+      expect(result?.capacities).toEqual([]);
     });
 
     it('returns null when the driver has no truck that day', async () => {
@@ -735,7 +769,7 @@ describe('DriverTruckAssignmentsService', () => {
         id: 'truck-1',
         code: 'T-01',
         plate: 'AB123CD',
-        capacity: 40,
+        capacities: [],
         isActive: false,
       });
 

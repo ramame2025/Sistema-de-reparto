@@ -16,6 +16,7 @@ import {
   type EffectiveDay,
   type RangeSelection,
 } from "../lib/calendar";
+import { formatTruckCapacities } from "../lib/format";
 
 type TruckCalendarResponse = {
   truckId: string;
@@ -188,8 +189,8 @@ export function TruckCalendar({ truck }: { truck: TruckRecord }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold">Calendario · {truck.code}</h2>
-          <p className="text-sm text-slate-600">
-            {truck.plate} · capacidad {truck.capacity}
+          <p className="text-sm text-slate-600" data-testid="truck-calendar-capacity">
+            {truck.plate} · capacidad {formatTruckCapacities(truck.capacities)}
           </p>
         </div>
         <div className="flex items-center gap-2">

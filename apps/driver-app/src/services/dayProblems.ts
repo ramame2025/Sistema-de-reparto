@@ -1,5 +1,5 @@
 import {
-  calculateSaleTotal,
+  priceSaleItems,
   type CreateSaleInput,
   type PaymentMethod,
   type PriceTable,
@@ -41,7 +41,12 @@ const totalOfQueued = (entry: PendingSale, prices: PriceTable | null): number | 
     return undefined;
   }
 
-  return calculateSaleTotal(payload.customerType, payload.items, prices);
+  // Un par sin precio cae en el mismo `undefined` que no tener tabla: el
+  // contrato de `total` ya dice "ausente cuando no hay con que valorizarla", y
+  // un cero aca haria parecer que la venta no valia nada.
+  const priced = priceSaleItems(payload.customerType, payload.items, prices);
+
+  return priced.ok ? priced.total : undefined;
 };
 
 /**
