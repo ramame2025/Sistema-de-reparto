@@ -1,10 +1,5 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
 import {
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
-import {
-  CUSTOMER_TYPES,
   type CustomerType,
   type PriceTable,
   type ProductCode,
@@ -46,47 +41,39 @@ export class PricesService {
    * miercoles se grabe al precio del lunes, que es el que el chofer cobro.
    */
   async getPriceTableAt(at: Date): Promise<PriceTable> {
-    // TODOS los productos, activos y dados de baja. Una venta encolada en el
-    // telefono antes de que el producto se ocultara tiene que poder
-    // sincronizar despues, y para eso necesita su precio.
-    const [products, rows] = await Promise.all([
-      this.prisma.product.findMany({ select: { code: true } }) as Promise<
-        { code: string }[]
-      >,
-      this.prisma.productPrice.findMany({
-        where: { validFrom: { lte: at } },
-        orderBy: { validFrom: 'asc' },
-      }) as Promise<PriceRow[]>,
-    ]);
+    // La tabla se arma con LAS FILAS QUE EXISTEN, agrupadas por el
+    // `customerType` que hayan traido, sea cual sea. No se recorre ninguna
+    // lista fija de categorias ni de productos: las categorias las define el
+    // admin en runtime, y una recien creada NACE SIN PRECIOS -- no aparece en
+    // la tabla hasta que tenga su primera celda, que es exactamente lo que
+    // pasa.
+    //
+    // Nada se filtra por `isActive`, ni de producto ni de categoria: una venta
+    // encolada en el telefono antes de que el admin lo diera de baja tiene que
+    // poder sincronizar despues, y para eso necesita su precio.
+    const rows: PriceRow[] = await this.prisma.productPrice.findMany({
+      where: { validFrom: { lte: at } },
+      orderBy: { validFrom: 'asc' },
+    });
 
     // Las filas vienen ordenadas por validFrom ascendente, asi que la ultima
     // que se escribe de cada combinacion es la vigente en `at`.
-    const byCustomerType = new Map<CustomerType, Map<ProductCode, number>>();
+    const table: PriceTable = {};
     for (const row of rows) {
-      if (!byCustomerType.has(row.customerType)) {
-        byCustomerType.set(row.customerType, new Map());
-      }
-      byCustomerType.get(row.customerType)!.set(row.productCode, row.amount);
+      const cells: Partial<Record<ProductCode, number>> =
+        table[row.customerType] ?? {};
+      cells[row.productCode] = row.amount;
+      table[row.customerType] = cells;
     }
 
-    const table = {} as PriceTable;
-    for (const customerType of CUSTOMER_TYPES) {
-      const prices = byCustomerType.get(customerType);
-      table[customerType] = {} as Record<ProductCode, number>;
-      for (const { code } of products) {
-        const amount = prices?.get(code);
-        if (amount === undefined) {
-          // Un producto sin precio no rompe su propia venta: rompe TODAS.
-          // Por eso `createProduct` escribe producto y precios en la misma
-          // transaccion, y por eso esto sigue siendo un error y no un cero.
-          throw new InternalServerErrorException(
-            `Missing price for productCode=${code} customerType=${customerType} at ${at.toISOString()}`,
-          );
-        }
-        table[customerType][code] = amount;
-      }
-    }
-
+    // El agujero se omite, no rompe: una categoria puede existir sin todos sus
+    // precios cargados, asi que un par sin precio es un estado legitimo del
+    // sistema y no una tabla corrupta.
+    //
+    // Fallar aca convertia ese agujero en un 500 para TODAS las ventas,
+    // incluidas las de las categorias con la lista completa. La tabla informa
+    // lo que hay; la falla pertenece al momento de cotizar, que es el unico
+    // que sabe que par se necesitaba y puede nombrarlo.
     return table;
   }
 

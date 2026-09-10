@@ -6,12 +6,16 @@ import {
   type CreateLoadManifestInput,
   type CreateSaleInput,
   type CreateTruckInput,
+  type PriceTable,
   type RecordEmptyVisitInput,
+  type SaleItemInput,
   type UpdatePriceInput,
   type UpdateCustomerInput,
   type UpdateProductInput,
   type UpdateSaleInput,
   type UpdateTruckInput,
+  findUnitPrice,
+  priceSaleItems,
   resolveOccurredAt,
   validateCreateAssignmentInput,
   normalizeCustomerName,
@@ -877,5 +881,135 @@ describe('resolveOccurredAt', () => {
     for (const bad of ['', 'ayer', '2026-13-45T99:99:99Z']) {
       expect(resolveOccurredAt(bad, now)).toEqual(now);
     }
+  });
+});
+
+/**
+ * The price table is sparse on purpose: a customer type may exist without a
+ * price for every product. These two primitives are the only sanctioned way
+ * to read a price -- every `?? 0` they replace was a silent free sale.
+ */
+describe('findUnitPrice', () => {
+  const prices: PriceTable = {
+    final: { G10: 8500, G15: 13000 },
+    comercio: { G10: 8200 },
+  };
+
+  it('returns the unit price of a priced pair', () => {
+    expect(findUnitPrice(prices, 'final', 'G15')).toEqual({
+      ok: true,
+      unitPrice: 13000,
+    });
+  });
+
+  it('reports the pair when the customer type has no prices at all', () => {
+    expect(findUnitPrice(prices, 'distribuidor', 'G10')).toEqual({
+      ok: false,
+      missing: { customerType: 'distribuidor', productCode: 'G10' },
+    });
+  });
+
+  it('reports the pair when the type exists but the product is not priced for it', () => {
+    expect(findUnitPrice(prices, 'comercio', 'G15')).toEqual({
+      ok: false,
+      missing: { customerType: 'comercio', productCode: 'G15' },
+    });
+  });
+
+  // Cero es un precio real que el admin puede fijar (una promocion, una
+  // muestra): tiene que distinguirse de "no hay precio", que es lo que este
+  // resultado existe para no confundir.
+  it('treats a stored zero as a real price, not as a missing one', () => {
+    expect(findUnitPrice({ final: { G10: 0 } }, 'final', 'G10')).toEqual({
+      ok: true,
+      unitPrice: 0,
+    });
+  });
+});
+
+describe('priceSaleItems', () => {
+  const prices: PriceTable = {
+    final: { G10: 8500, G15: 13000 },
+    comercio: { G10: 8200 },
+  };
+
+  it('prices every line and derives the total from those same lines', () => {
+    const items: SaleItemInput[] = [
+      { productCode: 'G10', quantity: 2 },
+      { productCode: 'G15', quantity: 1 },
+    ];
+
+    expect(priceSaleItems('final', items, prices)).toEqual({
+      ok: true,
+      items: [
+        { productCode: 'G10', quantity: 2, unitPrice: 8500 },
+        { productCode: 'G15', quantity: 1, unitPrice: 13000 },
+      ],
+      total: 30000,
+    });
+  });
+
+  it('prices an empty item list as an empty sale worth zero', () => {
+    expect(priceSaleItems('final', [], prices)).toEqual({
+      ok: true,
+      items: [],
+      total: 0,
+    });
+  });
+
+  it('reports the missing pair instead of pricing the line at zero', () => {
+    const result = priceSaleItems('comercio', [{ productCode: 'G15', quantity: 3 }], prices);
+
+    expect(result).toEqual({
+      ok: false,
+      missing: [{ customerType: 'comercio', productCode: 'G15' }],
+    });
+  });
+
+  // Que el chofer/admin vea de una lo que falta cargar, no de a un precio por
+  // intento de venta.
+  it('reports every missing pair, not only the first one', () => {
+    const result = priceSaleItems(
+      'comercio',
+      [
+        { productCode: 'G15', quantity: 1 },
+        { productCode: 'G10', quantity: 1 },
+        { productCode: 'G45', quantity: 1 },
+      ],
+      prices,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      missing: [
+        { customerType: 'comercio', productCode: 'G15' },
+        { customerType: 'comercio', productCode: 'G45' },
+      ],
+    });
+  });
+
+  it('names an unpriced pair once even if the same product appears twice', () => {
+    const result = priceSaleItems(
+      'comercio',
+      [
+        { productCode: 'G15', quantity: 1 },
+        { productCode: 'G15', quantity: 2 },
+      ],
+      prices,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      missing: [{ customerType: 'comercio', productCode: 'G15' }],
+    });
+  });
+
+  it('reports the pairs of a customer type with no prices at all', () => {
+    const result = priceSaleItems('distribuidor', [{ productCode: 'G10', quantity: 1 }], prices);
+
+    expect(result).toEqual({
+      ok: false,
+      missing: [{ customerType: 'distribuidor', productCode: 'G10' }],
+    });
   });
 });

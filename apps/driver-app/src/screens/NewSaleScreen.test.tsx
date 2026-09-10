@@ -310,7 +310,7 @@ describe('NewSaleScreen/offline fallback', () => {
 });
 
 describe('NewSaleScreen/product quantities', () => {
-  it('updates the derived total via calculateSaleTotal as steppers change', async () => {
+  it('updates the derived total via priceSaleItems as steppers change', async () => {
     await renderSaleScreen();
 
     await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
@@ -798,6 +798,85 @@ describe('NewSaleScreen — catalogo y precios reales', () => {
     // al chofer sin saber que le falta.
     expect(screen.getByTestId('sale-footer-action')).toHaveTextContent('Sin precios — sincronizá');
     expect(screen.getByTestId('sale-footer-action').props.accessibilityState.disabled).toBe(true);
+  });
+});
+
+/**
+ * Un tipo de cliente puede existir sin todos sus precios cargados. El chofer
+ * no puede cobrarle a ojo ni ver un total que miente por defecto: se le dice
+ * que a ese cliente todavia no se le puede cotizar y se le corta la accion.
+ */
+describe('NewSaleScreen/cliente sin precios', () => {
+  // Al tipo 'final' le falta el precio de G15: el resto de la tabla esta.
+  const partiallyPricedCatalog = {
+    ...baseCatalogValue,
+    prices: {
+      final: { G10: 8500, G45: 39000, G15_AUTO: 14500 },
+      comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },
+      distribuidor: { G10: 7900, G15: 12100, G45: 36500, G15_AUTO: 13600 },
+    },
+  };
+
+  it('warns the driver when the picked customer cannot be quoted for what is loaded', async () => {
+    mockedUseCatalog.mockReturnValue(partiallyPricedCatalog);
+
+    await renderSaleScreen('Kiosco La Esquina', 'final');
+    await fireEvent.press(screen.getByTestId('product-row-G15-increment'));
+
+    expect(screen.getByTestId('new-sale-unpriced-customer')).toBeTruthy();
+  });
+
+  it('does not show a total that under-reports what the sale is worth', async () => {
+    mockedUseCatalog.mockReturnValue(partiallyPricedCatalog);
+
+    await renderSaleScreen('Kiosco La Esquina', 'final');
+    await fireEvent.press(screen.getByTestId('product-row-G15-increment'));
+
+    // Un "$0" aca se leeria como una venta que no vale nada, que es
+    // exactamente la mentira que este cambio existe para evitar.
+    expect(screen.getByTestId('sale-footer-total')).not.toHaveTextContent('$0');
+  });
+
+  it('blocks the save action, naming what is missing', async () => {
+    mockedUseCatalog.mockReturnValue(partiallyPricedCatalog);
+
+    await renderSaleScreen('Kiosco La Esquina', 'final');
+    await fireEvent.press(screen.getByTestId('product-row-G15-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    expect(screen.getByTestId('sale-footer-action').props.accessibilityState.disabled).toBe(true);
+    expect(mockedTrySendSale).not.toHaveBeenCalled();
+    expect(mockedEnqueueSale).not.toHaveBeenCalled();
+  });
+
+  it('keeps selling the products that DO have a price for that customer', async () => {
+    mockedUseCatalog.mockReturnValue(partiallyPricedCatalog);
+    mockedTrySendSale.mockResolvedValue('sale-priced');
+
+    await renderSaleScreen('Kiosco La Esquina', 'final');
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+
+    expect(screen.queryByTestId('new-sale-unpriced-customer')).toBeNull();
+    expect(screen.getByTestId('sale-footer-total')).toHaveTextContent('$8.500');
+
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+  });
+
+  // Una devolucion no tiene nada que cotizar: la falta de precios no la toca.
+  it('still lets the driver register an empty visit for that customer', async () => {
+    mockedUseCatalog.mockReturnValue(partiallyPricedCatalog);
+    mockedTrySendEmptyVisit.mockResolvedValue('visit-1');
+
+    await renderSaleScreen('Kiosco La Esquina', 'final');
+    await fireEvent(
+      screen.getByTestId('new-sale-container-returned-switch'),
+      'valueChange',
+      true,
+    );
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    await waitFor(() => expect(mockedTrySendEmptyVisit).toHaveBeenCalledTimes(1));
   });
 });
 

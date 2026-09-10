@@ -93,26 +93,34 @@ describe('PricesService', () => {
   });
 
   describe('getPriceTable', () => {
-    it('throws when one of the 12 productCode x customerType pairs is missing', async () => {
+    // Un tipo de cliente puede existir sin todos sus precios cargados, asi que
+    // un agujero es un estado legitimo: la tabla informa lo que hay y la falla
+    // se decide al cotizar, donde se sabe que par se necesitaba.
+    it('omits the cell of a missing pair instead of failing the whole table', async () => {
       const rows = buildFullPriceRows().filter(
         (row) => !(row.productCode === 'G45' && row.customerType === 'distribuidor'),
       );
       prisma.productPrice.findMany.mockResolvedValue(rows);
 
-      await expect(service.getPriceTable()).rejects.toThrow(
-        /G45.*distribuidor|distribuidor.*G45/,
-      );
+      const table = await service.getPriceTable();
+
+      expect(table.distribuidor?.G45).toBeUndefined();
     });
 
-    it('throws a different message when a different pair is missing', async () => {
+    // Lo que rompia antes: un solo precio faltante devolvia 500 para TODOS,
+    // incluidos los tipos de cliente con la lista completa.
+    it('still prices every other pair when one is missing', async () => {
       const rows = buildFullPriceRows().filter(
         (row) => !(row.productCode === 'G10' && row.customerType === 'final'),
       );
       prisma.productPrice.findMany.mockResolvedValue(rows);
 
-      await expect(service.getPriceTable()).rejects.toThrow(
-        /G10.*final|final.*G10/,
-      );
+      const table = await service.getPriceTable();
+
+      expect(table.final?.G10).toBeUndefined();
+      expect(table.final?.G15).toBe(1100);
+      expect(table.comercio?.G10).toBe(1400);
+      expect(table.distribuidor?.G15_AUTO).toBe(2100);
     });
 
     it('maps all 12 rows into the PriceTable shape keyed by customerType then productCode', async () => {
@@ -121,12 +129,12 @@ describe('PricesService', () => {
 
       const table = await service.getPriceTable();
 
-      expect(table.final.G10).toBe(1000);
-      expect(table.final.G15).toBe(1100);
-      expect(table.final.G45).toBe(1200);
-      expect(table.final.G15_AUTO).toBe(1300);
-      expect(table.comercio.G10).toBe(1400);
-      expect(table.distribuidor.G15_AUTO).toBe(2100);
+      expect(table.final?.G10).toBe(1000);
+      expect(table.final?.G15).toBe(1100);
+      expect(table.final?.G45).toBe(1200);
+      expect(table.final?.G15_AUTO).toBe(1300);
+      expect(table.comercio?.G10).toBe(1400);
+      expect(table.distribuidor?.G15_AUTO).toBe(2100);
     });
 
     it('covers a product added after the seed, without any code change', async () => {
@@ -147,31 +155,43 @@ describe('PricesService', () => {
 
       const table = await service.getPriceTable();
 
-      expect(table.final.G20).toBe(5000);
-      expect(table.distribuidor.G20).toBe(5000);
+      expect(table.final?.G20).toBe(5000);
+      expect(table.distribuidor?.G20).toBe(5000);
     });
 
     // Una venta encolada en el telefono antes de dar de baja el producto tiene
-    // que poder sincronizar despues, y para eso necesita su precio.
+    // que poder sincronizar despues, y para eso necesita su precio. Sale gratis
+    // de armar la tabla con las filas que existen: nada las filtra por
+    // `isActive`.
     it('keeps deactivated products in the table, so queued sales can still be priced', async () => {
       prisma.productPrice.findMany.mockResolvedValue(buildFullPriceRows());
 
-      await service.getPriceTable();
+      const table = await service.getPriceTable();
 
-      expect(prisma.product.findMany).toHaveBeenCalledWith({
-        select: { code: true },
+      expect(prisma.productPrice.findMany).toHaveBeenCalledWith({
+        where: { validFrom: { lte: expect.any(Date) } },
+        orderBy: { validFrom: 'asc' },
       });
+      expect(table.final?.G10).toBe(1000);
     });
 
-    it('does not throw for a catalogue with no products at all', async () => {
-      prisma.product.findMany.mockResolvedValue([]);
+    // Una categoria recien creada NACE SIN PRECIOS: no tiene ni una celda, y
+    // eso es un estado legitimo. La tabla no la inventa vacia ni la rellena.
+    it('omits a category with no price rows at all, instead of faking an empty one', async () => {
+      prisma.productPrice.findMany.mockResolvedValue(
+        buildFullPriceRows().filter((row) => row.customerType !== 'distribuidor'),
+      );
+
+      const table = await service.getPriceTable();
+
+      expect(table.distribuidor).toBeUndefined();
+      expect(table.final?.G10).toBe(1000);
+    });
+
+    it('does not throw for a database with no price rows at all', async () => {
       prisma.productPrice.findMany.mockResolvedValue([]);
 
-      await expect(service.getPriceTable()).resolves.toEqual({
-        final: {},
-        comercio: {},
-        distribuidor: {},
-      });
+      await expect(service.getPriceTable()).resolves.toEqual({});
     });
   });
 
@@ -278,7 +298,7 @@ describe('PricesService — historical pricing', () => {
 
       const table = await service.getPriceTableAt(new Date('2026-08-15T00:00:00.000Z'));
 
-      expect(table.final.G10).toBe(8500);
+      expect(table.final?.G10).toBe(8500);
     });
 
     it('uses the new price for a date after the change', async () => {
@@ -286,7 +306,7 @@ describe('PricesService — historical pricing', () => {
 
       const table = await service.getPriceTableAt(new Date('2026-08-25T00:00:00.000Z'));
 
-      expect(table.final.G10).toBe(9500);
+      expect(table.final?.G10).toBe(9500);
     });
 
     // El limite exacto importa: un precio que rige "desde" un instante ya rige
@@ -296,7 +316,7 @@ describe('PricesService — historical pricing', () => {
 
       const table = await service.getPriceTableAt(new Date('2026-08-20T00:00:00.000Z'));
 
-      expect(table.final.G10).toBe(9500);
+      expect(table.final?.G10).toBe(9500);
     });
 
     it('picks the latest of several versions before the date', async () => {
@@ -308,15 +328,15 @@ describe('PricesService — historical pricing', () => {
 
       const table = await service.getPriceTableAt(new Date('2026-08-15T00:00:00.000Z'));
 
-      expect(table.final.G10).toBe(9000);
+      expect(table.final?.G10).toBe(9000);
     });
 
-    it('throws when no version was in force yet on that date', async () => {
+    it('omits the cell when no version was in force yet on that date', async () => {
       givenPriceVersions([priceRow(9500, '2026-08-20T00:00:00.000Z')]);
 
-      await expect(
-        service.getPriceTableAt(new Date('2026-08-01T00:00:00.000Z')),
-      ).rejects.toThrow(/G10/);
+      const table = await service.getPriceTableAt(new Date('2026-08-01T00:00:00.000Z'));
+
+      expect(table.final?.G10).toBeUndefined();
     });
   });
 

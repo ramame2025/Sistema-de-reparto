@@ -1,12 +1,20 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  priceSaleItems,
   resolveOccurredAt,
-  calculateSaleTotal,
   type CancelSaleInput,
   type CreateSaleInput,
   type CustomerType,
+  type PriceTable,
+  type PricedSaleItem,
   type RecordEmptyVisitInput,
   type SaleAuditRecord,
+  type SaleItemInput,
   type SaleKind,
   type SaleRecord,
   type UpdateSaleInput,
@@ -95,6 +103,42 @@ export class SalesService {
     return { customerType, customerName, customerId, truckId };
   }
 
+  /**
+   * Valoriza las lineas, o rechaza la operacion nombrando los pares que no
+   * tienen precio.
+   *
+   * Es un 400 y no un 500: que a un tipo de cliente le falte el precio de un
+   * producto es una configuracion incompleta del admin -- un estado legitimo
+   * desde que el tipo de cliente se crea antes de cargarle los precios -- y no
+   * una falla del servidor. El par culpable va en el mensaje, mismo criterio
+   * que `assertProductCodesExist`: quien lee un log o un banner tiene que
+   * saber QUE falta cargar sin abrir el JSON.
+   *
+   * La alternativa vieja era congelar `unitPrice: 0`, que regalaba la
+   * mercaderia sin que nadie se enterara.
+   */
+  private priceItemsOrReject(
+    customerType: CustomerType,
+    items: SaleItemInput[],
+    priceTable: PriceTable,
+  ): { items: PricedSaleItem[]; total: number } {
+    const priced = priceSaleItems(customerType, items, priceTable);
+
+    if (!priced.ok) {
+      const pairs = priced.missing.map(
+        (pair) =>
+          `No price for customerType=${pair.customerType} productCode=${pair.productCode}`,
+      );
+
+      throw new BadRequestException({
+        message: pairs.join(', '),
+        errors: pairs,
+      });
+    }
+
+    return { items: priced.items, total: priced.total };
+  }
+
   async listSales(): Promise<SaleRecord[]> {
     const sales = await this.prisma.sale.findMany({
       include: { items: true },
@@ -143,15 +187,12 @@ export class SalesService {
       await this.resolveCustomerAndTruck(input);
 
     // El precio unitario se congela en cada linea, y el total se deriva de
-    // esas lineas. Asi total e items no pueden discrepar nunca.
-    const pricedItems = input.items.map((item) => ({
-      productCode: item.productCode,
-      quantity: item.quantity,
-      unitPrice: priceTable[customerType][item.productCode] ?? 0,
-    }));
-    const total = pricedItems.reduce(
-      (sum, item) => sum + item.unitPrice * item.quantity,
-      0,
+    // esas lineas. Asi total e items no pueden discrepar nunca: `priceSaleItems`
+    // devuelve los dos juntos justamente para que no puedan calcularse aparte.
+    const { items: pricedItems, total } = this.priceItemsOrReject(
+      customerType,
+      input.items,
+      priceTable,
     );
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
@@ -296,17 +337,12 @@ export class SalesService {
     // A churn row never has items/paymentMethod, on create or on edit
     // (Design decision #2/#5): forced here too, regardless of whatever the
     // edit payload does or doesn't carry, mirroring `recordEmptyVisit`.
-    const resolvedItems = isChurn
-      ? []
-      : input.items.map((item) => ({
-          productCode: item.productCode,
-          quantity: item.quantity,
-          unitPrice: priceTable[customerType][item.productCode] ?? 0,
-        }));
-    const total = resolvedItems.reduce(
-      (sum, item) => sum + item.unitPrice * item.quantity,
-      0,
-    );
+    //
+    // Un churn no tiene items, asi que no hay nada que cotizar: la falta de
+    // precios nunca puede bloquear su edicion.
+    const { items: resolvedItems, total } = isChurn
+      ? { items: [], total: 0 }
+      : this.priceItemsOrReject(customerType, input.items, priceTable);
     const resolvedPaymentMethod = isChurn ? null : (input.paymentMethod as PrismaPaymentMethod);
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;

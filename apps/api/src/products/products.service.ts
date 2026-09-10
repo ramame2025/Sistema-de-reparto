@@ -63,9 +63,11 @@ export class ProductsService {
         },
       });
 
-      // Misma transaccion, a proposito: un producto sin sus tres precios haria
-      // fallar getPriceTable, y con ella TODAS las ventas del sistema, no solo
-      // las de este producto.
+      // Misma transaccion, a proposito: el producto y sus precios nacen juntos
+      // o no nace ninguno. Un producto sin uno de sus precios ya no rompe la
+      // tabla entera -- `getPriceTableAt` omite la celda faltante -- pero deja
+      // al chofer sin poder venderlo a ese tipo de cliente, y con un error que
+      // solo aparece frente al cliente.
       await tx.productPrice.createMany({
         data: CUSTOMER_TYPES.map((customerType) => ({
           productCode: code,

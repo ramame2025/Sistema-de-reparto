@@ -6,6 +6,8 @@ import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
   PAYMENT_METHODS,
+  findUnitPrice,
+  priceSaleItems,
   type CreateSaleInput,
   type CustomerType,
   type PaymentMethod,
@@ -152,23 +154,33 @@ export function NewSaleScreen() {
   );
 
   // Con los precios que vinieron de la API, no con una tabla compilada dentro
-  // de la app. Este era el numero que podia diferir del que grababa el
-  // servidor, y con precios editables esa diferencia es plata.
-  const total = useMemo(() => {
+  // de la app, y por la MISMA funcion que usa el servidor al grabar: esta
+  // pantalla cotizaba con su propia cuenta, y esa divergencia es plata.
+  //
+  // `null` = todavia no hay nada que cotizar (sin catalogo o sin cliente
+  // elegido), que es distinto de "no se puede cotizar".
+  const pricedSale = useMemo(() => {
     if (!prices || !customerType) {
-      return 0;
+      return null;
     }
-    return currentItems.reduce(
-      (sum, item) => sum + (prices[customerType][item.productCode] ?? 0) * item.quantity,
-      0,
-    );
+    return priceSaleItems(customerType, currentItems, prices);
   }, [customerType, currentItems, prices]);
+
+  // Al tipo de cliente elegido le faltan precios para lo que hay cargado. Es
+  // un estado legitimo -- un tipo de cliente se crea antes de tener todos sus
+  // precios -- pero esta venta no se puede cobrar hasta que se completen.
+  const cannotQuoteCustomer = pricedSale !== null && !pricedSale.ok;
+
+  // `undefined` (no cero) cuando falta un precio: el pie muestra un guion en
+  // vez de un importe que miente por defecto.
+  const total = pricedSale === null ? 0 : pricedSale.ok ? pricedSale.total : undefined;
 
   const unitPriceOf = (productCode: ProductCode): number | undefined => {
     if (!prices || !customerType) {
       return undefined;
     }
-    return prices[customerType][productCode];
+    const result = findUnitPrice(prices, customerType, productCode);
+    return result.ok ? result.unitPrice : undefined;
   };
 
   const changeQty = (productCode: ProductCode, delta: number) => {
@@ -306,6 +318,17 @@ export function NewSaleScreen() {
       return;
     }
 
+    // Ultima barrera antes de armar el payload: sin precio no hay importe que
+    // cobrar, y grabar la venta igual la congelaria en cero. Va antes de tomar
+    // el candado porque una venta rechazada aca no llego a intentarse.
+    if (!pricedSale?.ok) {
+      showMessage(
+        'A este cliente todavia no se le puede cotizar: faltan precios de su tipo.',
+        'error',
+      );
+      return;
+    }
+
     // A partir de aca la venta va a intentarse de verdad. Tomamos el candado
     // sincronico y pintamos el boton ANTES del await del GPS, no despues: ese
     // era el bug -- setSaving(true) vivia recien despues de captureDeviceLocation.
@@ -355,7 +378,7 @@ export function NewSaleScreen() {
       return;
     }
 
-    const soldTotal = total;
+    const soldTotal = pricedSale.total;
 
     try {
       await trySendSale(payload);
@@ -490,6 +513,11 @@ export function NewSaleScreen() {
       }
       return { label: 'Agregá productos', disabled: true, run: () => {} };
     }
+    // Despues del churn a proposito: una devolucion no tiene nada que
+    // cotizar, asi que la falta de precios no puede bloquearla.
+    if (cannotQuoteCustomer) {
+      return { label: 'Sin precios para este cliente', disabled: true, run: () => {} };
+    }
     return { label: 'Guardar venta', disabled: false, run: () => void saveSale() };
   }, [
     saving,
@@ -499,6 +527,7 @@ export function NewSaleScreen() {
     customerName,
     currentItems.length,
     containerReturned,
+    cannotQuoteCustomer,
     saveSale,
     recordVisit,
   ]);
@@ -545,6 +574,13 @@ export function NewSaleScreen() {
           testID="new-sale-stale-prices"
           message="Sin conexion: precios de la ultima vez que sincronizaste. Pueden estar desactualizados."
           tone="warning"
+        />
+      )}
+      {cannotQuoteCustomer && (
+        <FeedbackBanner
+          testID="new-sale-unpriced-customer"
+          message="A este cliente todavia no se le puede cotizar: faltan precios de su tipo. Hablá con el administrador."
+          tone="error"
         />
       )}
 

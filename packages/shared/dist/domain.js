@@ -43,17 +43,66 @@ export const EXPENSE_CATEGORIES = [
 export const USER_ROLES = ['admin', 'chofer'];
 export const ASSIGNMENT_KINDS = ['titular', 'cobertura'];
 export const SALE_KINDS = ['sale', 'churn'];
+/** Tamano de pagina fijo del historial de asignaciones (vista admin). */
 export const DRIVER_CUSTOMER_ASSIGNMENT_HISTORY_PAGE_SIZE = 15;
 export const DEFAULT_PRICE_TABLE = {
     final: { G10: 8500, G15: 13000, G45: 39000, G15_AUTO: 14500 },
     comercio: { G10: 8200, G15: 12600, G45: 38000, G15_AUTO: 14000 },
     distribuidor: { G10: 7900, G15: 12100, G45: 36500, G15_AUTO: 13600 },
 };
-export function calculateSaleTotal(customerType, items, prices) {
-    return items.reduce((total, item) => {
-        const unitPrice = prices[customerType][item.productCode] ?? 0;
-        return total + unitPrice * item.quantity;
-    }, 0);
+/**
+ * La UNICA forma sancionada de leer un precio en todo el codigo.
+ *
+ * Existe para que "no hay precio" no se pueda confundir nunca con "el precio
+ * es cero": cero es un precio real que el admin puede fijar, y un `?? 0` que
+ * los mezcla vende gratis sin que nadie se entere. Devolver el par faltante,
+ * y no solo un `undefined`, es lo que despues permite decir exactamente que
+ * falta cargar.
+ */
+export function findUnitPrice(prices, customerType, productCode) {
+    const unitPrice = prices[customerType]?.[productCode];
+    if (unitPrice === undefined) {
+        return { ok: false, missing: { customerType, productCode } };
+    }
+    return { ok: true, unitPrice };
+}
+/**
+ * Valoriza una venta entera, o dice que pares le faltan.
+ *
+ * Devuelve las lineas Y el total juntos porque el total se deriva de esas
+ * mismas lineas: asi total e items no pueden discrepar nunca, que es la
+ * invariante de la que ya dependia la API al grabar la venta.
+ *
+ * Informa TODOS los pares faltantes, no el primero: quien tiene que cargar
+ * los precios los ve de una sola vez, en lugar de descubrirlos de a uno por
+ * intento de venta.
+ */
+export function priceSaleItems(customerType, items, prices) {
+    const priced = [];
+    const missing = [];
+    const alreadyReported = new Set();
+    for (const item of items) {
+        const result = findUnitPrice(prices, customerType, item.productCode);
+        if (!result.ok) {
+            // El mismo producto repetido en dos lineas es un solo precio faltante:
+            // repetirlo solo ensuciaria el mensaje de error.
+            if (!alreadyReported.has(item.productCode)) {
+                alreadyReported.add(item.productCode);
+                missing.push(result.missing);
+            }
+            continue;
+        }
+        priced.push({
+            productCode: item.productCode,
+            quantity: item.quantity,
+            unitPrice: result.unitPrice,
+        });
+    }
+    if (missing.length > 0) {
+        return { ok: false, missing };
+    }
+    const total = priced.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+    return { ok: true, items: priced, total };
 }
 export function validateCreateSaleInput(input) {
     const errors = [];

@@ -67,7 +67,21 @@ export type UserRole = (typeof USER_ROLES)[number];
 export type AssignmentKind = (typeof ASSIGNMENT_KINDS)[number];
 export type SaleKind = (typeof SALE_KINDS)[number];
 
-export type PriceTable = Record<CustomerType, Record<ProductCode, number>>;
+/**
+ * La tabla de precios es RALA a proposito, en sus dos niveles: puede faltar un
+ * tipo de cliente entero, y puede faltar un producto dentro de un tipo que si
+ * esta. Un tipo de cliente nace incompleto -- se crea primero y se le cargan
+ * los precios despues -- asi que el agujero es un estado legitimo del sistema,
+ * no una tabla corrupta.
+ *
+ * `Partial` en los dos niveles no es cosmetico: es lo que hace que TypeScript
+ * devuelva `number | undefined` al indexar y obligue a cada lector a decidir
+ * que hacer con el agujero. Un `Record` liso mentia diciendo `number`, y esa
+ * mentira es la que habilitaba los `?? 0` que vendian gratis.
+ */
+export type PriceTable = Partial<
+  Record<CustomerType, Partial<Record<ProductCode, number>>>
+>;
 
 export type SaleItemInput = {
   productCode: ProductCode;
@@ -474,15 +488,99 @@ export const DEFAULT_PRICE_TABLE: PriceTable = {
   distribuidor: { G10: 7900, G15: 12100, G45: 36500, G15_AUTO: 13600 },
 };
 
-export function calculateSaleTotal(
+/** El par que no tiene precio, nombrado entero: sin el no se sabe que cargar. */
+export type MissingPrice = {
+  customerType: CustomerType;
+  productCode: ProductCode;
+};
+
+export type UnitPriceResult =
+  | { ok: true; unitPrice: number }
+  | { ok: false; missing: MissingPrice };
+
+/**
+ * La UNICA forma sancionada de leer un precio en todo el codigo.
+ *
+ * Existe para que "no hay precio" no se pueda confundir nunca con "el precio
+ * es cero": cero es un precio real que el admin puede fijar, y un `?? 0` que
+ * los mezcla vende gratis sin que nadie se entere. Devolver el par faltante,
+ * y no solo un `undefined`, es lo que despues permite decir exactamente que
+ * falta cargar.
+ */
+export function findUnitPrice(
+  prices: PriceTable,
+  customerType: CustomerType,
+  productCode: ProductCode,
+): UnitPriceResult {
+  const unitPrice = prices[customerType]?.[productCode];
+
+  if (unitPrice === undefined) {
+    return { ok: false, missing: { customerType, productCode } };
+  }
+
+  return { ok: true, unitPrice };
+}
+
+export type PricedSaleItem = {
+  productCode: ProductCode;
+  quantity: number;
+  unitPrice: number;
+};
+
+export type PricedSaleResult =
+  | { ok: true; items: PricedSaleItem[]; total: number }
+  | { ok: false; missing: MissingPrice[] };
+
+/**
+ * Valoriza una venta entera, o dice que pares le faltan.
+ *
+ * Devuelve las lineas Y el total juntos porque el total se deriva de esas
+ * mismas lineas: asi total e items no pueden discrepar nunca, que es la
+ * invariante de la que ya dependia la API al grabar la venta.
+ *
+ * Informa TODOS los pares faltantes, no el primero: quien tiene que cargar
+ * los precios los ve de una sola vez, en lugar de descubrirlos de a uno por
+ * intento de venta.
+ */
+export function priceSaleItems(
   customerType: CustomerType,
   items: SaleItemInput[],
   prices: PriceTable,
-): number {
-  return items.reduce((total, item) => {
-    const unitPrice = prices[customerType][item.productCode] ?? 0;
-    return total + unitPrice * item.quantity;
-  }, 0);
+): PricedSaleResult {
+  const priced: PricedSaleItem[] = [];
+  const missing: MissingPrice[] = [];
+  const alreadyReported = new Set<ProductCode>();
+
+  for (const item of items) {
+    const result = findUnitPrice(prices, customerType, item.productCode);
+
+    if (!result.ok) {
+      // El mismo producto repetido en dos lineas es un solo precio faltante:
+      // repetirlo solo ensuciaria el mensaje de error.
+      if (!alreadyReported.has(item.productCode)) {
+        alreadyReported.add(item.productCode);
+        missing.push(result.missing);
+      }
+      continue;
+    }
+
+    priced.push({
+      productCode: item.productCode,
+      quantity: item.quantity,
+      unitPrice: result.unitPrice,
+    });
+  }
+
+  if (missing.length > 0) {
+    return { ok: false, missing };
+  }
+
+  const total = priced.reduce(
+    (sum, item) => sum + item.unitPrice * item.quantity,
+    0,
+  );
+
+  return { ok: true, items: priced, total };
 }
 
 export function validateCreateSaleInput(input: CreateSaleInput): string[] {

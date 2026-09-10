@@ -132,8 +132,11 @@ describe("ProductosPage", () => {
       expect(post.mock.calls[0][1].code).toBe("G20");
     });
 
-    // Un producto sin sus tres precios rompe getPriceTable y con ella TODAS
-    // las ventas, asi que el boton no se habilita hasta tenerlos.
+    // "Nace completo o no nace" sigue rigiendo para el producto: un precio
+    // faltante ya no rompe la tabla entera -- `getPriceTableAt` omite la celda
+    // -- pero deja al chofer sin poder venderlo a ese tipo de cliente, y se
+    // entera recien frente al cliente. Por eso el boton no se habilita hasta
+    // tenerlos.
     it("keeps the button disabled until code, name and the three prices are filled", () => {
       render(<ProductosPage />);
       const submit = screen.getByRole("button", { name: "Crear producto" });

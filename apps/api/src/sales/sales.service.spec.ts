@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type {
   CreateSaleInput,
@@ -16,6 +16,14 @@ const CUSTOM_PRICE_TABLE: PriceTable = {
   final: { G10: 100, G15: 200, G45: 300, G15_AUTO: 400 },
   comercio: { G10: 90, G15: 180, G45: 270, G15_AUTO: 360 },
   distribuidor: { G10: 80, G15: 160, G45: 240, G15_AUTO: 320 },
+};
+
+/**
+ * Una tabla con agujeros, que ahora es un estado legitimo: un tipo de cliente
+ * existe antes de tener todos sus precios cargados.
+ */
+const SPARSE_PRICE_TABLE: PriceTable = {
+  final: { G10: 100 },
 };
 
 function buildSaleRow(overrides: Record<string, unknown> = {}) {
@@ -350,6 +358,42 @@ describe('SalesService', () => {
       expect(prisma.sale.create).not.toHaveBeenCalled();
     });
 
+    // Un par sin precio es una configuracion incompleta del admin, no una
+    // falla del servidor: 400 con el par nombrado, y ni una fila escrita.
+    // Congelar un unitPrice en cero seria regalar la mercaderia en silencio.
+    it('rejects the sale with a 400 naming the unpriced pair, and writes nothing', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue(SPARSE_PRICE_TABLE);
+
+      await expect(
+        service.createSale(buildCreateInput({ items: [{ productCode: 'G15', quantity: 2 }] })),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    it('names the customerType and the productCode of the unpriced pair', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue(SPARSE_PRICE_TABLE);
+
+      await expect(
+        service.createSale(buildCreateInput({ items: [{ productCode: 'G15', quantity: 2 }] })),
+      ).rejects.toThrow('No price for customerType=final productCode=G15');
+    });
+
+    it('names every unpriced pair at once, not just the first', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue(SPARSE_PRICE_TABLE);
+
+      await expect(
+        service.createSale(
+          buildCreateInput({
+            items: [
+              { productCode: 'G15', quantity: 1 },
+              { productCode: 'G10', quantity: 1 },
+              { productCode: 'G45', quantity: 1 },
+            ],
+          }),
+        ),
+      ).rejects.toThrow(/G15.*G45/);
+    });
+
     it('computes the total from PricesService.getPriceTable, not DEFAULT_PRICE_TABLE', async () => {
       prisma.sale.create.mockResolvedValue(buildSaleRow({ total: 400 }));
 
@@ -554,6 +598,43 @@ describe('SalesService', () => {
         { productCode: 'G10', quantity: 2, unitPrice: 100 },
       ]);
       expect(call.data.total).toBe(200);
+    });
+
+    // Misma regla que en createSale: una correccion tampoco puede congelar un
+    // precio inventado, y la venta original queda intacta.
+    it('rejects the edit with a 400 naming the unpriced pair, and writes nothing', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue(SPARSE_PRICE_TABLE);
+
+      await expect(
+        service.updateSale(
+          'sale-1',
+          buildUpdateInput({ items: [{ productCode: 'G15', quantity: 2 }] }),
+        ),
+      ).rejects.toThrow('No price for customerType=final productCode=G15');
+      expect(prisma.sale.update).not.toHaveBeenCalled();
+      expect(prisma.saleItem.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.saleAudit.create).not.toHaveBeenCalled();
+    });
+
+    // Un churn no tiene items, asi que no hay nada que cotizar: la falta de
+    // precios no puede bloquear su edicion.
+    it('edits a churn row even when the customer type has no prices at all', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue({});
+      prisma.sale.findUnique.mockResolvedValue(buildChurnRow());
+      prisma.sale.update.mockResolvedValue(buildChurnRow({ customerName: 'Nuevo nombre' }));
+
+      const result = await service.updateSale('sale-1', {
+        driverName: 'Juan',
+        customerName: 'Nuevo nombre',
+        customerType: 'final',
+        paymentMethod: 'efectivo',
+        items: [],
+        kind: 'churn',
+        reason: 'Corrección de visita',
+      });
+
+      expect(result.customerName).toBe('Nuevo nombre');
+      expect(prisma.sale.update).toHaveBeenCalled();
     });
 
     it('computes the total from PricesService.getPriceTable, not DEFAULT_PRICE_TABLE', async () => {

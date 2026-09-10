@@ -99,7 +99,7 @@ export class LoadManifestsService {
    * Stock derivado (no persistido): cargado - vendido (solo ventas activas),
    * hasta el fin de `asOf` en horario de negocio (ART, UTC-3 fijo, sin DST).
    * Reducido en TS, no en SQL, siguiendo el mismo estilo que
-   * `toRecord`/`calculateSaleTotal` en el resto del codigo.
+   * `toRecord`/`priceSaleItems` en el resto del codigo.
    */
   async getTruckStock(truckId: string, asOf: string): Promise<TruckStockSummary> {
     const asOfBoundary = endOfBusinessDayUtc(asOf);

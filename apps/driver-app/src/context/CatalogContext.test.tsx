@@ -43,7 +43,7 @@ function Probe() {
       <Text testID="stale">{String(stale)}</Text>
       <Text testID="can-sell">{String(canSell)}</Text>
       <Text testID="codes">{products.map((p) => p.code).join(',')}</Text>
-      <Text testID="g10">{String(prices?.final.G10 ?? 'none')}</Text>
+      <Text testID="g10">{String(prices?.final?.G10 ?? 'none')}</Text>
     </>
   );
 }
