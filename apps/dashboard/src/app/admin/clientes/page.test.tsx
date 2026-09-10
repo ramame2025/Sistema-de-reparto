@@ -95,13 +95,43 @@ const ZONES = [
   },
 ];
 
+const CATEGORIES = [
+  {
+    id: "k1",
+    code: "final",
+    name: "Final",
+    isActive: true,
+    sortOrder: 0,
+    createdAt: "",
+    updatedAt: "",
+  },
+  {
+    id: "k2",
+    code: "mayorista",
+    name: "Mayorista",
+    isActive: true,
+    sortOrder: 1,
+    createdAt: "",
+    updatedAt: "",
+  },
+];
+
 /**
- * La pagina pide dos cosas: el padron y las zonas, estas ultimas para sus
- * selects.
+ * La pagina pide tres cosas: el padron, las zonas y las categorias de cliente,
+ * las dos ultimas para sus selects.
  */
-function swrByKey(customers: unknown = CUSTOMERS, zones: unknown = ZONES) {
+function swrByKey(
+  customers: unknown = CUSTOMERS,
+  zones: unknown = ZONES,
+  categories: unknown = CATEGORIES,
+) {
   return (key: string) => ({
-    data: key === "/zones" ? zones : customers,
+    data:
+      key === "/zones"
+        ? zones
+        : key === "/customer-categories"
+          ? categories
+          : customers,
     isLoading: false,
     error: undefined,
     mutate,
@@ -196,6 +226,39 @@ describe("ClientesPage", () => {
     expect(
       Array.from(select.querySelectorAll("option")).map((option) => option.textContent),
     ).toEqual(["Sin zona", "Norte", "Oeste"]);
+  });
+
+  // El tipo de cliente dejo de ser una constante de tres valores: sale de la
+  // tabla que administra el admin, con el nombre que el le puso.
+  it("offers the categories from the catalogue instead of the hardcoded three", () => {
+    render(<ClientesPage />);
+
+    const select = screen.getByLabelText("Tipo");
+    expect(select.tagName).toBe("SELECT");
+    expect(
+      Array.from(select.querySelectorAll("option")).map((option) => option.textContent),
+    ).toEqual(["Final", "Mayorista"]);
+    expect(
+      Array.from(select.querySelectorAll("option")).map(
+        (option) => (option as HTMLOptionElement).value,
+      ),
+    ).toEqual(["final", "mayorista"]);
+  });
+
+  it("creates a customer with the category the admin picked", async () => {
+    render(<ClientesPage />);
+
+    fireEvent.change(screen.getByLabelText("Nombre"), {
+      target: { value: "Kiosco Nuevo" },
+    });
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "mayorista" } });
+    fireEvent.click(screen.getByRole("button", { name: "Crear cliente" }));
+
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    expect(post).toHaveBeenCalledWith("/customers", {
+      name: "Kiosco Nuevo",
+      customerType: "mayorista",
+    });
   });
 
   it("omits zone and address entirely when left blank, instead of sending empty strings", async () => {
@@ -354,6 +417,47 @@ describe("ClientesPage", () => {
 
       expect(screen.getByLabelText("Zona del cliente")).toHaveValue("z1");
       expect(screen.getByRole("option", { name: "Norte" })).toBeInTheDocument();
+    });
+
+    it("loads the editing row with the category the customer already has", () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+
+      expect(screen.getByLabelText("Tipo del cliente")).toHaveValue("comercio");
+    });
+
+    // Mismo criterio que con la zona: una categoria dada de baja ya no viene
+    // en la lista, pero el cliente la sigue teniendo. Sin esta opcion el
+    // select se veria vacio y editar cualquier otro campo pareceria estar
+    // sacandole la categoria.
+    it("keeps showing a category that is no longer in the catalogue", () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+
+      const select = screen.getByLabelText("Tipo del cliente");
+      expect(select).toHaveValue("comercio");
+      expect(
+        Array.from(select.querySelectorAll("option")).map(
+          (option) => (option as HTMLOptionElement).value,
+        ),
+      ).toEqual(["comercio", "final", "mayorista"]);
+    });
+
+    it("changes the category of an existing customer", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+      fireEvent.change(screen.getByLabelText("Tipo del cliente"), {
+        target: { value: "mayorista" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      expect(patch).toHaveBeenCalledWith("/customers/c1", {
+        customerType: "mayorista",
+      });
     });
 
     it("clears the address with null rather than an empty string", async () => {
@@ -522,8 +626,8 @@ describe("ClientesPage", () => {
   });
 
   describe("filtros de tipo y zona + paginacion", () => {
-    // Las zonas ya no salen del padron: son un endpoint aparte, asi que el
-    // mock tiene que responder por clave.
+    // Las zonas y las categorias ya no salen del padron: son dos endpoints
+    // aparte, asi que el mock tiene que responder por clave.
     const withCustomers = (data: unknown[]) => {
       mockedUseSWR.mockImplementation(swrByKey(data));
       render(<ClientesPage />);
@@ -547,12 +651,15 @@ describe("ClientesPage", () => {
     it("filters the directory by customer type", () => {
       withCustomers(CUSTOMERS);
 
+      // "final" y no "comercio": las opciones del filtro salen de las
+      // categorias vigentes, y "comercio" es justamente la dada de baja que
+      // el fixture usa para probar el fallback de la fila en edicion.
       fireEvent.change(screen.getByLabelText("Filtrar por tipo"), {
-        target: { value: "comercio" },
+        target: { value: "final" },
       });
 
-      expect(screen.getByText("Almacen Norte")).toBeInTheDocument();
-      expect(screen.queryByText("Kiosco Sur")).not.toBeInTheDocument();
+      expect(screen.getByText("Kiosco Sur")).toBeInTheDocument();
+      expect(screen.queryByText("Almacen Norte")).not.toBeInTheDocument();
     });
 
     it("filters the directory by zone, offering only the zones the API returns", () => {
@@ -614,13 +721,16 @@ describe("ClientesPage", () => {
     });
 
     it("returns to page 1 when a filter changes", () => {
-      withCustomers(makeCustomers(20));
+      // Los 20 son "final" para que el filtro no achique el conjunto: lo que
+      // se prueba aca es que cambiar de filtro vuelve a la pagina 1, no el
+      // filtrado en si.
+      withCustomers(makeCustomers(20, { customerType: "final" }));
 
       fireEvent.click(screen.getByRole("button", { name: "Siguiente" }));
       expect(screen.getByText(/P[aá]gina 2 de 2/)).toBeInTheDocument();
 
       fireEvent.change(screen.getByLabelText("Filtrar por tipo"), {
-        target: { value: "comercio" },
+        target: { value: "final" },
       });
 
       expect(screen.getByText(/P[aá]gina 1 de 2/)).toBeInTheDocument();

@@ -11,6 +11,7 @@ import {
   type CustomerType,
   type UpdateCustomerInput,
 } from '@distribuidor/shared';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type { CustomerRecord };
@@ -51,7 +52,10 @@ const ZONE_INCLUDE = { zoneRef: { select: { id: true, name: true } } } as const;
 
 @Injectable()
 export class CustomersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly categoriesService: CustomerCategoriesService,
+  ) {}
 
   async listCustomers(): Promise<CustomerRecord[]> {
     const customers = await this.prisma.customer.findMany({
@@ -67,6 +71,14 @@ export class CustomersService {
     input: CreateCustomerInput,
     options: CreateCustomerOptions = {},
   ): Promise<CustomerRecord> {
+    // La categoria se valida ANTES de escribir nada. Se exige VIGENTE, no solo
+    // existente: darle de alta un cliente es una eleccion contra una lista
+    // viva -- el panel del admin o el alta rapida del chofer, que es online --
+    // asi que una categoria dada de baja ahi es un error, no una venta vieja
+    // sincronizando. Es el criterio opuesto al de una venta entrante, que si
+    // acepta una categoria retirada (`assertCategoryCodesExist`).
+    await this.categoriesService.assertCategoryAssignable(input.customerType);
+
     // La zona se valida ANTES de escribir nada. No se guarda su nombre: lo
     // unico que se persiste es el id, y el nombre para mostrar se resuelve
     // siempre desde la relacion.
@@ -114,7 +126,12 @@ export class CustomersService {
     // it would overwrite a stored value with undefined.
     const data: Record<string, unknown> = {};
     if (input.name !== undefined) data.name = input.name.trim();
-    if (input.customerType !== undefined) data.customerType = input.customerType;
+    if (input.customerType !== undefined) {
+      // Solo si el patch la toca: un cliente puede tener una categoria dada de
+      // baja, y editarle la direccion no puede fallar por eso.
+      await this.categoriesService.assertCategoryAssignable(input.customerType);
+      data.customerType = input.customerType;
+    }
     if (input.zoneId !== undefined) {
       // La zona se valida ANTES de escribir nada, asi que un id inexistente o
       // dado de baja no deja al cliente a medio actualizar.

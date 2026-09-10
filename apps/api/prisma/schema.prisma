@@ -12,12 +12,6 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-enum CustomerType {
-  final
-  comercio
-  distribuidor
-}
-
 enum PaymentMethod {
   efectivo
   transferencia
@@ -78,7 +72,12 @@ model Sale {
   truckCode         String?
   total             Int
   customerName      String
-  customerType      CustomerType
+  /// Texto congelado, SIN foreign key a `CustomerCategory`, a proposito. La
+  /// venta registra lo que el cliente ERA en ese momento: si la categoria se
+  /// renombra o se da de baja despues, esta fila no se tiene que enterar. Con
+  /// una FK un `ON UPDATE CASCADE` reescribiria el historial de ventas ya
+  /// cobradas, que es exactamente lo que no puede pasar.
+  customerType      String
   paymentMethod     PaymentMethod?
   note              String?
   customerId        String?
@@ -158,7 +157,10 @@ model UserAccount {
 model Customer {
   id                String                          @id @default(cuid())
   name              String
-  customerType      CustomerType
+  /// Codigo de la categoria del cliente. Conserva el nombre de columna que
+  /// tenia como enum: ya viaja dentro de los payloads de venta encolados en
+  /// los telefonos, igual que `productCode`.
+  customerType      String
   zone              String?
   zoneId            String?
   /// Human-readable street address. Independent from latitude/longitude:
@@ -175,9 +177,13 @@ model Customer {
   /// Restrict, no Cascade: una zona que algun cliente referencia no se puede
   /// borrar nunca. Se da de baja con isActive, igual que un producto.
   zoneRef           Zone?                           @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+  /// Restrict, no Cascade: una categoria que algun cliente referencia no se
+  /// puede borrar nunca. Se da de baja con isActive.
+  category          CustomerCategory                @relation(fields: [customerType], references: [code], onDelete: Restrict)
 
   @@index([isActive, name])
   @@index([zoneId])
+  @@index([customerType])
 }
 
 model Truck {
@@ -272,37 +278,18 @@ model LoadManifestItem {
 /// que viaja por la API y que ya esta persistida en los payloads encolados en
 /// los telefonos de los choferes, asi que es inmutable una vez creada.
 model Product {
-  id            String             @id @default(cuid())
-  code          String             @unique
-  name          String
-  isActive      Boolean            @default(true)
-  sortOrder     Int                @default(0)
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  prices        ProductPrice[]
-  saleItems     SaleItem[]
-  manifestItems LoadManifestItem[]
+  id              String             @id @default(cuid())
+  code            String             @unique
+  name            String
+  isActive        Boolean            @default(true)
+  sortOrder       Int                @default(0)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  prices          ProductPrice[]
+  saleItems       SaleItem[]
+  manifestItems   LoadManifestItem[]
 
   @@index([isActive, sortOrder])
-}
-
-/// Append-only: cambiar un precio INSERTA una fila nueva, nunca pisa una
-/// existente. El precio vigente en una fecha es la fila mas reciente con
-/// `validFrom` menor o igual a esa fecha. Sin esto no hay forma de responder
-/// "cuanto valia esto el lunes", que es lo que necesita una venta encolada.
-/// El historial de quien cambio que precio sale gratis de este mismo diseno.
-model ProductPrice {
-  id           String       @id @default(cuid())
-  productCode  String
-  customerType CustomerType
-  amount       Int
-  validFrom    DateTime     @default(now())
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  product      Product      @relation(fields: [productCode], references: [code], onDelete: Restrict)
-
-  @@unique([productCode, customerType, validFrom])
-  @@index([productCode, customerType, validFrom])
 }
 
 /// Zonas de reparto, editables por el admin. `code` es la clave estable e
@@ -319,4 +306,47 @@ model Zone {
   customers Customer[]
 
   @@index([isActive, sortOrder])
+}
+
+/// Categorias de cliente (antes el enum `CustomerType`), editables por el
+/// admin. `code` es la clave estable e inmutable que viaja por la API y que
+/// ya esta persistida en los payloads de venta encolados en los telefonos,
+/// asi que se renombra el `name` y nunca el `code`.
+///
+/// Una categoria nueva NACE SIN PRECIOS: no se copian los de otra categoria.
+/// Un precio heredado miente en silencio; una celda vacia se ve.
+model CustomerCategory {
+  id        String         @id @default(cuid())
+  code      String         @unique
+  name      String
+  isActive  Boolean        @default(true)
+  sortOrder Int            @default(0)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  customers Customer[]
+  prices    ProductPrice[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// Append-only: cambiar un precio INSERTA una fila nueva, nunca pisa una
+/// existente. El precio vigente en una fecha es la fila mas reciente con
+/// `validFrom` menor o igual a esa fecha. Sin esto no hay forma de responder
+/// "cuanto valia esto el lunes", que es lo que necesita una venta encolada.
+/// El historial de quien cambio que precio sale gratis de este mismo diseno.
+model ProductPrice {
+  id           String           @id @default(cuid())
+  productCode  String
+  customerType String
+  amount       Int
+  validFrom    DateTime         @default(now())
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  product      Product          @relation(fields: [productCode], references: [code], onDelete: Restrict)
+  /// Restrict, no Cascade: una categoria que alguna vez tuvo un precio no se
+  /// puede borrar nunca. Se da de baja con isActive.
+  category     CustomerCategory @relation(fields: [customerType], references: [code], onDelete: Restrict)
+
+  @@unique([productCode, customerType, validFrom])
+  @@index([productCode, customerType, validFrom])
 }

@@ -36,9 +36,40 @@ export function isWellFormedProductCode(code: unknown): boolean {
   return typeof code === "string" && code.trim().length > 0;
 }
 
-export const CUSTOMER_TYPES = ["final", "comercio", "distribuidor"] as const;
+/**
+ * Categoria de cliente tal como viaja por la API. Es un string abierto, no una
+ * union cerrada: las categorias las define el admin en runtime, en la tabla
+ * `CustomerCategory`. El codigo es estable e inmutable una vez creado, porque
+ * ya viaja dentro de los payloads de venta encolados offline en los telefonos.
+ */
+export type CustomerType = string;
 
-export type CustomerType = (typeof CUSTOMER_TYPES)[number];
+/**
+ * Tan largo como el codigo de una zona o un producto, y por la misma razon:
+ * es una clave que se teclea y se lee, no un texto libre.
+ */
+export const CUSTOMER_TYPE_MAX_LENGTH = 20;
+
+/**
+ * Valida la FORMA de una categoria de cliente, no su pertenencia al catalogo.
+ *
+ * Mismo criterio que `isWellFormedProductCode`, y por el mismo motivo:
+ * `packages/shared` corre en el telefono y en el navegador, y ninguno de los
+ * dos conoce la lista de categorias. Comprobar pertenencia aca rechazaria toda
+ * categoria nueva y legitima, y peor: rechazaria una venta encolada con una
+ * categoria creada despues de la ultima sincronizacion. Que la categoria
+ * EXISTA se verifica contra la tabla, del lado del servidor.
+ *
+ * A proposito NO se exige mayusculas: las tres categorias semilla ('final',
+ * 'comercio', 'distribuidor') vienen del enum viejo y su codigo es inmutable.
+ */
+export function isWellFormedCustomerType(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= CUSTOMER_TYPE_MAX_LENGTH;
+}
 
 export const PAYMENT_METHODS = [
   "efectivo",
@@ -365,11 +396,22 @@ export type ProductRecord = {
 };
 
 /**
- * Un producto nace CON sus tres precios, en la misma transaccion. No es una
- * comodidad: `getPriceTable` falla entera si a cualquier producto le falta el
- * precio de cualquier tipo de cliente, y eso no rompe la venta de ese producto
- * sino TODAS las ventas del sistema. Un producto sin precios no puede existir
- * jamas, ni por un instante.
+ * Un producto nace CON un precio por cada categoria de cliente ACTIVA, en la
+ * misma transaccion. No es una comodidad: la tabla de precios tolera agujeros
+ * -- los omite en vez de fallar entera -- pero un producto sin precio no se
+ * puede vender a la categoria que quedo sin el, y el chofer se entera recien
+ * frente al cliente. Que un producto exista sin precios es evitable, asi que
+ * se evita.
+ *
+ * Cuales son esas categorias solo lo sabe el servidor, asi que la regla se
+ * verifica en `ProductsService.createProduct` y NO en el validador puro, que
+ * corre en el telefono y en el navegador. El validador solo mira que cada
+ * precio que SI vino sea un entero no negativo.
+ *
+ * El caso inverso -- una categoria nueva -- es deliberadamente el opuesto:
+ * nace sin ningun precio, y los productos existentes simplemente no tienen
+ * celda para ella hasta que el admin la cargue. Nada se backfillea, porque un
+ * precio heredado miente en silencio y una celda vacia se ve.
  */
 export type CreateProductInput = {
   code: string;
@@ -411,6 +453,34 @@ export type CreateZoneInput = {
  * que se muestra.
  */
 export type UpdateZoneInput = {
+  name?: string;
+  isActive?: boolean;
+  sortOrder?: number;
+};
+
+export type CustomerCategoryRecord = {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateCustomerCategoryInput = {
+  code: string;
+  name: string;
+  sortOrder?: number;
+};
+
+/**
+ * El `code` no se puede cambiar, y por eso no esta aca. Ya viaja dentro de los
+ * payloads de venta encolados en los telefonos, igual que el codigo de
+ * producto: renombrarlo dejaria esas ventas apuntando a una categoria
+ * inexistente.
+ */
+export type UpdateCustomerCategoryInput = {
   name?: string;
   isActive?: boolean;
   sortOrder?: number;
@@ -646,7 +716,7 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
     errors.push('truckId must not be empty when provided');
   }
 
-  if (!CUSTOMER_TYPES.includes(input.customerType)) {
+  if (!isWellFormedCustomerType(input.customerType)) {
     errors.push("customerType is invalid");
   }
 
@@ -725,7 +795,7 @@ export function validateRecordEmptyVisitInput(input: RecordEmptyVisitInput): str
     errors.push('truckId must not be empty when provided');
   }
 
-  if (!CUSTOMER_TYPES.includes(input.customerType)) {
+  if (!isWellFormedCustomerType(input.customerType)) {
     errors.push("customerType is invalid");
   }
 
@@ -762,7 +832,7 @@ function validateSaleIdentityFields(input: UpdateSaleInput): string[] {
     errors.push('truckId must not be empty when provided');
   }
 
-  if (!CUSTOMER_TYPES.includes(input.customerType)) {
+  if (!isWellFormedCustomerType(input.customerType)) {
     errors.push("customerType is invalid");
   }
 
@@ -926,7 +996,7 @@ export function validateCreateCustomerInput(input: CreateCustomerInput): string[
     errors.push('name must have at least 2 characters');
   }
 
-  if (!CUSTOMER_TYPES.includes(input.customerType)) {
+  if (!isWellFormedCustomerType(input.customerType)) {
     errors.push('customerType is invalid');
   }
 
@@ -976,7 +1046,10 @@ export function validateUpdateCustomerInput(input: UpdateCustomerInput): string[
     errors.push('name must have at least 2 characters');
   }
 
-  if (input.customerType !== undefined && !CUSTOMER_TYPES.includes(input.customerType)) {
+  if (
+    input.customerType !== undefined &&
+    !isWellFormedCustomerType(input.customerType)
+  ) {
     errors.push('customerType is invalid');
   }
 
@@ -1160,17 +1233,10 @@ const PRODUCT_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_]*$/;
 const PRODUCT_CODE_MAX_LENGTH = 20;
 
 function validateProductPrice(
-  prices: Record<CustomerType, number>,
   customerType: CustomerType,
+  amount: number,
   errors: string[],
 ): void {
-  const amount = prices[customerType];
-
-  if (amount === undefined || amount === null) {
-    errors.push(`prices.${customerType} is required`);
-    return;
-  }
-
   if (!Number.isInteger(amount) || amount < 0) {
     errors.push(`prices.${customerType} must be a non-negative integer`);
   }
@@ -1199,11 +1265,14 @@ export function validateCreateProductInput(input: CreateProductInput): string[] 
     errors.push("sortOrder must be an integer");
   }
 
+  // Se valida cada precio QUE VINO, no que hayan venido todos: la lista de
+  // categorias vive en la base y este validador no la conoce. Completitud la
+  // exige el servidor, que si puede nombrar las que faltan.
   if (!input.prices) {
     errors.push("prices is required");
   } else {
-    for (const customerType of CUSTOMER_TYPES) {
-      validateProductPrice(input.prices, customerType, errors);
+    for (const [customerType, amount] of Object.entries(input.prices)) {
+      validateProductPrice(customerType, amount, errors);
     }
   }
 
@@ -1271,6 +1340,72 @@ export function validateCreateZoneInput(input: CreateZoneInput): string[] {
 }
 
 export function validateUpdateZoneInput(input: UpdateZoneInput): string[] {
+  const errors: string[] = [];
+
+  const touched =
+    input.name !== undefined ||
+    input.isActive !== undefined ||
+    input.sortOrder !== undefined;
+
+  if (!touched) {
+    errors.push("at least one field must be provided");
+  }
+
+  if (input.name !== undefined && input.name.trim().length < 2) {
+    errors.push("name must have at least 2 characters");
+  }
+
+  if (input.isActive !== undefined && typeof input.isActive !== "boolean") {
+    errors.push("isActive must be a boolean");
+  }
+
+  if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+    errors.push("sortOrder must be an integer");
+  }
+
+  return errors;
+}
+
+/**
+ * A diferencia del codigo de zona y del de producto, aca se aceptan
+ * minusculas. Las tres categorias semilla son los valores del enum viejo
+ * ('final', 'comercio', 'distribuidor'), ya persistidos en ventas encoladas y
+ * por lo tanto inmutables: forzar mayusculas para las nuevas dejaria la
+ * columna partida en dos convenciones para siempre.
+ */
+const CUSTOMER_CATEGORY_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_]*$/;
+
+export function validateCreateCustomerCategoryInput(
+  input: CreateCustomerCategoryInput,
+): string[] {
+  const errors: string[] = [];
+  const code = input.code?.trim() ?? "";
+
+  if (code.length === 0) {
+    errors.push("code is required");
+  } else {
+    if (code.length > CUSTOMER_TYPE_MAX_LENGTH) {
+      errors.push(`code must be at most ${CUSTOMER_TYPE_MAX_LENGTH} characters`);
+    }
+    if (!CUSTOMER_CATEGORY_CODE_PATTERN.test(code)) {
+      errors.push("code must be letters, digits or underscore");
+    }
+  }
+
+  if (!input.name || input.name.trim().length < 2) {
+    errors.push("name must have at least 2 characters");
+  }
+
+  if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+    errors.push("sortOrder must be an integer");
+  }
+
+  return errors;
+}
+
+export function validateUpdateCustomerCategoryInput(
+  input: UpdateCustomerCategoryInput,
+): string[] {
   const errors: string[] = [];
 
   const touched =

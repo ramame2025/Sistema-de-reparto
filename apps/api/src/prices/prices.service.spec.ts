@@ -6,7 +6,7 @@ import { PricesService } from './prices.service';
 type PriceRow = {
   id: string;
   productCode: 'G10' | 'G15' | 'G45' | 'G15_AUTO' | 'G20';
-  customerType: 'final' | 'comercio' | 'distribuidor';
+  customerType: string;
   amount: number;
   validFrom: Date;
   updatedAt: Date;
@@ -173,6 +173,26 @@ describe('PricesService', () => {
         orderBy: { validFrom: 'asc' },
       });
       expect(table.final?.G10).toBe(1000);
+    });
+
+    // Las categorias ya no son una constante: la tabla se agrupa por los
+    // valores de `customerType` que hayan vuelto, sean los que sean.
+    it('covers a category created after the seed, without any code change', async () => {
+      prisma.productPrice.findMany.mockResolvedValue([
+        ...buildFullPriceRows(),
+        {
+          id: 'price-mayorista-G10',
+          productCode: 'G10' as PriceRow['productCode'],
+          customerType: 'mayorista',
+          amount: 7000,
+          validFrom: new Date('1970-01-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ]);
+
+      const table = await service.getPriceTable();
+
+      expect(table.mayorista?.G10).toBe(7000);
     });
 
     // Una categoria recien creada NACE SIN PRECIOS: no tiene ni una celda, y

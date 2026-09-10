@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { CreateCustomerInput, UpdateCustomerInput } from '@distribuidor/shared';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CustomersService } from './customers.service';
 
@@ -51,6 +52,7 @@ function buildZoneRow(overrides: Partial<ZoneRow> = {}): ZoneRow {
 
 describe('CustomersService', () => {
   let service: CustomersService;
+  let categoriesService: { assertCategoryAssignable: jest.Mock };
   let prisma: {
     customer: {
       create: jest.Mock;
@@ -82,10 +84,15 @@ describe('CustomersService', () => {
       },
     };
 
+    categoriesService = {
+      assertCategoryAssignable: jest.fn().mockResolvedValue(undefined),
+    };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         CustomersService,
         { provide: PrismaService, useValue: prisma },
+        { provide: CustomerCategoriesService, useValue: categoriesService },
       ],
     }).compile();
 
@@ -447,6 +454,62 @@ describe('CustomersService', () => {
         service.updateCustomer('customer-1', { name: 'Kiosco Norte' }),
       ).rejects.toThrow(NotFoundException);
       expect(prisma.customer.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('customerType assignment', () => {
+    beforeEach(() => {
+      prisma.customer.create.mockResolvedValue(buildCustomerRow());
+      prisma.customer.findUnique.mockResolvedValue(buildCustomerRow());
+      prisma.customer.update.mockResolvedValue(buildCustomerRow());
+    });
+
+    it('validates the customerType against the categories table on create', async () => {
+      await service.createCustomer({ name: 'Kiosco Sur', customerType: 'mayorista' });
+
+      expect(categoriesService.assertCategoryAssignable).toHaveBeenCalledWith(
+        'mayorista',
+      );
+    });
+
+    it('does not write anything when the category is unknown or retired', async () => {
+      categoriesService.assertCategoryAssignable.mockRejectedValue(
+        new BadRequestException('Unknown customerType: fantasma'),
+      );
+
+      await expect(
+        service.createCustomer({ name: 'Kiosco Sur', customerType: 'fantasma' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.customer.create).not.toHaveBeenCalled();
+    });
+
+    it('validates the customerType before writing on update', async () => {
+      await service.updateCustomer('customer-1', { customerType: 'mayorista' });
+
+      expect(categoriesService.assertCategoryAssignable).toHaveBeenCalledWith(
+        'mayorista',
+      );
+    });
+
+    it('does not update anything when the category is unknown or retired', async () => {
+      categoriesService.assertCategoryAssignable.mockRejectedValue(
+        new BadRequestException('Customer category retirada is not active'),
+      );
+
+      await expect(
+        service.updateCustomer('customer-1', { customerType: 'retirada' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.customer.update).not.toHaveBeenCalled();
+    });
+
+    // Un patch que no toca la categoria no la revalida: el cliente puede tener
+    // una categoria dada de baja, y editarle la direccion no puede fallar por
+    // eso.
+    it('leaves an untouched customerType alone, even if it is retired', async () => {
+      await service.updateCustomer('customer-1', { address: 'Calle 1' });
+
+      expect(categoriesService.assertCategoryAssignable).not.toHaveBeenCalled();
+      expect(prisma.customer.update).toHaveBeenCalled();
     });
   });
 
