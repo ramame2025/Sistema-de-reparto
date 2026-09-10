@@ -309,7 +309,11 @@ export type ChangePasswordInput = {
 export type CreateCustomerInput = {
   name: string;
   customerType: CustomerType;
-  zone?: string;
+  /**
+   * Fila de `Zone`, la lista que administra el admin. Es lo que decide si dos
+   * clientes con el mismo nombre son el mismo: una FK, no cuatro grafias.
+   */
+  zoneId?: string;
   /**
    * Human-readable street address. Independent from latitude/longitude:
    * a customer may carry a pin, an address, both, or neither. Nothing
@@ -322,13 +326,13 @@ export type CreateCustomerInput = {
 
 /**
  * Every field optional — a patch touches only what it names. `null` on
- * `zone`, `address` or the coordinate pair clears the stored value, which
+ * `zoneId`, `address` or the coordinate pair clears the stored value, which
  * `undefined` cannot express.
  */
 export type UpdateCustomerInput = {
   name?: string;
   customerType?: CustomerType;
-  zone?: string | null;
+  zoneId?: string | null;
   address?: string | null;
   latitude?: number | null;
   longitude?: number | null;
@@ -339,6 +343,8 @@ export type CustomerRecord = {
   id: string;
   name: string;
   customerType: CustomerType;
+  /** Fila de `Zone` a la que pertenece el cliente, si tiene una asignada. */
+  zoneId?: string;
   zone?: string;
   address?: string;
   latitude?: number;
@@ -378,6 +384,33 @@ export type CreateProductInput = {
  * dejaria esas ventas apuntando a un producto inexistente.
  */
 export type UpdateProductInput = {
+  name?: string;
+  isActive?: boolean;
+  sortOrder?: number;
+};
+
+export type ZoneRecord = {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateZoneInput = {
+  code: string;
+  name: string;
+  sortOrder?: number;
+};
+
+/**
+ * El `code` no se puede cambiar, y por eso no esta aca. Es la clave estable de
+ * la zona, igual que la del producto: se renombra el `name`, que es lo unico
+ * que se muestra.
+ */
+export type UpdateZoneInput = {
   name?: string;
   isActive?: boolean;
   sortOrder?: number;
@@ -897,8 +930,8 @@ export function validateCreateCustomerInput(input: CreateCustomerInput): string[
     errors.push('customerType is invalid');
   }
 
-  if (input.zone !== undefined && input.zone.trim().length === 0) {
-    errors.push('zone must not be empty when provided');
+  if (input.zoneId !== undefined && input.zoneId.trim().length === 0) {
+    errors.push('zoneId must not be empty when provided');
   }
 
   if (input.address !== undefined && input.address.trim().length === 0) {
@@ -929,7 +962,7 @@ export function validateUpdateCustomerInput(input: UpdateCustomerInput): string[
   const touched =
     input.name !== undefined ||
     input.customerType !== undefined ||
-    input.zone !== undefined ||
+    input.zoneId !== undefined ||
     input.address !== undefined ||
     input.latitude !== undefined ||
     input.longitude !== undefined ||
@@ -947,8 +980,12 @@ export function validateUpdateCustomerInput(input: UpdateCustomerInput): string[
     errors.push('customerType is invalid');
   }
 
-  if (input.zone !== undefined && input.zone !== null && input.zone.trim().length === 0) {
-    errors.push('zone must not be empty when provided');
+  if (
+    input.zoneId !== undefined &&
+    input.zoneId !== null &&
+    input.zoneId.trim().length === 0
+  ) {
+    errors.push('zoneId must not be empty when provided');
   }
 
   if (
@@ -1174,6 +1211,66 @@ export function validateCreateProductInput(input: CreateProductInput): string[] 
 }
 
 export function validateUpdateProductInput(input: UpdateProductInput): string[] {
+  const errors: string[] = [];
+
+  const touched =
+    input.name !== undefined ||
+    input.isActive !== undefined ||
+    input.sortOrder !== undefined;
+
+  if (!touched) {
+    errors.push("at least one field must be provided");
+  }
+
+  if (input.name !== undefined && input.name.trim().length < 2) {
+    errors.push("name must have at least 2 characters");
+  }
+
+  if (input.isActive !== undefined && typeof input.isActive !== "boolean") {
+    errors.push("isActive must be a boolean");
+  }
+
+  if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+    errors.push("sortOrder must be an integer");
+  }
+
+  return errors;
+}
+
+/**
+ * Misma forma que el codigo de producto, y por la misma razon: es la clave
+ * estable de la fila, la que sobrevive a cualquier renombre del `name`.
+ */
+const ZONE_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_]*$/;
+const ZONE_CODE_MAX_LENGTH = 20;
+
+export function validateCreateZoneInput(input: CreateZoneInput): string[] {
+  const errors: string[] = [];
+  const code = input.code?.trim() ?? "";
+
+  if (code.length === 0) {
+    errors.push("code is required");
+  } else {
+    if (code.length > ZONE_CODE_MAX_LENGTH) {
+      errors.push(`code must be at most ${ZONE_CODE_MAX_LENGTH} characters`);
+    }
+    if (!ZONE_CODE_PATTERN.test(code)) {
+      errors.push("code must be uppercase letters, digits or underscore");
+    }
+  }
+
+  if (!input.name || input.name.trim().length < 2) {
+    errors.push("name must have at least 2 characters");
+  }
+
+  if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+    errors.push("sortOrder must be an integer");
+  }
+
+  return errors;
+}
+
+export function validateUpdateZoneInput(input: UpdateZoneInput): string[] {
   const errors: string[] = [];
 
   const touched =

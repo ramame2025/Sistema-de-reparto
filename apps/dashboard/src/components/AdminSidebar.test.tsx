@@ -32,6 +32,13 @@ describe("AdminSidebar active section", () => {
     expect(current()).toEqual(["Clientes asignados"]);
   });
 
+  it("offers Zonas as its own section", () => {
+    mockedUsePathname.mockReturnValue("/admin/zonas");
+    render(<AdminSidebar />);
+
+    expect(current()).toEqual(["Zonas"]);
+  });
+
   it("marks only the portada on /admin", () => {
     mockedUsePathname.mockReturnValue("/admin");
     render(<AdminSidebar />);

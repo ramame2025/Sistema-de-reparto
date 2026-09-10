@@ -160,6 +160,7 @@ model Customer {
   name              String
   customerType      CustomerType
   zone              String?
+  zoneId            String?
   /// Human-readable street address. Independent from latitude/longitude:
   /// a customer may have a pin, an address, both, or neither. Nothing
   /// geocodes one into the other.
@@ -171,8 +172,12 @@ model Customer {
   updatedAt         DateTime                        @updatedAt
   sales             Sale[]
   assignmentEntries DriverCustomerAssignmentEntry[]
+  /// Restrict, no Cascade: una zona que algun cliente referencia no se puede
+  /// borrar nunca. Se da de baja con isActive, igual que un producto.
+  zoneRef           Zone?                           @relation(fields: [zoneId], references: [id], onDelete: Restrict)
 
   @@index([isActive, name])
+  @@index([zoneId])
 }
 
 model Truck {
@@ -298,4 +303,20 @@ model ProductPrice {
 
   @@unique([productCode, customerType, validFrom])
   @@index([productCode, customerType, validFrom])
+}
+
+/// Zonas de reparto, editables por el admin. `code` es la clave estable e
+/// inmutable de la zona, igual que la del producto: el `name` se puede
+/// renombrar sin que nada quede colgado.
+model Zone {
+  id        String     @id @default(cuid())
+  code      String     @unique
+  name      String
+  isActive  Boolean    @default(true)
+  sortOrder Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  customers Customer[]
+
+  @@index([isActive, sortOrder])
 }

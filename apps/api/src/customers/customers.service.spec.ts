@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { CreateCustomerInput, UpdateCustomerInput } from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,7 +12,8 @@ type CustomerRow = {
   id: string;
   name: string;
   customerType: string;
-  zone: string | null;
+  zoneId: string | null;
+  zoneRef: { id: string; name: string } | null;
   address: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -17,12 +22,19 @@ type CustomerRow = {
   updatedAt: Date;
 };
 
+type ZoneRow = {
+  id: string;
+  name: string;
+  isActive: boolean;
+};
+
 function buildCustomerRow(overrides: Partial<CustomerRow> = {}): CustomerRow {
   return {
     id: 'customer-1',
     name: 'Kiosco Sur',
     customerType: 'final',
-    zone: 'Sur',
+    zoneId: 'zone-sur',
+    zoneRef: { id: 'zone-sur', name: 'Sur' },
     address: null,
     latitude: null,
     longitude: null,
@@ -31,6 +43,10 @@ function buildCustomerRow(overrides: Partial<CustomerRow> = {}): CustomerRow {
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
   };
+}
+
+function buildZoneRow(overrides: Partial<ZoneRow> = {}): ZoneRow {
+  return { id: 'zone-sur', name: 'Sur', isActive: true, ...overrides };
 }
 
 describe('CustomersService', () => {
@@ -45,6 +61,9 @@ describe('CustomersService', () => {
     sale: {
       findUnique: jest.Mock;
     };
+    zone: {
+      findUnique: jest.Mock;
+    };
   };
 
   beforeEach(async () => {
@@ -57,6 +76,9 @@ describe('CustomersService', () => {
       },
       sale: {
         findUnique: jest.fn(),
+      },
+      zone: {
+        findUnique: jest.fn().mockResolvedValue(buildZoneRow()),
       },
     };
 
@@ -78,10 +100,9 @@ describe('CustomersService', () => {
       const input: CreateCustomerInput = {
         name: 'Kiosco Sur',
         customerType: 'final',
-        zone: 'Sur',
+        zoneId: 'zone-sur',
       };
-      const created = buildCustomerRow({ name: input.name, zone: 'Sur' });
-      prisma.customer.create.mockResolvedValue(created);
+      prisma.customer.create.mockResolvedValue(buildCustomerRow({ name: input.name }));
 
       const result = await service.createCustomer(input);
 
@@ -89,12 +110,13 @@ describe('CustomersService', () => {
         data: {
           name: 'Kiosco Sur',
           customerType: 'final',
-          zone: 'Sur',
+          zoneId: 'zone-sur',
           address: undefined,
           latitude: undefined,
           longitude: undefined,
           isActive: true,
         },
+        include: { zoneRef: { select: { id: true, name: true } } },
       });
       expect(result.isActive).toBe(true);
     });
@@ -103,37 +125,100 @@ describe('CustomersService', () => {
       const inputSur: CreateCustomerInput = {
         name: 'Kiosco Central',
         customerType: 'final',
-        zone: 'Sur',
+        zoneId: 'zone-sur',
       };
       const inputNorte: CreateCustomerInput = {
         name: 'Kiosco Central',
         customerType: 'comercio',
-        zone: 'Norte',
+        zoneId: 'zone-norte',
       };
       prisma.customer.create
         .mockResolvedValueOnce(
-          buildCustomerRow({ id: 'customer-sur', name: 'Kiosco Central', zone: 'Sur' }),
+          buildCustomerRow({ id: 'customer-sur', name: 'Kiosco Central' }),
         )
         .mockResolvedValueOnce(
           buildCustomerRow({
             id: 'customer-norte',
             name: 'Kiosco Central',
-            zone: 'Norte',
             customerType: 'comercio',
+            zoneId: 'zone-norte',
+            zoneRef: { id: 'zone-norte', name: 'Norte' },
           }),
         );
 
       const sur = await service.createCustomer(inputSur);
       prisma.customer.findMany.mockResolvedValue([
-        buildCustomerRow({ id: 'customer-sur', name: 'Kiosco Central', zone: 'Sur' }),
+        buildCustomerRow({ id: 'customer-sur', name: 'Kiosco Central' }),
       ]);
+      prisma.zone.findUnique.mockResolvedValue(
+        buildZoneRow({ id: 'zone-norte', name: 'Norte' }),
+      );
       const norte = await service.createCustomer(inputNorte);
 
       expect(prisma.customer.create).toHaveBeenCalledTimes(2);
       expect(sur.id).toBe('customer-sur');
       expect(norte.id).toBe('customer-norte');
       expect(sur.name).toBe(norte.name);
-      expect(sur.zone).not.toBe(norte.zone);
+      expect(sur.zoneId).not.toBe(norte.zoneId);
+    });
+  });
+
+  describe('createCustomer — zone assignment', () => {
+    const input: CreateCustomerInput = {
+      name: 'Kiosco Sur',
+      customerType: 'final',
+      zoneId: 'zone-sur',
+    };
+
+    beforeEach(() => {
+      prisma.customer.create.mockResolvedValue(buildCustomerRow());
+    });
+
+    // Se persiste el id, no una copia del nombre: el nombre para mostrar sale
+    // de la relacion.
+    it('persists only the zone id, never a copy of its name', async () => {
+      prisma.zone.findUnique.mockResolvedValue(
+        buildZoneRow({ id: 'zone-sur', name: 'Sur' }),
+      );
+
+      await service.createCustomer(input);
+
+      const [[args]] = prisma.customer.create.mock.calls;
+      expect(args.data.zoneId).toBe('zone-sur');
+      expect(args.data).not.toHaveProperty('zone');
+    });
+
+    it('rejects an unknown zoneId with a BadRequestException naming it', async () => {
+      prisma.zone.findUnique.mockResolvedValue(null);
+
+      await expect(service.createCustomer(input)).rejects.toThrow(BadRequestException);
+      await expect(service.createCustomer(input)).rejects.toThrow(/zone-sur/);
+      expect(prisma.customer.create).not.toHaveBeenCalled();
+    });
+
+    // A diferencia del codigo de producto, que tiene que seguir aceptandose
+    // aunque este de baja porque viaja dentro de ventas ya encoladas, la zona
+    // se elige de una lista viva: asignar una dada de baja es un error.
+    it('rejects a deactivated zone', async () => {
+      prisma.zone.findUnique.mockResolvedValue(buildZoneRow({ isActive: false }));
+
+      await expect(service.createCustomer(input)).rejects.toThrow(BadRequestException);
+      expect(prisma.customer.create).not.toHaveBeenCalled();
+    });
+
+    it('creates a customer with no zone at all', async () => {
+      prisma.customer.create.mockResolvedValue(
+        buildCustomerRow({ zoneId: null, zoneRef: null }),
+      );
+
+      const result = await service.createCustomer({
+        name: 'Kiosco Sur',
+        customerType: 'final',
+      });
+
+      expect(prisma.zone.findUnique).not.toHaveBeenCalled();
+      expect(result.zoneId).toBeUndefined();
+      expect(result.zone).toBeUndefined();
     });
   });
 
@@ -152,6 +237,7 @@ describe('CustomersService', () => {
 
       expect(prisma.customer.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ address: 'Av. Mitre 1234' }),
+        include: { zoneRef: { select: { id: true, name: true } } },
       });
       expect(result.address).toBe('Av. Mitre 1234');
     });
@@ -172,12 +258,12 @@ describe('CustomersService', () => {
     const input: CreateCustomerInput = {
       name: 'Don Jose',
       customerType: 'final',
-      zone: 'Sur',
+      zoneId: 'zone-sur',
     };
 
     it('rejects a same-name, same-zone customer with a ConflictException', async () => {
       prisma.customer.findMany.mockResolvedValue([
-        buildCustomerRow({ id: 'existing-1', name: 'Don Jose', zone: 'Sur' }),
+        buildCustomerRow({ id: 'existing-1', name: 'Don Jose', zoneId: 'zone-sur' }),
       ]);
 
       await expect(service.createCustomer(input)).rejects.toThrow(ConflictException);
@@ -186,7 +272,7 @@ describe('CustomersService', () => {
 
     it('carries the conflicting customer in the exception, so the caller can offer it', async () => {
       prisma.customer.findMany.mockResolvedValue([
-        buildCustomerRow({ id: 'existing-1', name: 'Don Jose', zone: 'Sur' }),
+        buildCustomerRow({ id: 'existing-1', name: 'Don Jose', zoneId: 'zone-sur' }),
       ]);
 
       await expect(service.createCustomer(input)).rejects.toMatchObject({
@@ -196,15 +282,60 @@ describe('CustomersService', () => {
 
     it('treats accents and casing as the same name', async () => {
       prisma.customer.findMany.mockResolvedValue([
-        buildCustomerRow({ id: 'existing-1', name: '  DON JOSÉ ', zone: 'Sur' }),
+        buildCustomerRow({ id: 'existing-1', name: '  DON JOSÉ ', zoneId: 'zone-sur' }),
       ]);
 
       await expect(service.createCustomer(input)).rejects.toThrow(ConflictException);
     });
 
+    // La zona ahora es una FK, no una cadena: dos filas distintas son dos
+    // zonas distintas aunque se llamen parecido, y cuatro grafias de "Centro"
+    // ya no pueden forkear una zona a espaldas de esta comparacion.
+    it('lets the same name live in a different zone', async () => {
+      prisma.customer.findMany.mockResolvedValue([
+        buildCustomerRow({ id: 'existing-1', name: 'Don Jose', zoneId: 'zone-norte' }),
+      ]);
+      prisma.customer.create.mockResolvedValue(buildCustomerRow({ id: 'customer-new' }));
+
+      const result = await service.createCustomer(input);
+
+      expect(result.id).toBe('customer-new');
+    });
+
+    // Sin zona es su propio grupo, no un comodin: exactamente la misma
+    // semantica que tenia la comparacion por texto.
+    it('treats a missing zone as its own bucket', async () => {
+      prisma.customer.findMany.mockResolvedValue([
+        buildCustomerRow({
+          id: 'existing-1',
+          name: 'Don Jose',
+          zoneId: null,
+          zoneRef: null,
+        }),
+      ]);
+
+      await expect(
+        service.createCustomer({ name: 'Don Jose', customerType: 'final' }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('does not collide a zoneless customer with a zoned one of the same name', async () => {
+      prisma.customer.findMany.mockResolvedValue([
+        buildCustomerRow({ id: 'existing-1', name: 'Don Jose', zoneId: 'zone-sur' }),
+      ]);
+      prisma.customer.create.mockResolvedValue(buildCustomerRow({ id: 'customer-new' }));
+
+      const result = await service.createCustomer({
+        name: 'Don Jose',
+        customerType: 'final',
+      });
+
+      expect(result.id).toBe('customer-new');
+    });
+
     it('creates anyway when the caller explicitly allows the duplicate', async () => {
       prisma.customer.findMany.mockResolvedValue([
-        buildCustomerRow({ id: 'existing-1', name: 'Don Jose', zone: 'Sur' }),
+        buildCustomerRow({ id: 'existing-1', name: 'Don Jose', zoneId: 'zone-sur' }),
       ]);
       prisma.customer.create.mockResolvedValue(buildCustomerRow({ id: 'customer-new' }));
 
@@ -221,6 +352,7 @@ describe('CustomersService', () => {
 
       expect(prisma.customer.findMany).toHaveBeenCalledWith({
         where: { isActive: true },
+        include: { zoneRef: { select: { id: true, name: true } } },
       });
       expect(prisma.customer.create).toHaveBeenCalled();
     });
@@ -239,6 +371,7 @@ describe('CustomersService', () => {
       expect(prisma.customer.update).toHaveBeenCalledWith({
         where: { id: 'customer-1' },
         data: { name: 'Kiosco Norte' },
+        include: { zoneRef: { select: { id: true, name: true } } },
       });
       expect(result.name).toBe('Kiosco Norte');
     });
@@ -257,6 +390,7 @@ describe('CustomersService', () => {
       expect(prisma.customer.update).toHaveBeenCalledWith({
         where: { id: 'customer-1' },
         data: { latitude: -34.6, longitude: -58.4 },
+        include: { zoneRef: { select: { id: true, name: true } } },
       });
     });
 
@@ -271,18 +405,19 @@ describe('CustomersService', () => {
       expect(prisma.customer.update).toHaveBeenCalledWith({
         where: { id: 'customer-1' },
         data: { address: null },
+        include: { zoneRef: { select: { id: true, name: true } } },
       });
       expect(result.address).toBeUndefined();
     });
 
     it('leaves untouched fields out of the update payload entirely', async () => {
       prisma.customer.findUnique.mockResolvedValue(buildCustomerRow());
-      prisma.customer.update.mockResolvedValue(buildCustomerRow({ zone: 'Norte' }));
+      prisma.customer.update.mockResolvedValue(buildCustomerRow({ address: 'X' }));
 
-      await service.updateCustomer('customer-1', { zone: 'Norte' });
+      await service.updateCustomer('customer-1', { address: 'X' });
 
       const [[call]] = prisma.customer.update.mock.calls;
-      expect(Object.keys(call.data)).toEqual(['zone']);
+      expect(Object.keys(call.data)).toEqual(['address']);
     });
 
     it('never touches the Sale table, so linked sales keep their customerId', async () => {
@@ -315,6 +450,56 @@ describe('CustomersService', () => {
     });
   });
 
+  describe('updateCustomer — zone assignment', () => {
+    beforeEach(() => {
+      prisma.customer.findUnique.mockResolvedValue(buildCustomerRow());
+      prisma.customer.update.mockResolvedValue(buildCustomerRow());
+    });
+
+    it('moves the customer to another zone by id, without copying its name', async () => {
+      prisma.zone.findUnique.mockResolvedValue(
+        buildZoneRow({ id: 'zone-norte', name: 'Norte' }),
+      );
+
+      await service.updateCustomer('customer-1', { zoneId: 'zone-norte' });
+
+      expect(prisma.customer.update).toHaveBeenCalledWith({
+        where: { id: 'customer-1' },
+        data: { zoneId: 'zone-norte' },
+        include: { zoneRef: { select: { id: true, name: true } } },
+      });
+    });
+
+    it('clears the zone with an explicit null', async () => {
+      await service.updateCustomer('customer-1', { zoneId: null });
+
+      expect(prisma.customer.update).toHaveBeenCalledWith({
+        where: { id: 'customer-1' },
+        data: { zoneId: null },
+        include: { zoneRef: { select: { id: true, name: true } } },
+      });
+      expect(prisma.zone.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown zoneId before writing anything', async () => {
+      prisma.zone.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.updateCustomer('customer-1', { zoneId: 'zone-ghost' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.customer.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a deactivated zone before writing anything', async () => {
+      prisma.zone.findUnique.mockResolvedValue(buildZoneRow({ isActive: false }));
+
+      await expect(
+        service.updateCustomer('customer-1', { zoneId: 'zone-sur' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.customer.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('listCustomers', () => {
     it('excludes inactive customers from the result', async () => {
       prisma.customer.findMany.mockResolvedValue([
@@ -326,9 +511,45 @@ describe('CustomersService', () => {
       expect(prisma.customer.findMany).toHaveBeenCalledWith({
         where: { isActive: true },
         orderBy: { name: 'asc' },
+        include: { zoneRef: { select: { id: true, name: true } } },
       });
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('customer-active');
+    });
+
+    // `zone` sigue siendo el nombre para mostrar, asi que todo lo que solo lo
+    // renderiza -- el aviso de duplicado del chofer, por ejemplo -- no cambia.
+    it('returns the zone id and the zone display name side by side', async () => {
+      prisma.customer.findMany.mockResolvedValue([buildCustomerRow()]);
+
+      const [record] = await service.listCustomers();
+
+      expect(record.zoneId).toBe('zone-sur');
+      expect(record.zone).toBe('Sur');
+    });
+
+    it('reads the display name from the relation, not from the payload', async () => {
+      prisma.customer.findMany.mockResolvedValue([
+        buildCustomerRow({
+          zoneId: 'zone-sur',
+          zoneRef: { id: 'zone-sur', name: 'Sur' },
+        }),
+      ]);
+
+      const [record] = await service.listCustomers();
+
+      expect(record.zone).toBe('Sur');
+    });
+
+    it('leaves both zone fields undefined for a customer with no zone', async () => {
+      prisma.customer.findMany.mockResolvedValue([
+        buildCustomerRow({ zoneId: null, zoneRef: null }),
+      ]);
+
+      const [record] = await service.listCustomers();
+
+      expect(record.zoneId).toBeUndefined();
+      expect(record.zone).toBeUndefined();
     });
   });
 

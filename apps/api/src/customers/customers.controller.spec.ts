@@ -52,6 +52,21 @@ describe('CustomersController behaviour', () => {
   describe('createCustomer', () => {
     const valid = { name: 'Kiosco Sur', customerType: 'final' as const };
 
+    it('forwards the zone the admin picked', async () => {
+      await controller.createCustomer({ ...valid, zoneId: 'zone-sur' }, undefined);
+      expect(service.createCustomer).toHaveBeenCalledWith(
+        { ...valid, zoneId: 'zone-sur' },
+        { allowDuplicate: false },
+      );
+    });
+
+    it('rejects a blank zoneId before reaching the service', async () => {
+      await expect(
+        controller.createCustomer({ ...valid, zoneId: '  ' }, undefined),
+      ).rejects.toThrow(BadRequestException);
+      expect(service.createCustomer).not.toHaveBeenCalled();
+    });
+
     it('rejects an invalid payload before reaching the service', async () => {
       await expect(
         controller.createCustomer({ ...valid, name: 'K' }, undefined),
@@ -100,6 +115,23 @@ describe('CustomersController behaviour', () => {
       await controller.updateCustomer('customer-1', { name: 'Kiosco Norte' });
       expect(service.updateCustomer).toHaveBeenCalledWith('customer-1', {
         name: 'Kiosco Norte',
+      });
+    });
+
+    // Mover un cliente de zona es un patch que solo trae `zoneId`: si el
+    // validador no lo contara como campo tocado, el unico cambio posible
+    // moriria en el controller.
+    it('forwards a patch that only moves the customer to another zone', async () => {
+      await controller.updateCustomer('customer-1', { zoneId: 'zone-norte' });
+      expect(service.updateCustomer).toHaveBeenCalledWith('customer-1', {
+        zoneId: 'zone-norte',
+      });
+    });
+
+    it('forwards clearing the zone with an explicit null', async () => {
+      await controller.updateCustomer('customer-1', { zoneId: null });
+      expect(service.updateCustomer).toHaveBeenCalledWith('customer-1', {
+        zoneId: null,
       });
     });
   });

@@ -333,8 +333,8 @@ export function validateCreateCustomerInput(input) {
     if (!CUSTOMER_TYPES.includes(input.customerType)) {
         errors.push('customerType is invalid');
     }
-    if (input.zone !== undefined && input.zone.trim().length === 0) {
-        errors.push('zone must not be empty when provided');
+    if (input.zoneId !== undefined && input.zoneId.trim().length === 0) {
+        errors.push('zoneId must not be empty when provided');
     }
     if (input.address !== undefined && input.address.trim().length === 0) {
         errors.push('address must not be empty when provided');
@@ -357,7 +357,7 @@ export function validateUpdateCustomerInput(input) {
     const errors = [];
     const touched = input.name !== undefined ||
         input.customerType !== undefined ||
-        input.zone !== undefined ||
+        input.zoneId !== undefined ||
         input.address !== undefined ||
         input.latitude !== undefined ||
         input.longitude !== undefined ||
@@ -371,8 +371,10 @@ export function validateUpdateCustomerInput(input) {
     if (input.customerType !== undefined && !CUSTOMER_TYPES.includes(input.customerType)) {
         errors.push('customerType is invalid');
     }
-    if (input.zone !== undefined && input.zone !== null && input.zone.trim().length === 0) {
-        errors.push('zone must not be empty when provided');
+    if (input.zoneId !== undefined &&
+        input.zoneId !== null &&
+        input.zoneId.trim().length === 0) {
+        errors.push('zoneId must not be empty when provided');
     }
     if (input.address !== undefined &&
         input.address !== null &&
@@ -539,6 +541,53 @@ export function validateCreateProductInput(input) {
     return errors;
 }
 export function validateUpdateProductInput(input) {
+    const errors = [];
+    const touched = input.name !== undefined ||
+        input.isActive !== undefined ||
+        input.sortOrder !== undefined;
+    if (!touched) {
+        errors.push("at least one field must be provided");
+    }
+    if (input.name !== undefined && input.name.trim().length < 2) {
+        errors.push("name must have at least 2 characters");
+    }
+    if (input.isActive !== undefined && typeof input.isActive !== "boolean") {
+        errors.push("isActive must be a boolean");
+    }
+    if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+        errors.push("sortOrder must be an integer");
+    }
+    return errors;
+}
+/**
+ * Misma forma que el codigo de producto, y por la misma razon: es la clave
+ * estable de la fila, la que sobrevive a cualquier renombre del `name`.
+ */
+const ZONE_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_]*$/;
+const ZONE_CODE_MAX_LENGTH = 20;
+export function validateCreateZoneInput(input) {
+    const errors = [];
+    const code = input.code?.trim() ?? "";
+    if (code.length === 0) {
+        errors.push("code is required");
+    }
+    else {
+        if (code.length > ZONE_CODE_MAX_LENGTH) {
+            errors.push(`code must be at most ${ZONE_CODE_MAX_LENGTH} characters`);
+        }
+        if (!ZONE_CODE_PATTERN.test(code)) {
+            errors.push("code must be uppercase letters, digits or underscore");
+        }
+    }
+    if (!input.name || input.name.trim().length < 2) {
+        errors.push("name must have at least 2 characters");
+    }
+    if (input.sortOrder !== undefined && !Number.isInteger(input.sortOrder)) {
+        errors.push("sortOrder must be an integer");
+    }
+    return errors;
+}
+export function validateUpdateZoneInput(input) {
     const errors = [];
     const touched = input.name !== undefined ||
         input.isActive !== undefined ||

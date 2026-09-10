@@ -19,6 +19,7 @@ import { SalesModule } from './sales/sales.module';
 import { TrucksModule } from './trucks/trucks.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
+import { ZonesModule } from './zones/zones.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { UsersModule } from './users/users.module';
     DriverCustomerAssignmentsModule,
     ProductsModule,
     PricesModule,
+    ZonesModule,
   ],
   controllers: [AppController],
   providers: [

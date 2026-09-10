@@ -55,6 +55,7 @@ const CUSTOMERS = [
     id: "c1",
     name: "Almacen Norte",
     customerType: "comercio",
+    zoneId: "z1",
     zone: "Norte",
     address: "Av. Mitre 1234",
     latitude: -34.6,
@@ -73,22 +74,52 @@ const CUSTOMERS = [
   },
 ];
 
+const ZONES = [
+  {
+    id: "z1",
+    code: "NORTE",
+    name: "Norte",
+    isActive: true,
+    sortOrder: 0,
+    createdAt: "",
+    updatedAt: "",
+  },
+  {
+    id: "z2",
+    code: "OESTE",
+    name: "Oeste",
+    isActive: true,
+    sortOrder: 1,
+    createdAt: "",
+    updatedAt: "",
+  },
+];
+
+/**
+ * La pagina pide dos cosas: el padron y las zonas, estas ultimas para sus
+ * selects.
+ */
+function swrByKey(customers: unknown = CUSTOMERS, zones: unknown = ZONES) {
+  return (key: string) => ({
+    data: key === "/zones" ? zones : customers,
+    isLoading: false,
+    error: undefined,
+    mutate,
+  });
+}
+
+const mutate = jest.fn();
+
 describe("ClientesPage", () => {
   const post = jest.fn();
   const patch = jest.fn();
-  const mutate = jest.fn();
 
   beforeEach(() => {
     post.mockReset().mockResolvedValue({});
     patch.mockReset().mockResolvedValue({});
     mutate.mockReset();
     mockedUseApiClient.mockReturnValue({ post, patch });
-    mockedUseSWR.mockReturnValue({
-      data: CUSTOMERS,
-      isLoading: false,
-      error: undefined,
-      mutate,
-    });
+    mockedUseSWR.mockImplementation(swrByKey());
   });
 
   it("lists the customers in the directory", () => {
@@ -118,12 +149,7 @@ describe("ClientesPage", () => {
   // Accent folding matters in the search box for the same reason it matters
   // in duplicate detection: nobody types the accent.
   it("ignores accents and casing while searching", () => {
-    mockedUseSWR.mockReturnValue({
-      data: [{ ...CUSTOMERS[1], name: "Don José" }],
-      isLoading: false,
-      error: undefined,
-      mutate,
-    });
+    mockedUseSWR.mockImplementation(swrByKey([{ ...CUSTOMERS[1], name: "Don José" }]));
     render(<ClientesPage />);
 
     fireEvent.change(screen.getByLabelText("Buscar"), {
@@ -145,7 +171,7 @@ describe("ClientesPage", () => {
     fireEvent.change(screen.getByLabelText("Nombre"), {
       target: { value: "Kiosco Nuevo" },
     });
-    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "Oeste" } });
+    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "z2" } });
     fireEvent.change(screen.getByLabelText("Direccion"), {
       target: { value: "Calle 5 num 100" },
     });
@@ -155,9 +181,21 @@ describe("ClientesPage", () => {
     expect(post).toHaveBeenCalledWith("/customers", {
       name: "Kiosco Nuevo",
       customerType: "final",
-      zone: "Oeste",
+      zoneId: "z2",
       address: "Calle 5 num 100",
     });
+  });
+
+  // La zona dejo de ser texto libre: se elige de la lista que administra el
+  // admin, asi que cuatro grafias de "Centro" ya no pueden forkear una zona.
+  it("offers the zones from the catalogue instead of a free-text field", () => {
+    render(<ClientesPage />);
+
+    const select = screen.getByLabelText("Zona");
+    expect(select.tagName).toBe("SELECT");
+    expect(
+      Array.from(select.querySelectorAll("option")).map((option) => option.textContent),
+    ).toEqual(["Sin zona", "Norte", "Oeste"]);
   });
 
   it("omits zone and address entirely when left blank, instead of sending empty strings", async () => {
@@ -269,6 +307,53 @@ describe("ClientesPage", () => {
         expect(screen.queryByLabelText("Nombre del cliente")).not.toBeInTheDocument(),
       );
       expect(patch).not.toHaveBeenCalled();
+    });
+
+    it("moves the customer to another zone by id", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+      fireEvent.change(screen.getByLabelText("Zona del cliente"), {
+        target: { value: "z2" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      expect(patch).toHaveBeenCalledWith("/customers/c1", { zoneId: "z2" });
+    });
+
+    it("clears the zone with null rather than an empty string", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+      fireEvent.change(screen.getByLabelText("Zona del cliente"), {
+        target: { value: "" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      expect(patch).toHaveBeenCalledWith("/customers/c1", { zoneId: null });
+    });
+
+    it("loads the editing row with the zone the customer already has", () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+
+      expect(screen.getByLabelText("Zona del cliente")).toHaveValue("z1");
+    });
+
+    // Una zona dada de baja no esta en la lista, pero el cliente la sigue
+    // teniendo: sin esta opcion el select se veria vacio y editar cualquier
+    // otro campo pareceria estar sacandole la zona.
+    it("keeps showing a zone that is no longer in the catalogue", () => {
+      mockedUseSWR.mockImplementation(swrByKey(CUSTOMERS, [ZONES[1]]));
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+
+      expect(screen.getByLabelText("Zona del cliente")).toHaveValue("z1");
+      expect(screen.getByRole("option", { name: "Norte" })).toBeInTheDocument();
     });
 
     it("clears the address with null rather than an empty string", async () => {
@@ -430,25 +515,17 @@ describe("ClientesPage", () => {
   });
 
   it("shows an empty state when the directory has no customers", () => {
-    mockedUseSWR.mockReturnValue({
-      data: [],
-      isLoading: false,
-      error: undefined,
-      mutate,
-    });
+    mockedUseSWR.mockImplementation(swrByKey([]));
     render(<ClientesPage />);
 
     expect(screen.getByTestId("customers-empty")).toBeInTheDocument();
   });
 
   describe("filtros de tipo y zona + paginacion", () => {
+    // Las zonas ya no salen del padron: son un endpoint aparte, asi que el
+    // mock tiene que responder por clave.
     const withCustomers = (data: unknown[]) => {
-      mockedUseSWR.mockReturnValue({
-        data,
-        isLoading: false,
-        error: undefined,
-        mutate,
-      });
+      mockedUseSWR.mockImplementation(swrByKey(data));
       render(<ClientesPage />);
     };
 
@@ -478,7 +555,7 @@ describe("ClientesPage", () => {
       expect(screen.queryByText("Kiosco Sur")).not.toBeInTheDocument();
     });
 
-    it("filters the directory by zone, offering only zones present in the padron", () => {
+    it("filters the directory by zone, offering only the zones the API returns", () => {
       withCustomers(CUSTOMERS);
 
       const zoneSelect = screen.getByLabelText("Filtrar por zona");

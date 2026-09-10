@@ -2,6 +2,8 @@ import {
   type CreateAssignmentInput,
   type CreateProductInput,
   type CreateCustomerInput,
+  type CreateZoneInput,
+  type UpdateZoneInput,
   type CreateDriverCustomerAssignmentInput,
   type CreateLoadManifestInput,
   type CreateSaleInput,
@@ -31,16 +33,18 @@ import {
   validateUpdateCustomerInput,
   validateUpdateProductInput,
   validateUpdateTruckInput,
+  validateCreateZoneInput,
+  validateUpdateZoneInput,
 } from '@distribuidor/shared';
 
 describe('validateCreateCustomerInput', () => {
   const base: CreateCustomerInput = {
     name: 'Kiosco Sur',
     customerType: 'final',
-    zone: 'Sur',
+    zoneId: 'zone-sur',
   };
 
-  it('accepts a valid payload with zone and no lat/lng', () => {
+  it('accepts a valid payload with a zone and no lat/lng', () => {
     expect(validateCreateCustomerInput(base)).toEqual([]);
   });
 
@@ -70,13 +74,25 @@ describe('validateCreateCustomerInput', () => {
     const errors = validateCreateCustomerInput({ ...base, latitude: 200 });
     expect(errors).toContain('latitude must be between -90 and 90');
   });
+
+  // La zona pasa a ser una fila de `Zone`, no texto libre: el alta viaja con
+  // el id. Que exista y este activa lo decide el servidor, no este validador.
+  it('accepts a payload carrying a zoneId', () => {
+    expect(validateCreateCustomerInput({ ...base, zoneId: 'zone-1' })).toEqual([]);
+  });
+
+  it('rejects a zoneId that is present but blank', () => {
+    expect(validateCreateCustomerInput({ ...base, zoneId: '  ' })).toContain(
+      'zoneId must not be empty when provided',
+    );
+  });
 });
 
 describe('validateCreateCustomerInput — address', () => {
   const base: CreateCustomerInput = {
     name: 'Kiosco Sur',
     customerType: 'final',
-    zone: 'Sur',
+    zoneId: 'zone-sur',
   };
 
   it('accepts a payload with no address at all (address is optional)', () => {
@@ -159,10 +175,7 @@ describe('validateUpdateCustomerInput', () => {
     ).toEqual([]);
   });
 
-  it('rejects a blank name, zone or address when explicitly provided', () => {
-    expect(validateUpdateCustomerInput({ zone: '  ' })).toContain(
-      'zone must not be empty when provided',
-    );
+  it('rejects a blank address when explicitly provided', () => {
     expect(validateUpdateCustomerInput({ address: '  ' })).toContain(
       'address must not be empty when provided',
     );
@@ -173,6 +186,22 @@ describe('validateUpdateCustomerInput', () => {
       isActive: 'yes' as unknown as boolean,
     });
     expect(errors).toContain('isActive must be a boolean');
+  });
+
+  // Mover un cliente de zona es un patch que solo toca `zoneId`: si no
+  // contara como campo tocado, el unico cambio posible seria rechazado.
+  it('accepts a patch that only moves the customer to another zone', () => {
+    expect(validateUpdateCustomerInput({ zoneId: 'zone-2' })).toEqual([]);
+  });
+
+  it('accepts clearing the zone with an explicit null', () => {
+    expect(validateUpdateCustomerInput({ zoneId: null })).toEqual([]);
+  });
+
+  it('rejects a blank zoneId when explicitly provided', () => {
+    expect(validateUpdateCustomerInput({ zoneId: '  ' })).toContain(
+      'zoneId must not be empty when provided',
+    );
   });
 });
 
@@ -836,6 +865,97 @@ describe('validateUpdateProductInput', () => {
 
   it('accepts deactivating a product', () => {
     expect(validateUpdateProductInput({ isActive: false })).toEqual([]);
+  });
+});
+
+describe('validateCreateZoneInput', () => {
+  const base: CreateZoneInput = { code: 'CENTRO', name: 'Centro' };
+
+  it('accepts a valid zone', () => {
+    expect(validateCreateZoneInput(base)).toEqual([]);
+  });
+
+  it('accepts an optional sortOrder', () => {
+    expect(validateCreateZoneInput({ ...base, sortOrder: 3 })).toEqual([]);
+  });
+
+  describe('code', () => {
+    it('rejects an empty code', () => {
+      expect(validateCreateZoneInput({ ...base, code: '  ' })).toContain(
+        'code is required',
+      );
+    });
+
+    // Misma regla que el codigo de producto: es la clave estable de la zona,
+    // asi que se restringe a un token plano en vez de aceptar cualquier texto.
+    it('rejects lowercase, spaces and punctuation', () => {
+      for (const code of ['centro', 'ZONA 1', 'ZONA-1', 'CENTRO!']) {
+        expect(validateCreateZoneInput({ ...base, code })).toContain(
+          'code must be uppercase letters, digits or underscore',
+        );
+      }
+    });
+
+    it('accepts uppercase letters, digits and underscore', () => {
+      for (const code of ['CENTRO', 'ZONA_2', 'V12']) {
+        expect(validateCreateZoneInput({ ...base, code })).toEqual([]);
+      }
+    });
+
+    it('rejects a code longer than 20 characters', () => {
+      expect(validateCreateZoneInput({ ...base, code: 'A'.repeat(21) })).toContain(
+        'code must be at most 20 characters',
+      );
+    });
+  });
+
+  it('rejects a name shorter than 2 characters', () => {
+    expect(validateCreateZoneInput({ ...base, name: 'C' })).toContain(
+      'name must have at least 2 characters',
+    );
+  });
+
+  it('rejects a non-integer sortOrder', () => {
+    expect(validateCreateZoneInput({ ...base, sortOrder: 1.5 })).toContain(
+      'sortOrder must be an integer',
+    );
+  });
+});
+
+describe('validateUpdateZoneInput', () => {
+  it('accepts a patch touching a single field', () => {
+    expect(validateUpdateZoneInput({ name: 'Centro Norte' })).toEqual([]);
+  });
+
+  it('rejects an empty patch', () => {
+    expect(validateUpdateZoneInput({})).toContain(
+      'at least one field must be provided',
+    );
+  });
+
+  // Renombrar el codigo dejaria colgado a todo lo que ya lo referencia, asi
+  // que no es un campo parcheable: un patch que solo lo trae queda vacio.
+  it('has no way to change the code', () => {
+    const patch = { code: 'OTRA' } as unknown as UpdateZoneInput;
+    expect(validateUpdateZoneInput(patch)).toContain(
+      'at least one field must be provided',
+    );
+  });
+
+  it('rejects a short name, a non-boolean isActive and a non-integer sortOrder', () => {
+    expect(validateUpdateZoneInput({ name: 'C' })).toContain(
+      'name must have at least 2 characters',
+    );
+    expect(
+      validateUpdateZoneInput({ isActive: 'si' as unknown as boolean }),
+    ).toContain('isActive must be a boolean');
+    expect(validateUpdateZoneInput({ sortOrder: 1.5 })).toContain(
+      'sortOrder must be an integer',
+    );
+  });
+
+  it('accepts deactivating a zone', () => {
+    expect(validateUpdateZoneInput({ isActive: false })).toEqual([]);
   });
 });
 

@@ -8,6 +8,7 @@ import {
   type CustomerRecord,
   type CustomerType,
   type UpdateCustomerInput,
+  type ZoneRecord,
 } from "@distribuidor/shared";
 import { useApiClient } from "../../../context/AuthContext";
 import { LocationPicker, type LocationValue } from "../../../components/LocationPicker";
@@ -23,7 +24,8 @@ type TypeFilter = "all" | CustomerType;
 type CreateForm = {
   name: string;
   customerType: CustomerType;
-  zone: string;
+  /** Id de la zona elegida; cadena vacia significa "sin zona". */
+  zoneId: string;
   address: string;
   latitude?: number;
   longitude?: number;
@@ -32,9 +34,24 @@ type CreateForm = {
 const EMPTY_FORM: CreateForm = {
   name: "",
   customerType: "final",
-  zone: "",
+  zoneId: "",
   address: "",
 };
+
+/**
+ * Una zona dada de baja ya no viene en la lista, pero el cliente que la tiene
+ * asignada la sigue teniendo. Sin esta opcion el select se veria vacio, y
+ * editar cualquier otro campo pareceria estarle sacando la zona.
+ */
+function zoneOptions(zones: ZoneRecord[], customer?: CustomerRecord) {
+  const options = zones.map((zone) => ({ id: zone.id, name: zone.name }));
+
+  if (customer?.zoneId && !zones.some((zone) => zone.id === customer.zoneId)) {
+    options.unshift({ id: customer.zoneId, name: customer.zone ?? customer.zoneId });
+  }
+
+  return options;
+}
 
 /**
  * El par de coordenadas se aplica entero o no se aplica: la API rechaza una
@@ -97,19 +114,11 @@ export default function ClientesPage() {
     mutate: reloadCustomers,
   } = useSWR<CustomerRecord[]>("/customers");
 
-  const error = actionError ?? (loadError ? "No se pudo cargar clientes." : null);
+  // Solo las zonas vigentes: asignar una dada de baja es un error, y la API
+  // lo rechaza igual.
+  const { data: zones = [] } = useSWR<ZoneRecord[]>("/zones");
 
-  // Las zonas del <select> salen del padron real, no de una lista fija: una
-  // zona la escribe el admin a mano al crear el cliente.
-  const zones = useMemo(() => {
-    const set = new Set<string>();
-    for (const customer of customers) {
-      if (customer.zone && customer.zone.trim().length > 0) {
-        set.add(customer.zone);
-      }
-    }
-    return [...set].sort((a, b) => a.localeCompare(b, "es"));
-  }, [customers]);
+  const error = actionError ?? (loadError ? "No se pudo cargar clientes." : null);
 
   const visibleCustomers = useMemo(() => {
     const needle = normalizeCustomerName(search);
@@ -166,7 +175,7 @@ export default function ClientesPage() {
   const buildCreatePayload = () => ({
     name: form.name.trim(),
     customerType: form.customerType,
-    ...(optionalText(form.zone) ? { zone: optionalText(form.zone) } : {}),
+    ...(form.zoneId ? { zoneId: form.zoneId } : {}),
     ...(optionalText(form.address) ? { address: optionalText(form.address) } : {}),
     ...(form.latitude !== undefined && form.longitude !== undefined
       ? { latitude: form.latitude, longitude: form.longitude }
@@ -278,12 +287,18 @@ export default function ClientesPage() {
           </label>
           <label className="text-sm text-slate-600">
             Zona
-            <input
-              type="text"
-              value={form.zone}
-              onChange={(event) => setForm({ ...form, zone: event.target.value })}
+            <select
+              value={form.zoneId}
+              onChange={(event) => setForm({ ...form, zoneId: event.target.value })}
               className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            />
+            >
+              <option value="">Sin zona</option>
+              {zoneOptions(zones).map((zone) => (
+                <option key={zone.id} value={zone.id}>
+                  {zone.name}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="text-sm text-slate-600">
             Direccion
@@ -388,8 +403,8 @@ export default function ClientesPage() {
               >
                 <option value="all">Todas</option>
                 {zones.map((zone) => (
-                  <option key={zone} value={zone}>
-                    {zone}
+                  <option key={zone.id} value={zone.name}>
+                    {zone.name}
                   </option>
                 ))}
               </select>
@@ -432,6 +447,7 @@ export default function ClientesPage() {
                   <CustomerRow
                     key={customer.id}
                     customer={customer}
+                    zones={zones}
                     editing={editingId === customer.id}
                     onEdit={() => setEditingId(customer.id)}
                     onCancel={() => setEditingId(null)}
@@ -459,6 +475,7 @@ export default function ClientesPage() {
 
 type CustomerRowProps = {
   customer: CustomerRecord;
+  zones: ZoneRecord[];
   editing: boolean;
   onEdit: () => void;
   onCancel: () => void;
@@ -468,6 +485,7 @@ type CustomerRowProps = {
 
 function CustomerRow({
   customer,
+  zones,
   editing,
   onEdit,
   onCancel,
@@ -476,7 +494,7 @@ function CustomerRow({
 }: CustomerRowProps) {
   const [name, setName] = useState(customer.name);
   const [customerType, setCustomerType] = useState<CustomerType>(customer.customerType);
-  const [zone, setZone] = useState(customer.zone ?? "");
+  const [zoneId, setZoneId] = useState(customer.zoneId ?? "");
   const [address, setAddress] = useState(customer.address ?? "");
   // `undefined` significa "no se toco el pin"; un LocationValue significa que
   // el admin lo movio o lo saco, incluso si vuelve a coincidir con lo guardado.
@@ -498,8 +516,8 @@ function CustomerRow({
     }
     // Vaciar el campo limpia el valor guardado, y eso solo se puede expresar
     // con null: undefined significaria "no lo toques".
-    if (zone.trim() !== (customer.zone ?? "")) {
-      patch.zone = zone.trim().length > 0 ? zone.trim() : null;
+    if (zoneId !== (customer.zoneId ?? "")) {
+      patch.zoneId = zoneId.length > 0 ? zoneId : null;
     }
     if (address.trim() !== (customer.address ?? "")) {
       patch.address = address.trim().length > 0 ? address.trim() : null;
@@ -586,12 +604,18 @@ function CustomerRow({
       <td className="py-2 pr-4">
         <label className="text-xs text-slate-600">
           Zona del cliente
-          <input
-            type="text"
-            value={zone}
-            onChange={(event) => setZone(event.target.value)}
+          <select
+            value={zoneId}
+            onChange={(event) => setZoneId(event.target.value)}
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1"
-          />
+          >
+            <option value="">Sin zona</option>
+            {zoneOptions(zones, customer).map((zone) => (
+              <option key={zone.id} value={zone.id}>
+                {zone.name}
+              </option>
+            ))}
+          </select>
         </label>
       </td>
       <td className="py-2 pr-4" colSpan={2}>

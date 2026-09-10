@@ -254,7 +254,11 @@ export type ChangePasswordInput = {
 export type CreateCustomerInput = {
     name: string;
     customerType: CustomerType;
-    zone?: string;
+    /**
+     * Fila de `Zone`, la lista que administra el admin. Es lo que decide si dos
+     * clientes con el mismo nombre son el mismo: una FK, no cuatro grafias.
+     */
+    zoneId?: string;
     /**
      * Human-readable street address. Independent from latitude/longitude:
      * a customer may carry a pin, an address, both, or neither. Nothing
@@ -266,13 +270,13 @@ export type CreateCustomerInput = {
 };
 /**
  * Every field optional — a patch touches only what it names. `null` on
- * `zone`, `address` or the coordinate pair clears the stored value, which
+ * `zoneId`, `address` or the coordinate pair clears the stored value, which
  * `undefined` cannot express.
  */
 export type UpdateCustomerInput = {
     name?: string;
     customerType?: CustomerType;
-    zone?: string | null;
+    zoneId?: string | null;
     address?: string | null;
     latitude?: number | null;
     longitude?: number | null;
@@ -282,6 +286,8 @@ export type CustomerRecord = {
     id: string;
     name: string;
     customerType: CustomerType;
+    /** Fila de `Zone` a la que pertenece el cliente, si tiene una asignada. */
+    zoneId?: string;
     zone?: string;
     address?: string;
     latitude?: number;
@@ -318,6 +324,30 @@ export type CreateProductInput = {
  * dejaria esas ventas apuntando a un producto inexistente.
  */
 export type UpdateProductInput = {
+    name?: string;
+    isActive?: boolean;
+    sortOrder?: number;
+};
+export type ZoneRecord = {
+    id: string;
+    code: string;
+    name: string;
+    isActive: boolean;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+};
+export type CreateZoneInput = {
+    code: string;
+    name: string;
+    sortOrder?: number;
+};
+/**
+ * El `code` no se puede cambiar, y por eso no esta aca. Es la clave estable de
+ * la zona, igual que la del producto: se renombra el `name`, que es lo unico
+ * que se muestra.
+ */
+export type UpdateZoneInput = {
     name?: string;
     isActive?: boolean;
     sortOrder?: number;
@@ -487,6 +517,8 @@ export declare function validateUpdatePriceInput(input: UpdatePriceInput): strin
 export declare function validateCreateDriverCustomerAssignmentInput(input: CreateDriverCustomerAssignmentInput): string[];
 export declare function validateCreateProductInput(input: CreateProductInput): string[];
 export declare function validateUpdateProductInput(input: UpdateProductInput): string[];
+export declare function validateCreateZoneInput(input: CreateZoneInput): string[];
+export declare function validateUpdateZoneInput(input: UpdateZoneInput): string[];
 /**
  * Ventana hacia atras que se acepta en `occurredAt`. Cubre de sobra el uso
  * real -- los choferes sincronizan el mismo dia -- y acota el dano de un
