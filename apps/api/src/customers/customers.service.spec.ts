@@ -181,8 +181,8 @@ describe('CustomersService', () => {
       prisma.customer.create.mockResolvedValue(buildCustomerRow());
     });
 
-    // Se persiste el id, no una copia del nombre: el nombre para mostrar sale
-    // de la relacion.
+    // La columna sombra ya no existe: se persiste el id y nada mas. El nombre
+    // para mostrar sale siempre de la relacion.
     it('persists only the zone id, never a copy of its name', async () => {
       prisma.zone.findUnique.mockResolvedValue(
         buildZoneRow({ id: 'zone-sur', name: 'Sur' }),
@@ -591,7 +591,7 @@ describe('CustomersService', () => {
       expect(record.zone).toBe('Sur');
     });
 
-    it('reads the display name from the relation, not from the payload', async () => {
+    it('reads the display name from the relation, the only place it lives now', async () => {
       prisma.customer.findMany.mockResolvedValue([
         buildCustomerRow({
           zoneId: 'zone-sur',

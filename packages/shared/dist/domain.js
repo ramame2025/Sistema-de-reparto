@@ -434,8 +434,38 @@ export function validateCreateTruckInput(input) {
     if (!input.plate || input.plate.trim().length < 1) {
         errors.push('plate must have at least 1 character');
     }
-    if (!Number.isInteger(input.capacity) || input.capacity < 0) {
-        errors.push('capacity must be a non-negative integer');
+    return errors;
+}
+/**
+ * Valida la grilla de capacidad. Como en todo el paquete, de los codigos de
+ * producto se comprueba la FORMA y no la pertenencia: el catalogo lo define el
+ * admin en runtime y ni el telefono ni el navegador lo conocen. Que el
+ * producto EXISTA lo asegura el servidor con `assertProductCodesExist`.
+ */
+export function validateSetTruckCapacitiesInput(input) {
+    const errors = [];
+    if (!Array.isArray(input.capacities)) {
+        errors.push('capacities must be an array');
+        return errors;
+    }
+    const seen = new Set();
+    for (const entry of input.capacities) {
+        if (!isWellFormedProductCode(entry?.productCode)) {
+            errors.push('productCode is invalid');
+            continue;
+        }
+        // Dos filas del mismo producto no tienen respuesta posible: cual de las
+        // dos seria la capacidad? Se rechaza aca y no se deja que lo haga el
+        // unique de la base, que contestaria un 500 sin nombrar el producto.
+        if (seen.has(entry.productCode)) {
+            errors.push(`productCode ${entry.productCode} is duplicated`);
+        }
+        seen.add(entry.productCode);
+        // 0 es una capacidad valida y significativa, asi que se compara contra
+        // el numero y nunca con un `if (!entry.units)`.
+        if (!Number.isInteger(entry.units) || entry.units < 0) {
+            errors.push('units must be a non-negative integer');
+        }
     }
     return errors;
 }
@@ -443,7 +473,6 @@ export function validateUpdateTruckInput(input) {
     const errors = [];
     const touched = input.code !== undefined ||
         input.plate !== undefined ||
-        input.capacity !== undefined ||
         input.isActive !== undefined;
     if (!touched) {
         errors.push('at least one field must be provided');
@@ -453,10 +482,6 @@ export function validateUpdateTruckInput(input) {
     }
     if (input.plate !== undefined && input.plate.trim().length < 1) {
         errors.push('plate must have at least 1 character');
-    }
-    if (input.capacity !== undefined &&
-        (!Number.isInteger(input.capacity) || input.capacity < 0)) {
-        errors.push('capacity must be a non-negative integer');
     }
     if (input.isActive !== undefined && typeof input.isActive !== 'boolean') {
         errors.push('isActive must be a boolean');

@@ -8,12 +8,22 @@ import { TrucksService } from './trucks.service';
 
 describe('TrucksController', () => {
   let controller: TrucksController;
-  let trucksService: { getTruck: jest.Mock; updateTruck: jest.Mock; listTrucks: jest.Mock };
+  let trucksService: {
+    getTruck: jest.Mock;
+    updateTruck: jest.Mock;
+    listTrucks: jest.Mock;
+    setCapacities: jest.Mock;
+  };
   let assignmentsService: { getTruckCalendar: jest.Mock };
   let loadManifestsService: { getTruckStock: jest.Mock };
 
   beforeEach(async () => {
-    trucksService = { getTruck: jest.fn(), updateTruck: jest.fn(), listTrucks: jest.fn() };
+    trucksService = {
+      getTruck: jest.fn(),
+      updateTruck: jest.fn(),
+      listTrucks: jest.fn(),
+      setCapacities: jest.fn(),
+    };
     assignmentsService = { getTruckCalendar: jest.fn() };
     loadManifestsService = { getTruckStock: jest.fn() };
 
@@ -78,12 +88,14 @@ describe('TrucksController', () => {
   });
   describe('updateTruck', () => {
     it('delegates a valid partial payload to the service', async () => {
-      trucksService.updateTruck.mockResolvedValue({ id: 'truck-1', capacity: 45 });
+      trucksService.updateTruck.mockResolvedValue({ id: 'truck-1', plate: 'XY987ZW' });
 
-      const result = await controller.updateTruck('truck-1', { capacity: 45 });
+      const result = await controller.updateTruck('truck-1', { plate: 'XY987ZW' });
 
-      expect(trucksService.updateTruck).toHaveBeenCalledWith('truck-1', { capacity: 45 });
-      expect(result.capacity).toBe(45);
+      expect(trucksService.updateTruck).toHaveBeenCalledWith('truck-1', {
+        plate: 'XY987ZW',
+      });
+      expect(result.plate).toBe('XY987ZW');
     });
 
     it('rejects an empty payload before touching the service', async () => {
@@ -91,11 +103,51 @@ describe('TrucksController', () => {
       expect(trucksService.updateTruck).not.toHaveBeenCalled();
     });
 
-    it('rejects a negative capacity', async () => {
-      await expect(controller.updateTruck('truck-1', { capacity: -5 })).rejects.toThrow(
+    it('rejects a blank plate', async () => {
+      await expect(controller.updateTruck('truck-1', { plate: '  ' })).rejects.toThrow(
         BadRequestException,
       );
       expect(trucksService.updateTruck).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setTruckCapacities', () => {
+    it('is admin-only, like the rest of the controller', () => {
+      const roles = Reflect.getMetadata(ROLES_KEY, TrucksController);
+      expect(roles).toEqual(['admin']);
+    });
+
+    it('delegates a valid grid to the service', async () => {
+      trucksService.setCapacities.mockResolvedValue({ id: 'truck-1', capacities: [] });
+
+      await controller.setTruckCapacities('truck-1', {
+        capacities: [{ productCode: 'G10', units: 30 }],
+      });
+
+      expect(trucksService.setCapacities).toHaveBeenCalledWith('truck-1', {
+        capacities: [{ productCode: 'G10', units: 30 }],
+      });
+    });
+
+    it('rejects a negative units before touching the service', async () => {
+      await expect(
+        controller.setTruckCapacities('truck-1', {
+          capacities: [{ productCode: 'G10', units: -1 }],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(trucksService.setCapacities).not.toHaveBeenCalled();
+    });
+
+    it('rejects a duplicated productCode before touching the service', async () => {
+      await expect(
+        controller.setTruckCapacities('truck-1', {
+          capacities: [
+            { productCode: 'G10', units: 1 },
+            { productCode: 'G10', units: 2 },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(trucksService.setCapacities).not.toHaveBeenCalled();
     });
   });
 

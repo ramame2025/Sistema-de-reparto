@@ -376,6 +376,13 @@ export type CustomerRecord = {
   customerType: CustomerType;
   /** Fila de `Zone` a la que pertenece el cliente, si tiene una asignada. */
   zoneId?: string;
+  /**
+   * Nombre para mostrar de esa zona, resuelto SIEMPRE desde la relacion: la
+   * columna sombra homonima ya no existe. Sigue siendo el mismo campo de
+   * siempre, asi que quien solo lo renderiza -- el aviso de duplicado del
+   * chofer, por ejemplo -- no se entera del cambio. Es de solo lectura: para
+   * asignar una zona esta `zoneId`, y no hay otra forma.
+   */
   zone?: string;
   address?: string;
   latitude?: number;
@@ -486,17 +493,35 @@ export type UpdateCustomerCategoryInput = {
   sortOrder?: number;
 };
 
+/**
+ * Cuantas unidades de UN producto entran en el camion. La capacidad dejo de
+ * ser un numero unico: un total no dice que carga entra, y no se puede
+ * repartir entre productos sin inventar el reparto.
+ *
+ * `units: 0` es una respuesta real -- "este producto no viaja en este
+ * camion" -- y por eso se guarda como fila, en vez de omitirse.
+ */
+export type TruckCapacityEntry = {
+  productCode: ProductCode;
+  units: number;
+};
+
 export type CreateTruckInput = {
   code: string;
   plate: string;
-  capacity: number;
 };
 
 export type TruckRecord = {
   id: string;
   code: string;
   plate: string;
-  capacity: number;
+  /**
+   * La grilla por producto, ordenada como el catalogo. Un array vacio
+   * significa "sin detallar", NO "no entra nada": por eso no hay aca ningun
+   * total derivado -- un `capacity: 0` calculado seria exactamente esa
+   * mentira.
+   */
+  capacities: TruckCapacityEntry[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -506,8 +531,17 @@ export type TruckRecord = {
 export type UpdateTruckInput = {
   code?: string;
   plate?: string;
-  capacity?: number;
   isActive?: boolean;
+};
+
+/**
+ * Reemplazo TOTAL de la grilla del camion, nunca un merge. Con un merge
+ * parcial "sacar este producto del camion" no se podria expresar: mandar la
+ * lista entera es lo que hace que una fila ausente signifique borrada. Mismo
+ * contrato que `CreateDriverCustomerAssignmentInput`.
+ */
+export type SetTruckCapacitiesInput = {
+  capacities: TruckCapacityEntry[];
 };
 
 export type CreateAssignmentInput = {
@@ -1109,8 +1143,46 @@ export function validateCreateTruckInput(input: CreateTruckInput): string[] {
     errors.push('plate must have at least 1 character');
   }
 
-  if (!Number.isInteger(input.capacity) || input.capacity < 0) {
-    errors.push('capacity must be a non-negative integer');
+  return errors;
+}
+
+/**
+ * Valida la grilla de capacidad. Como en todo el paquete, de los codigos de
+ * producto se comprueba la FORMA y no la pertenencia: el catalogo lo define el
+ * admin en runtime y ni el telefono ni el navegador lo conocen. Que el
+ * producto EXISTA lo asegura el servidor con `assertProductCodesExist`.
+ */
+export function validateSetTruckCapacitiesInput(
+  input: SetTruckCapacitiesInput,
+): string[] {
+  const errors: string[] = [];
+
+  if (!Array.isArray(input.capacities)) {
+    errors.push('capacities must be an array');
+    return errors;
+  }
+
+  const seen = new Set<string>();
+
+  for (const entry of input.capacities) {
+    if (!isWellFormedProductCode(entry?.productCode)) {
+      errors.push('productCode is invalid');
+      continue;
+    }
+
+    // Dos filas del mismo producto no tienen respuesta posible: cual de las
+    // dos seria la capacidad? Se rechaza aca y no se deja que lo haga el
+    // unique de la base, que contestaria un 500 sin nombrar el producto.
+    if (seen.has(entry.productCode)) {
+      errors.push(`productCode ${entry.productCode} is duplicated`);
+    }
+    seen.add(entry.productCode);
+
+    // 0 es una capacidad valida y significativa, asi que se compara contra
+    // el numero y nunca con un `if (!entry.units)`.
+    if (!Number.isInteger(entry.units) || entry.units < 0) {
+      errors.push('units must be a non-negative integer');
+    }
   }
 
   return errors;
@@ -1122,7 +1194,6 @@ export function validateUpdateTruckInput(input: UpdateTruckInput): string[] {
   const touched =
     input.code !== undefined ||
     input.plate !== undefined ||
-    input.capacity !== undefined ||
     input.isActive !== undefined;
 
   if (!touched) {
@@ -1135,13 +1206,6 @@ export function validateUpdateTruckInput(input: UpdateTruckInput): string[] {
 
   if (input.plate !== undefined && input.plate.trim().length < 1) {
     errors.push('plate must have at least 1 character');
-  }
-
-  if (
-    input.capacity !== undefined &&
-    (!Number.isInteger(input.capacity) || input.capacity < 0)
-  ) {
-    errors.push('capacity must be a non-negative integer');
   }
 
   if (input.isActive !== undefined && typeof input.isActive !== 'boolean') {
