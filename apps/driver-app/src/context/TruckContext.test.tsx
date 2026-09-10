@@ -24,7 +24,7 @@ const truck = {
   truckId: 'truck-1',
   code: 'T-01',
   plate: 'AB123CD',
-  capacity: 40,
+  capacities: [],
   startDate: '2026-02-10T00:00:00.000Z',
   endDate: '2026-02-12T00:00:00.000Z',
 };

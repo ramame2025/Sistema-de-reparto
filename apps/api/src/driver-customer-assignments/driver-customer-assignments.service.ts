@@ -14,7 +14,7 @@ type CustomerRow = {
   id: string;
   name: string;
   customerType: string;
-  zone: string | null;
+  zoneRef: { id: string; name: string } | null;
   latitude: number | null;
   longitude: number | null;
   isActive: boolean;
@@ -45,6 +45,20 @@ const toUtcDay = (value: string): Date => {
 };
 
 const formatDay = (value: Date): string => value.toISOString().slice(0, 10);
+
+/**
+ * El nombre para mostrar de la zona sale de la relacion: la columna sombra
+ * `Customer.zone` ya no existe. Es el mismo include que usa `CustomersService`,
+ * y esta es la unica otra consulta que arma un `CustomerRecord`.
+ */
+const ENTRIES_INCLUDE = {
+  entries: {
+    include: {
+      customer: { include: { zoneRef: { select: { id: true, name: true } } } },
+    },
+    orderBy: { position: 'asc' },
+  },
+} as const;
 
 @Injectable()
 export class DriverCustomerAssignmentsService {
@@ -87,9 +101,7 @@ export class DriverCustomerAssignmentsService {
 
       const withEntries = (await tx.driverCustomerAssignment.findUnique({
         where: { id: assignment.id },
-        include: {
-          entries: { include: { customer: true }, orderBy: { position: 'asc' } },
-        },
+        include: ENTRIES_INCLUDE,
       })) as AssignmentRow;
 
       return this.toRecord(withEntries);
@@ -103,9 +115,7 @@ export class DriverCustomerAssignmentsService {
   async getMyAssignment(driverId: string, date: string): Promise<CustomerRecord[]> {
     const assignment = (await this.prisma.driverCustomerAssignment.findUnique({
       where: { driverId_date: { driverId, date: toUtcDay(date) } },
-      include: {
-        entries: { include: { customer: true }, orderBy: { position: 'asc' } },
-      },
+      include: ENTRIES_INCLUDE,
     })) as AssignmentRow | null;
 
     if (!assignment) {
@@ -155,7 +165,14 @@ export class DriverCustomerAssignmentsService {
       this.prisma.driverCustomerAssignment.findMany({
         where,
         include: {
-          entries: { include: { customer: true }, orderBy: { position: 'asc' } },
+          entries: {
+            include: {
+              // La zona sale siempre de la relacion: la columna sombra
+              // `Customer.zone` ya no existe.
+              customer: { include: { zoneRef: { select: { id: true, name: true } } } },
+            },
+            orderBy: { position: 'asc' },
+          },
         },
         orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * pageSize,
@@ -181,9 +198,7 @@ export class DriverCustomerAssignmentsService {
         ...(driverId ? { driverId } : {}),
         ...(date ? { date: toUtcDay(date) } : {}),
       },
-      include: {
-        entries: { include: { customer: true }, orderBy: { position: 'asc' } },
-      },
+      include: ENTRIES_INCLUDE,
       orderBy: { date: 'desc' },
     })) as AssignmentRow[];
 
@@ -206,7 +221,7 @@ export class DriverCustomerAssignmentsService {
       id: customer.id,
       name: customer.name,
       customerType: customer.customerType as CustomerType,
-      zone: customer.zone ?? undefined,
+      zone: customer.zoneRef?.name ?? undefined,
       latitude: customer.latitude ?? undefined,
       longitude: customer.longitude ?? undefined,
       isActive: customer.isActive,

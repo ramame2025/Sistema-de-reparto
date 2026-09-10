@@ -3,8 +3,8 @@
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import {
-  CUSTOMER_TYPES,
   normalizeCustomerName,
+  type CustomerCategoryRecord,
   type CustomerRecord,
   type CustomerType,
   type UpdateCustomerInput,
@@ -31,12 +31,45 @@ type CreateForm = {
   longitude?: number;
 };
 
+/**
+ * `customerType` arranca vacio, no en "final": las categorias las define el
+ * admin en runtime, asi que cual es la primera solo se sabe cuando la lista
+ * llego. Hasta entonces el select toma la primera activa.
+ */
 const EMPTY_FORM: CreateForm = {
   name: "",
-  customerType: "final",
+  customerType: "",
   zoneId: "",
   address: "",
 };
+
+/**
+ * Una categoria dada de baja ya no viene en la lista, pero el cliente que la
+ * tiene asignada la sigue teniendo. Sin esta opcion el select se veria vacio, y
+ * editar cualquier otro campo pareceria estarle cambiando la categoria. Mismo
+ * criterio que `zoneOptions`.
+ *
+ * La etiqueta cae al codigo crudo porque el cliente solo guarda el codigo: el
+ * nombre para mostrar vive en la categoria, y esa ya no esta en la lista.
+ */
+function categoryOptions(
+  categories: CustomerCategoryRecord[],
+  customer?: CustomerRecord,
+) {
+  const options = categories.map((category) => ({
+    code: category.code,
+    name: category.name,
+  }));
+
+  if (
+    customer?.customerType &&
+    !categories.some((category) => category.code === customer.customerType)
+  ) {
+    options.unshift({ code: customer.customerType, name: customer.customerType });
+  }
+
+  return options;
+}
 
 /**
  * Una zona dada de baja ya no viene en la lista, pero el cliente que la tiene
@@ -118,6 +151,15 @@ export default function ClientesPage() {
   // lo rechaza igual.
   const { data: zones = [] } = useSWR<ZoneRecord[]>("/zones");
 
+  // Solo las categorias vigentes: asignar una dada de baja es un error, y la
+  // API lo rechaza igual.
+  const { data: categories = [] } =
+    useSWR<CustomerCategoryRecord[]>("/customer-categories");
+
+  // Mientras la lista no llego no hay categoria por defecto que elegir; en
+  // cuanto llega, la primera activa es la que el select muestra.
+  const selectedCustomerType = form.customerType || categories[0]?.code || "";
+
   const error = actionError ?? (loadError ? "No se pudo cargar clientes." : null);
 
   const visibleCustomers = useMemo(() => {
@@ -174,7 +216,7 @@ export default function ClientesPage() {
 
   const buildCreatePayload = () => ({
     name: form.name.trim(),
-    customerType: form.customerType,
+    customerType: selectedCustomerType,
     ...(form.zoneId ? { zoneId: form.zoneId } : {}),
     ...(optionalText(form.address) ? { address: optionalText(form.address) } : {}),
     ...(form.latitude !== undefined && form.longitude !== undefined
@@ -272,15 +314,15 @@ export default function ClientesPage() {
           <label className="text-sm text-slate-600">
             Tipo
             <select
-              value={form.customerType}
+              value={selectedCustomerType}
               onChange={(event) =>
                 setForm({ ...form, customerType: event.target.value as CustomerType })
               }
               className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
             >
-              {CUSTOMER_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
+              {categoryOptions(categories).map((category) => (
+                <option key={category.code} value={category.code}>
+                  {category.name}
                 </option>
               ))}
             </select>
@@ -387,9 +429,9 @@ export default function ClientesPage() {
                 className="ml-2 rounded border border-slate-300 px-3 py-1"
               >
                 <option value="all">Todos</option>
-                {CUSTOMER_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
+                {categories.map((category) => (
+                  <option key={category.code} value={category.code}>
+                    {category.name}
                   </option>
                 ))}
               </select>
@@ -448,6 +490,7 @@ export default function ClientesPage() {
                     key={customer.id}
                     customer={customer}
                     zones={zones}
+                    categories={categories}
                     editing={editingId === customer.id}
                     onEdit={() => setEditingId(customer.id)}
                     onCancel={() => setEditingId(null)}
@@ -476,6 +519,7 @@ export default function ClientesPage() {
 type CustomerRowProps = {
   customer: CustomerRecord;
   zones: ZoneRecord[];
+  categories: CustomerCategoryRecord[];
   editing: boolean;
   onEdit: () => void;
   onCancel: () => void;
@@ -486,6 +530,7 @@ type CustomerRowProps = {
 function CustomerRow({
   customer,
   zones,
+  categories,
   editing,
   onEdit,
   onCancel,
@@ -593,9 +638,9 @@ function CustomerRow({
             onChange={(event) => setCustomerType(event.target.value as CustomerType)}
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1"
           >
-            {CUSTOMER_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {type}
+            {categoryOptions(categories, customer).map((category) => (
+              <option key={category.code} value={category.code}>
+                {category.name}
               </option>
             ))}
           </select>

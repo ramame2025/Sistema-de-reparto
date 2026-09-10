@@ -7,6 +7,7 @@ import {
 import {
   type AssignmentKind,
   type CreateAssignmentInput,
+  type TruckCapacityEntry,
 } from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -44,7 +45,11 @@ export type DriverTruckToday = {
   truckId: string;
   code: string;
   plate: string;
-  capacity: number;
+  /**
+   * Grilla por producto, ordenada como el catalogo. Array vacio significa
+   * "sin detallar", no "no entra nada": por eso no viaja ningun total.
+   */
+  capacities: TruckCapacityEntry[];
   startDate: string;
   endDate: string | null;
 };
@@ -264,6 +269,13 @@ export class DriverTruckAssignmentsService {
 
     const truck = await this.prisma.truck.findUnique({
       where: { id: assignment.truckId },
+      // Mismo orden que `TrucksService`: la grilla se lee como el catalogo.
+      include: {
+        capacities: {
+          select: { productCode: true, units: true },
+          orderBy: [{ product: { sortOrder: 'asc' } }, { productCode: 'asc' }],
+        },
+      },
     });
 
     // Un camion dado de baja no habilita ventas, aunque la asignacion siga viva.
@@ -277,7 +289,7 @@ export class DriverTruckAssignmentsService {
       truckId: truck.id,
       code: truck.code,
       plate: truck.plate,
-      capacity: truck.capacity,
+      capacities: truck.capacities,
       startDate: assignment.startDate,
       endDate: assignment.endDate,
     };

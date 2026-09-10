@@ -20,7 +20,6 @@ import {
   type UpdateSaleInput,
 } from '@distribuidor/shared';
 import {
-  CustomerType as PrismaCustomerType,
   PaymentMethod as PrismaPaymentMethod,
   SaleAuditAction as PrismaSaleAuditAction,
   SaleKind as PrismaSaleKind,
@@ -30,6 +29,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
 import { ProductsService } from '../products/products.service';
 
 type ResolvedSaleLinks = {
@@ -57,6 +57,7 @@ export class SalesService {
     private readonly prisma: PrismaService,
     private readonly pricesService: PricesService,
     private readonly productsService: ProductsService,
+    private readonly categoriesService: CustomerCategoriesService,
   ) {}
 
   private async resolveCustomerAndTruck(
@@ -99,6 +100,16 @@ export class SalesService {
 
       truckId = truck.id;
     }
+
+    // `packages/shared` valida la forma de la categoria pero no puede saber
+    // cuales existen: las define el admin en runtime. La pertenencia se
+    // verifica aca, antes de escribir, igual que la del producto.
+    //
+    // Existencia, NO vigencia: `assertCategoryCodesExist` acepta a proposito
+    // una categoria dada de baja, porque ese string llega dentro de una venta
+    // que el telefono encolo antes de que el admin la retirara. Rechazarla
+    // perderia una venta real.
+    await this.categoriesService.assertCategoryCodesExist([customerType]);
 
     return { customerType, customerName, customerId, truckId };
   }
@@ -204,7 +215,7 @@ export class SalesService {
         driverName: resolvedDriverName,
         truckCode: resolvedTruckCode,
         customerName,
-        customerType: customerType as PrismaCustomerType,
+        customerType,
         paymentMethod: input.paymentMethod as PrismaPaymentMethod,
         note: input.note?.trim() || null,
         total,
@@ -271,7 +282,7 @@ export class SalesService {
         driverName: resolvedDriverName,
         truckCode: resolvedTruckCode,
         customerName,
-        customerType: customerType as PrismaCustomerType,
+        customerType,
         paymentMethod: null,
         note: input.note?.trim() || null,
         total: 0,
@@ -393,7 +404,7 @@ export class SalesService {
           driverName: resolvedDriverName,
           truckCode: resolvedTruckCode,
           customerName,
-          customerType: customerType as PrismaCustomerType,
+          customerType,
           paymentMethod: resolvedPaymentMethod,
           note: input.note?.trim() || null,
           total,
