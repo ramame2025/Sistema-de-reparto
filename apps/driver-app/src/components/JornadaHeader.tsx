@@ -10,7 +10,6 @@ export type JornadaHeaderProps = {
   driverName: string;
   truckCode?: string;
   truckPlate?: string;
-  truckCapacity?: number;
   /** Un camion de cobertura no es el habitual del chofer: se dice. */
   truckKind?: 'titular' | 'cobertura';
   testID?: string;
@@ -26,7 +25,6 @@ export function JornadaHeader({
   driverName,
   truckCode,
   truckPlate,
-  truckCapacity,
   truckKind,
   testID,
 }: JornadaHeaderProps) {
@@ -40,7 +38,6 @@ export function JornadaHeader({
       {hasTruck ? (
         <Text style={styles.truck}>
           {truckPlate}
-          {truckCapacity !== undefined ? ` · ${truckCapacity} u. de capacidad` : ''}
           {truckKind === 'cobertura' ? ' · cobertura' : ''}
         </Text>
       ) : (

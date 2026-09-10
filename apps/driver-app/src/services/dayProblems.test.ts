@@ -72,6 +72,25 @@ describe('buildDayProblems/ventas que no se pudieron enviar', () => {
     expect(problem.total).toBeUndefined();
   });
 
+  // Mismo desenlace que no tener tabla: la venta se sigue mostrando, pero sin
+  // importe. Un total en cero la haria parecer una venta que no valia nada.
+  it('still reports a queued sale whose customer type has no price for the product', () => {
+    const queued = buildQueued({
+      payload: {
+        driverName: 'chofer1',
+        customerName: 'Kiosco La Esquina',
+        customerType: 'comercio',
+        paymentMethod: 'transferencia',
+        items: [{ productCode: 'G45', quantity: 1 }],
+      },
+    });
+
+    const [problem] = buildDayProblems([queued], [], prices);
+
+    expect(problem.kind).toBe('not-sent');
+    expect(problem.total).toBeUndefined();
+  });
+
   it('reports a queued empty visit, which has no items to add up', () => {
     const queued = buildQueued({
       queueId: 'q-churn',

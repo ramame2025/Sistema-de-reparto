@@ -55,6 +55,7 @@ const CUSTOMERS = [
     id: "c1",
     name: "Almacen Norte",
     customerType: "comercio",
+    zoneId: "z1",
     zone: "Norte",
     address: "Av. Mitre 1234",
     latitude: -34.6,
@@ -73,22 +74,82 @@ const CUSTOMERS = [
   },
 ];
 
+const ZONES = [
+  {
+    id: "z1",
+    code: "NORTE",
+    name: "Norte",
+    isActive: true,
+    sortOrder: 0,
+    createdAt: "",
+    updatedAt: "",
+  },
+  {
+    id: "z2",
+    code: "OESTE",
+    name: "Oeste",
+    isActive: true,
+    sortOrder: 1,
+    createdAt: "",
+    updatedAt: "",
+  },
+];
+
+const CATEGORIES = [
+  {
+    id: "k1",
+    code: "final",
+    name: "Final",
+    isActive: true,
+    sortOrder: 0,
+    createdAt: "",
+    updatedAt: "",
+  },
+  {
+    id: "k2",
+    code: "mayorista",
+    name: "Mayorista",
+    isActive: true,
+    sortOrder: 1,
+    createdAt: "",
+    updatedAt: "",
+  },
+];
+
+/**
+ * La pagina pide tres cosas: el padron, las zonas y las categorias de cliente,
+ * las dos ultimas para sus selects.
+ */
+function swrByKey(
+  customers: unknown = CUSTOMERS,
+  zones: unknown = ZONES,
+  categories: unknown = CATEGORIES,
+) {
+  return (key: string) => ({
+    data:
+      key === "/zones"
+        ? zones
+        : key === "/customer-categories"
+          ? categories
+          : customers,
+    isLoading: false,
+    error: undefined,
+    mutate,
+  });
+}
+
+const mutate = jest.fn();
+
 describe("ClientesPage", () => {
   const post = jest.fn();
   const patch = jest.fn();
-  const mutate = jest.fn();
 
   beforeEach(() => {
     post.mockReset().mockResolvedValue({});
     patch.mockReset().mockResolvedValue({});
     mutate.mockReset();
     mockedUseApiClient.mockReturnValue({ post, patch });
-    mockedUseSWR.mockReturnValue({
-      data: CUSTOMERS,
-      isLoading: false,
-      error: undefined,
-      mutate,
-    });
+    mockedUseSWR.mockImplementation(swrByKey());
   });
 
   it("lists the customers in the directory", () => {
@@ -118,12 +179,7 @@ describe("ClientesPage", () => {
   // Accent folding matters in the search box for the same reason it matters
   // in duplicate detection: nobody types the accent.
   it("ignores accents and casing while searching", () => {
-    mockedUseSWR.mockReturnValue({
-      data: [{ ...CUSTOMERS[1], name: "Don José" }],
-      isLoading: false,
-      error: undefined,
-      mutate,
-    });
+    mockedUseSWR.mockImplementation(swrByKey([{ ...CUSTOMERS[1], name: "Don José" }]));
     render(<ClientesPage />);
 
     fireEvent.change(screen.getByLabelText("Buscar"), {
@@ -145,7 +201,7 @@ describe("ClientesPage", () => {
     fireEvent.change(screen.getByLabelText("Nombre"), {
       target: { value: "Kiosco Nuevo" },
     });
-    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "Oeste" } });
+    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "z2" } });
     fireEvent.change(screen.getByLabelText("Direccion"), {
       target: { value: "Calle 5 num 100" },
     });
@@ -155,8 +211,53 @@ describe("ClientesPage", () => {
     expect(post).toHaveBeenCalledWith("/customers", {
       name: "Kiosco Nuevo",
       customerType: "final",
-      zone: "Oeste",
+      zoneId: "z2",
       address: "Calle 5 num 100",
+    });
+  });
+
+  // La zona dejo de ser texto libre: se elige de la lista que administra el
+  // admin, asi que cuatro grafias de "Centro" ya no pueden forkear una zona.
+  it("offers the zones from the catalogue instead of a free-text field", () => {
+    render(<ClientesPage />);
+
+    const select = screen.getByLabelText("Zona");
+    expect(select.tagName).toBe("SELECT");
+    expect(
+      Array.from(select.querySelectorAll("option")).map((option) => option.textContent),
+    ).toEqual(["Sin zona", "Norte", "Oeste"]);
+  });
+
+  // El tipo de cliente dejo de ser una constante de tres valores: sale de la
+  // tabla que administra el admin, con el nombre que el le puso.
+  it("offers the categories from the catalogue instead of the hardcoded three", () => {
+    render(<ClientesPage />);
+
+    const select = screen.getByLabelText("Tipo");
+    expect(select.tagName).toBe("SELECT");
+    expect(
+      Array.from(select.querySelectorAll("option")).map((option) => option.textContent),
+    ).toEqual(["Final", "Mayorista"]);
+    expect(
+      Array.from(select.querySelectorAll("option")).map(
+        (option) => (option as HTMLOptionElement).value,
+      ),
+    ).toEqual(["final", "mayorista"]);
+  });
+
+  it("creates a customer with the category the admin picked", async () => {
+    render(<ClientesPage />);
+
+    fireEvent.change(screen.getByLabelText("Nombre"), {
+      target: { value: "Kiosco Nuevo" },
+    });
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "mayorista" } });
+    fireEvent.click(screen.getByRole("button", { name: "Crear cliente" }));
+
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    expect(post).toHaveBeenCalledWith("/customers", {
+      name: "Kiosco Nuevo",
+      customerType: "mayorista",
     });
   });
 
@@ -269,6 +370,94 @@ describe("ClientesPage", () => {
         expect(screen.queryByLabelText("Nombre del cliente")).not.toBeInTheDocument(),
       );
       expect(patch).not.toHaveBeenCalled();
+    });
+
+    it("moves the customer to another zone by id", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+      fireEvent.change(screen.getByLabelText("Zona del cliente"), {
+        target: { value: "z2" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      expect(patch).toHaveBeenCalledWith("/customers/c1", { zoneId: "z2" });
+    });
+
+    it("clears the zone with null rather than an empty string", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+      fireEvent.change(screen.getByLabelText("Zona del cliente"), {
+        target: { value: "" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      expect(patch).toHaveBeenCalledWith("/customers/c1", { zoneId: null });
+    });
+
+    it("loads the editing row with the zone the customer already has", () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+
+      expect(screen.getByLabelText("Zona del cliente")).toHaveValue("z1");
+    });
+
+    // Una zona dada de baja no esta en la lista, pero el cliente la sigue
+    // teniendo: sin esta opcion el select se veria vacio y editar cualquier
+    // otro campo pareceria estar sacandole la zona.
+    it("keeps showing a zone that is no longer in the catalogue", () => {
+      mockedUseSWR.mockImplementation(swrByKey(CUSTOMERS, [ZONES[1]]));
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+
+      expect(screen.getByLabelText("Zona del cliente")).toHaveValue("z1");
+      expect(screen.getByRole("option", { name: "Norte" })).toBeInTheDocument();
+    });
+
+    it("loads the editing row with the category the customer already has", () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+
+      expect(screen.getByLabelText("Tipo del cliente")).toHaveValue("comercio");
+    });
+
+    // Mismo criterio que con la zona: una categoria dada de baja ya no viene
+    // en la lista, pero el cliente la sigue teniendo. Sin esta opcion el
+    // select se veria vacio y editar cualquier otro campo pareceria estar
+    // sacandole la categoria.
+    it("keeps showing a category that is no longer in the catalogue", () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+
+      const select = screen.getByLabelText("Tipo del cliente");
+      expect(select).toHaveValue("comercio");
+      expect(
+        Array.from(select.querySelectorAll("option")).map(
+          (option) => (option as HTMLOptionElement).value,
+        ),
+      ).toEqual(["comercio", "final", "mayorista"]);
+    });
+
+    it("changes the category of an existing customer", async () => {
+      render(<ClientesPage />);
+
+      fireEvent.click(screen.getByTestId("edit-c1"));
+      fireEvent.change(screen.getByLabelText("Tipo del cliente"), {
+        target: { value: "mayorista" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      expect(patch).toHaveBeenCalledWith("/customers/c1", {
+        customerType: "mayorista",
+      });
     });
 
     it("clears the address with null rather than an empty string", async () => {
@@ -430,25 +619,17 @@ describe("ClientesPage", () => {
   });
 
   it("shows an empty state when the directory has no customers", () => {
-    mockedUseSWR.mockReturnValue({
-      data: [],
-      isLoading: false,
-      error: undefined,
-      mutate,
-    });
+    mockedUseSWR.mockImplementation(swrByKey([]));
     render(<ClientesPage />);
 
     expect(screen.getByTestId("customers-empty")).toBeInTheDocument();
   });
 
   describe("filtros de tipo y zona + paginacion", () => {
+    // Las zonas y las categorias ya no salen del padron: son dos endpoints
+    // aparte, asi que el mock tiene que responder por clave.
     const withCustomers = (data: unknown[]) => {
-      mockedUseSWR.mockReturnValue({
-        data,
-        isLoading: false,
-        error: undefined,
-        mutate,
-      });
+      mockedUseSWR.mockImplementation(swrByKey(data));
       render(<ClientesPage />);
     };
 
@@ -470,15 +651,18 @@ describe("ClientesPage", () => {
     it("filters the directory by customer type", () => {
       withCustomers(CUSTOMERS);
 
+      // "final" y no "comercio": las opciones del filtro salen de las
+      // categorias vigentes, y "comercio" es justamente la dada de baja que
+      // el fixture usa para probar el fallback de la fila en edicion.
       fireEvent.change(screen.getByLabelText("Filtrar por tipo"), {
-        target: { value: "comercio" },
+        target: { value: "final" },
       });
 
-      expect(screen.getByText("Almacen Norte")).toBeInTheDocument();
-      expect(screen.queryByText("Kiosco Sur")).not.toBeInTheDocument();
+      expect(screen.getByText("Kiosco Sur")).toBeInTheDocument();
+      expect(screen.queryByText("Almacen Norte")).not.toBeInTheDocument();
     });
 
-    it("filters the directory by zone, offering only zones present in the padron", () => {
+    it("filters the directory by zone, offering only the zones the API returns", () => {
       withCustomers(CUSTOMERS);
 
       const zoneSelect = screen.getByLabelText("Filtrar por zona");
@@ -537,13 +721,16 @@ describe("ClientesPage", () => {
     });
 
     it("returns to page 1 when a filter changes", () => {
-      withCustomers(makeCustomers(20));
+      // Los 20 son "final" para que el filtro no achique el conjunto: lo que
+      // se prueba aca es que cambiar de filtro vuelve a la pagina 1, no el
+      // filtrado en si.
+      withCustomers(makeCustomers(20, { customerType: "final" }));
 
       fireEvent.click(screen.getByRole("button", { name: "Siguiente" }));
       expect(screen.getByText(/P[aá]gina 2 de 2/)).toBeInTheDocument();
 
       fireEvent.change(screen.getByLabelText("Filtrar por tipo"), {
-        target: { value: "comercio" },
+        target: { value: "final" },
       });
 
       expect(screen.getByText(/P[aá]gina 1 de 2/)).toBeInTheDocument();

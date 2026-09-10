@@ -8,13 +8,16 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import {
   type CreateTruckInput,
+  type SetTruckCapacitiesInput,
   type TruckStockSummary,
   type UpdateTruckInput,
   validateCreateTruckInput,
+  validateSetTruckCapacitiesInput,
   validateUpdateTruckInput,
 } from '@distribuidor/shared';
 import { Roles } from '../auth/roles.decorator';
@@ -106,6 +109,24 @@ export class TrucksController {
     }
 
     return this.trucksService.updateTruck(id, input);
+  }
+
+  /**
+   * Reemplaza la grilla ENTERA del camion. Es un PUT y no un PATCH a
+   * proposito: el recurso es la grilla completa, y mandar la lista entera es
+   * lo que hace que una fila ausente signifique borrada.
+   */
+  @Put(':id/capacities')
+  async setTruckCapacities(
+    @Param('id') id: string,
+    @Body() input: SetTruckCapacitiesInput,
+  ) {
+    const errors = validateSetTruckCapacitiesInput(input);
+    if (errors.length > 0) {
+      throw new BadRequestException({ message: 'Invalid capacities payload', errors });
+    }
+
+    return this.trucksService.setCapacities(id, input);
   }
 
   @Delete(':id')

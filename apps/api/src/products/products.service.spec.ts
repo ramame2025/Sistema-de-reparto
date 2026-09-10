@@ -37,6 +37,7 @@ describe('ProductsService', () => {
       update: jest.Mock;
     };
     productPrice: { createMany: jest.Mock };
+    customerCategory: { findMany: jest.Mock };
     $transaction: jest.Mock;
   };
 
@@ -49,6 +50,7 @@ describe('ProductsService', () => {
         update: jest.fn(),
       },
       productPrice: { createMany: jest.fn() },
+      customerCategory: { findMany: jest.fn() },
       // The real client hands the callback a transactional prisma; the same
       // mock stands in for it, which is what lets the tests assert that the
       // product and its prices are written through one call.
@@ -97,9 +99,14 @@ describe('ProductsService', () => {
       prisma.product.findUnique.mockResolvedValue(null);
       prisma.product.create.mockResolvedValue(buildProductRow());
       prisma.productPrice.createMany.mockResolvedValue({ count: 3 });
+      prisma.customerCategory.findMany.mockResolvedValue([
+        { code: 'final' },
+        { code: 'comercio' },
+        { code: 'distribuidor' },
+      ]);
     });
 
-    it('creates the product and its three prices in ONE transaction', async () => {
+    it('creates the product and one price per active category in ONE transaction', async () => {
       await service.createProduct(input);
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -110,6 +117,68 @@ describe('ProductsService', () => {
           { productCode: 'G20', customerType: 'comercio', amount: 14500 },
           { productCode: 'G20', customerType: 'distribuidor', amount: 14000 },
         ],
+      });
+    });
+
+    // Las categorias ya no son tres fijas: se leen en el momento del pedido,
+    // porque el admin pudo crear una hace un minuto.
+    it('reads the ACTIVE categories at request time, in display order', async () => {
+      prisma.customerCategory.findMany.mockResolvedValue([
+        { code: 'final' },
+        { code: 'mayorista' },
+      ]);
+
+      await service.createProduct({
+        ...input,
+        prices: { final: 15000, mayorista: 13000 },
+      });
+
+      expect(prisma.customerCategory.findMany).toHaveBeenCalledWith({
+        where: { isActive: true },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        select: { code: true },
+      });
+      expect(prisma.productPrice.createMany).toHaveBeenCalledWith({
+        data: [
+          { productCode: 'G20', customerType: 'final', amount: 15000 },
+          { productCode: 'G20', customerType: 'mayorista', amount: 13000 },
+        ],
+      });
+    });
+
+    // "Nace completo o no nace" sigue rigiendo para el PRODUCTO. Lo que cambio
+    // es contra que se mide: las categorias activas de ahora, no una lista
+    // fija de tres.
+    it('rejects a product missing a price for an active category, naming it', async () => {
+      prisma.customerCategory.findMany.mockResolvedValue([
+        { code: 'final' },
+        { code: 'mayorista' },
+      ]);
+
+      await expect(
+        service.createProduct({ ...input, prices: { final: 15000 } }),
+      ).rejects.toMatchObject({
+        response: {
+          message: 'Missing price for customerType: mayorista',
+          errors: ['prices.mayorista is required'],
+        },
+      });
+      expect(prisma.product.create).not.toHaveBeenCalled();
+      expect(prisma.productPrice.createMany).not.toHaveBeenCalled();
+    });
+
+    // Una categoria dada de baja no se puede vender, asi que exigirle precio a
+    // un producto nuevo seria pedir un dato muerto.
+    it('ignores a price sent for a category that is not active', async () => {
+      prisma.customerCategory.findMany.mockResolvedValue([{ code: 'final' }]);
+
+      await service.createProduct({
+        ...input,
+        prices: { final: 15000, retirada: 9000 },
+      });
+
+      expect(prisma.productPrice.createMany).toHaveBeenCalledWith({
+        data: [{ productCode: 'G20', customerType: 'final', amount: 15000 }],
       });
     });
 

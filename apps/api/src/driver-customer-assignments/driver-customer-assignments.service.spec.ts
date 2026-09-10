@@ -8,7 +8,7 @@ function buildCustomer(overrides: Partial<Record<string, unknown>> = {}) {
     id: 'customer-1',
     name: 'Kiosco Sur',
     customerType: 'final',
-    zone: null,
+    zoneRef: null,
     latitude: null,
     longitude: null,
     isActive: true,
@@ -280,6 +280,52 @@ describe('DriverCustomerAssignmentsService', () => {
       const result = await service.getMyAssignment('driver-1', '2026-08-21');
 
       expect(result.map((c) => c.id)).toEqual(['customer-1', 'customer-2']);
+    });
+
+    // La columna sombra `Customer.zone` murio en la fase 4: el nombre para
+    // mostrar sale de la relacion, igual que en `CustomersService`.
+    it('resolves the zone display name from the relation', async () => {
+      prisma.driverCustomerAssignment.findUnique.mockResolvedValue(
+        buildAssignment({
+          entries: [
+            {
+              position: 0,
+              customer: buildCustomer({
+                zoneRef: { id: 'zone-sur', name: 'Sur' },
+              }),
+            },
+          ],
+        }),
+      );
+
+      const result = await service.getMyAssignment('driver-1', '2026-08-21');
+
+      expect(result[0].zone).toBe('Sur');
+    });
+
+    it('leaves the zone undefined for a customer with no zone', async () => {
+      prisma.driverCustomerAssignment.findUnique.mockResolvedValue(
+        buildAssignment({
+          entries: [{ position: 0, customer: buildCustomer({ zoneRef: null }) }],
+        }),
+      );
+
+      const result = await service.getMyAssignment('driver-1', '2026-08-21');
+
+      expect(result[0].zone).toBeUndefined();
+    });
+
+    // Sin este include la zona llegaria siempre vacia: es la unica consulta
+    // fuera de `CustomersService` que arma un `CustomerRecord`.
+    it('includes the zone relation in the query', async () => {
+      prisma.driverCustomerAssignment.findUnique.mockResolvedValue(null);
+
+      await service.getMyAssignment('driver-1', '2026-08-21');
+
+      const [[args]] = prisma.driverCustomerAssignment.findUnique.mock.calls;
+      expect(args.include.entries.include.customer.include).toEqual({
+        zoneRef: { select: { id: true, name: true } },
+      });
     });
   });
 });

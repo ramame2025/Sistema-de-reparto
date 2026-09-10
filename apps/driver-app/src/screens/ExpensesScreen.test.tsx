@@ -58,7 +58,7 @@ beforeEach(() => {
       truckId: 'truck-1',
       code: 'C-04',
       plate: 'AB123CD',
-      capacity: 120,
+      capacities: [],
       startDate: '2026-08-01T00:00:00.000Z',
       endDate: null,
     },

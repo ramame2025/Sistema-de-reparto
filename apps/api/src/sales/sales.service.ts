@@ -1,18 +1,25 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  priceSaleItems,
   resolveOccurredAt,
-  calculateSaleTotal,
   type CancelSaleInput,
   type CreateSaleInput,
   type CustomerType,
+  type PriceTable,
+  type PricedSaleItem,
   type RecordEmptyVisitInput,
   type SaleAuditRecord,
+  type SaleItemInput,
   type SaleKind,
   type SaleRecord,
   type UpdateSaleInput,
 } from '@distribuidor/shared';
 import {
-  CustomerType as PrismaCustomerType,
   PaymentMethod as PrismaPaymentMethod,
   SaleAuditAction as PrismaSaleAuditAction,
   SaleKind as PrismaSaleKind,
@@ -22,6 +29,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
 import { ProductsService } from '../products/products.service';
 
 type ResolvedSaleLinks = {
@@ -49,6 +57,7 @@ export class SalesService {
     private readonly prisma: PrismaService,
     private readonly pricesService: PricesService,
     private readonly productsService: ProductsService,
+    private readonly categoriesService: CustomerCategoriesService,
   ) {}
 
   private async resolveCustomerAndTruck(
@@ -92,7 +101,53 @@ export class SalesService {
       truckId = truck.id;
     }
 
+    // `packages/shared` valida la forma de la categoria pero no puede saber
+    // cuales existen: las define el admin en runtime. La pertenencia se
+    // verifica aca, antes de escribir, igual que la del producto.
+    //
+    // Existencia, NO vigencia: `assertCategoryCodesExist` acepta a proposito
+    // una categoria dada de baja, porque ese string llega dentro de una venta
+    // que el telefono encolo antes de que el admin la retirara. Rechazarla
+    // perderia una venta real.
+    await this.categoriesService.assertCategoryCodesExist([customerType]);
+
     return { customerType, customerName, customerId, truckId };
+  }
+
+  /**
+   * Valoriza las lineas, o rechaza la operacion nombrando los pares que no
+   * tienen precio.
+   *
+   * Es un 400 y no un 500: que a un tipo de cliente le falte el precio de un
+   * producto es una configuracion incompleta del admin -- un estado legitimo
+   * desde que el tipo de cliente se crea antes de cargarle los precios -- y no
+   * una falla del servidor. El par culpable va en el mensaje, mismo criterio
+   * que `assertProductCodesExist`: quien lee un log o un banner tiene que
+   * saber QUE falta cargar sin abrir el JSON.
+   *
+   * La alternativa vieja era congelar `unitPrice: 0`, que regalaba la
+   * mercaderia sin que nadie se enterara.
+   */
+  private priceItemsOrReject(
+    customerType: CustomerType,
+    items: SaleItemInput[],
+    priceTable: PriceTable,
+  ): { items: PricedSaleItem[]; total: number } {
+    const priced = priceSaleItems(customerType, items, priceTable);
+
+    if (!priced.ok) {
+      const pairs = priced.missing.map(
+        (pair) =>
+          `No price for customerType=${pair.customerType} productCode=${pair.productCode}`,
+      );
+
+      throw new BadRequestException({
+        message: pairs.join(', '),
+        errors: pairs,
+      });
+    }
+
+    return { items: priced.items, total: priced.total };
   }
 
   async listSales(): Promise<SaleRecord[]> {
@@ -143,15 +198,12 @@ export class SalesService {
       await this.resolveCustomerAndTruck(input);
 
     // El precio unitario se congela en cada linea, y el total se deriva de
-    // esas lineas. Asi total e items no pueden discrepar nunca.
-    const pricedItems = input.items.map((item) => ({
-      productCode: item.productCode,
-      quantity: item.quantity,
-      unitPrice: priceTable[customerType][item.productCode] ?? 0,
-    }));
-    const total = pricedItems.reduce(
-      (sum, item) => sum + item.unitPrice * item.quantity,
-      0,
+    // esas lineas. Asi total e items no pueden discrepar nunca: `priceSaleItems`
+    // devuelve los dos juntos justamente para que no puedan calcularse aparte.
+    const { items: pricedItems, total } = this.priceItemsOrReject(
+      customerType,
+      input.items,
+      priceTable,
     );
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
@@ -163,7 +215,7 @@ export class SalesService {
         driverName: resolvedDriverName,
         truckCode: resolvedTruckCode,
         customerName,
-        customerType: customerType as PrismaCustomerType,
+        customerType,
         paymentMethod: input.paymentMethod as PrismaPaymentMethod,
         note: input.note?.trim() || null,
         total,
@@ -230,7 +282,7 @@ export class SalesService {
         driverName: resolvedDriverName,
         truckCode: resolvedTruckCode,
         customerName,
-        customerType: customerType as PrismaCustomerType,
+        customerType,
         paymentMethod: null,
         note: input.note?.trim() || null,
         total: 0,
@@ -296,17 +348,12 @@ export class SalesService {
     // A churn row never has items/paymentMethod, on create or on edit
     // (Design decision #2/#5): forced here too, regardless of whatever the
     // edit payload does or doesn't carry, mirroring `recordEmptyVisit`.
-    const resolvedItems = isChurn
-      ? []
-      : input.items.map((item) => ({
-          productCode: item.productCode,
-          quantity: item.quantity,
-          unitPrice: priceTable[customerType][item.productCode] ?? 0,
-        }));
-    const total = resolvedItems.reduce(
-      (sum, item) => sum + item.unitPrice * item.quantity,
-      0,
-    );
+    //
+    // Un churn no tiene items, asi que no hay nada que cotizar: la falta de
+    // precios nunca puede bloquear su edicion.
+    const { items: resolvedItems, total } = isChurn
+      ? { items: [], total: 0 }
+      : this.priceItemsOrReject(customerType, input.items, priceTable);
     const resolvedPaymentMethod = isChurn ? null : (input.paymentMethod as PrismaPaymentMethod);
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
@@ -357,7 +404,7 @@ export class SalesService {
           driverName: resolvedDriverName,
           truckCode: resolvedTruckCode,
           customerName,
-          customerType: customerType as PrismaCustomerType,
+          customerType,
           paymentMethod: resolvedPaymentMethod,
           note: input.note?.trim() || null,
           total,
