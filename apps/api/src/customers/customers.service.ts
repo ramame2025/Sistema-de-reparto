@@ -45,8 +45,8 @@ type ZoneRow = {
 };
 
 /**
- * El nombre para mostrar de la zona sale de la relacion. La columna sombra
- * `Customer.zone` sigue existiendo, pero ya no es de donde se lee.
+ * El nombre para mostrar de la zona sale de la relacion, el unico lugar donde
+ * vive: la columna sombra `Customer.zone` se elimino en la fase 4.
  */
 const ZONE_INCLUDE = { zoneRef: { select: { id: true, name: true } } } as const;
 

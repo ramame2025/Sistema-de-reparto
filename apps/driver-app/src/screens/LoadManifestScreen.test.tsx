@@ -75,7 +75,10 @@ const assignedTruck = {
   truckId: 'truck-1',
   code: 'CAMION-07',
   plate: 'AB123CD',
-  capacity: 40,
+  capacities: [
+    { productCode: 'G10', units: 30 },
+    { productCode: 'G45', units: 0 },
+  ],
   startDate: '2026-02-01T00:00:00.000Z',
   endDate: null,
 };
@@ -141,6 +144,37 @@ describe('LoadManifestScreen/camion asignado (guard)', () => {
     expect(screen.getByText(/CAMION-07/)).toBeTruthy();
     expect(screen.getByTestId('load-manifest-save-button').props.accessibilityState.disabled).toBe(
       false,
+    );
+  });
+
+  // Cargando productos, lo util es ver la capacidad DE CADA UNO al lado de lo
+  // que se esta cargando, no un total que no dice que entra.
+  it('shows each product capacity beside the quantity being loaded', async () => {
+    await render(<LoadManifestScreen />);
+
+    expect(screen.getByTestId('load-manifest-capacity-G10')).toHaveTextContent(/30/);
+    // 0 es una respuesta cargada: ese producto no viaja en este camion.
+    expect(screen.getByTestId('load-manifest-capacity-G45')).toHaveTextContent(/\b0\b/);
+  });
+
+  it('reads "sin detallar" for a product the truck has no capacity row for', async () => {
+    await render(<LoadManifestScreen />);
+
+    expect(screen.getByTestId('load-manifest-capacity-G15')).toHaveTextContent(
+      /sin detallar/,
+    );
+  });
+
+  it('reads "sin detallar" everywhere when the whole grid is empty', async () => {
+    mockedUseTruck.mockReturnValue({
+      ...baseTruckValue,
+      truck: { ...assignedTruck, capacities: [] },
+    });
+
+    await render(<LoadManifestScreen />);
+
+    expect(screen.getByTestId('load-manifest-capacity-G10')).toHaveTextContent(
+      /sin detallar/,
     );
   });
 

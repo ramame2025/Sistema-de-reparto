@@ -312,6 +312,13 @@ export type CustomerRecord = {
     customerType: CustomerType;
     /** Fila de `Zone` a la que pertenece el cliente, si tiene una asignada. */
     zoneId?: string;
+    /**
+     * Nombre para mostrar de esa zona, resuelto SIEMPRE desde la relacion: la
+     * columna sombra homonima ya no existe. Sigue siendo el mismo campo de
+     * siempre, asi que quien solo lo renderiza -- el aviso de duplicado del
+     * chofer, por ejemplo -- no se entera del cambio. Es de solo lectura: para
+     * asignar una zona esta `zoneId`, y no hay otra forma.
+     */
     zone?: string;
     address?: string;
     latitude?: number;
@@ -412,16 +419,33 @@ export type UpdateCustomerCategoryInput = {
     isActive?: boolean;
     sortOrder?: number;
 };
+/**
+ * Cuantas unidades de UN producto entran en el camion. La capacidad dejo de
+ * ser un numero unico: un total no dice que carga entra, y no se puede
+ * repartir entre productos sin inventar el reparto.
+ *
+ * `units: 0` es una respuesta real -- "este producto no viaja en este
+ * camion" -- y por eso se guarda como fila, en vez de omitirse.
+ */
+export type TruckCapacityEntry = {
+    productCode: ProductCode;
+    units: number;
+};
 export type CreateTruckInput = {
     code: string;
     plate: string;
-    capacity: number;
 };
 export type TruckRecord = {
     id: string;
     code: string;
     plate: string;
-    capacity: number;
+    /**
+     * La grilla por producto, ordenada como el catalogo. Un array vacio
+     * significa "sin detallar", NO "no entra nada": por eso no hay aca ningun
+     * total derivado -- un `capacity: 0` calculado seria exactamente esa
+     * mentira.
+     */
+    capacities: TruckCapacityEntry[];
     isActive: boolean;
     createdAt: string;
     updatedAt: string;
@@ -430,8 +454,16 @@ export type TruckRecord = {
 export type UpdateTruckInput = {
     code?: string;
     plate?: string;
-    capacity?: number;
     isActive?: boolean;
+};
+/**
+ * Reemplazo TOTAL de la grilla del camion, nunca un merge. Con un merge
+ * parcial "sacar este producto del camion" no se podria expresar: mandar la
+ * lista entera es lo que hace que una fila ausente signifique borrada. Mismo
+ * contrato que `CreateDriverCustomerAssignmentInput`.
+ */
+export type SetTruckCapacitiesInput = {
+    capacities: TruckCapacityEntry[];
 };
 export type CreateAssignmentInput = {
     driverId: string;
@@ -566,6 +598,13 @@ export declare function normalizeCustomerName(name: string): string;
 export declare function validateCreateCustomerInput(input: CreateCustomerInput): string[];
 export declare function validateUpdateCustomerInput(input: UpdateCustomerInput): string[];
 export declare function validateCreateTruckInput(input: CreateTruckInput): string[];
+/**
+ * Valida la grilla de capacidad. Como en todo el paquete, de los codigos de
+ * producto se comprueba la FORMA y no la pertenencia: el catalogo lo define el
+ * admin en runtime y ni el telefono ni el navegador lo conocen. Que el
+ * producto EXISTA lo asegura el servidor con `assertProductCodesExist`.
+ */
+export declare function validateSetTruckCapacitiesInput(input: SetTruckCapacitiesInput): string[];
 export declare function validateUpdateTruckInput(input: UpdateTruckInput): string[];
 export declare function validateCreateAssignmentInput(input: CreateAssignmentInput): string[];
 export declare function validateUpdatePriceInput(input: UpdatePriceInput): string[];

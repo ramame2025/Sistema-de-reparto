@@ -32,6 +32,7 @@ import {
   validateCreateSaleInput,
   validateCreateTruckInput,
   validateRecordEmptyVisitInput,
+  validateSetTruckCapacitiesInput,
   validateUpdatePriceInput,
   validateUpdateSaleInput,
   validateUpdateCustomerInput,
@@ -266,7 +267,6 @@ describe('validateCreateTruckInput', () => {
   const base: CreateTruckInput = {
     code: 'T-01',
     plate: 'AA123BB',
-    capacity: 300,
   };
 
   it('accepts a valid payload', () => {
@@ -278,14 +278,9 @@ describe('validateCreateTruckInput', () => {
     expect(errors).toContain('code must have at least 1 character');
   });
 
-  it('rejects a negative capacity', () => {
-    const errors = validateCreateTruckInput({ ...base, capacity: -1 });
-    expect(errors).toContain('capacity must be a non-negative integer');
-  });
-
-  it('rejects a non-integer capacity', () => {
-    const errors = validateCreateTruckInput({ ...base, capacity: 1.5 });
-    expect(errors).toContain('capacity must be a non-negative integer');
+  it('rejects an empty plate', () => {
+    const errors = validateCreateTruckInput({ ...base, plate: '   ' });
+    expect(errors).toContain('plate must have at least 1 character');
   });
 });
 
@@ -294,22 +289,8 @@ describe('validateUpdateTruckInput', () => {
     expect(validateUpdateTruckInput({})).toContain('at least one field must be provided');
   });
 
-  it('accepts a partial payload with only the capacity', () => {
-    expect(validateUpdateTruckInput({ capacity: 45 })).toEqual([]);
-  });
-
-  it('accepts capacity 0 without confusing it with "campo ausente"', () => {
-    // 0 es falsy: si la validacion usara `if (!input.capacity)` lo rechazaria.
-    expect(validateUpdateTruckInput({ capacity: 0 })).toEqual([]);
-  });
-
-  it('rejects a negative or fractional capacity', () => {
-    expect(validateUpdateTruckInput({ capacity: -1 })).toContain(
-      'capacity must be a non-negative integer',
-    );
-    expect(validateUpdateTruckInput({ capacity: 1.5 })).toContain(
-      'capacity must be a non-negative integer',
-    );
+  it('accepts a partial payload with only the plate', () => {
+    expect(validateUpdateTruckInput({ plate: 'AA123BB' })).toEqual([]);
   });
 
   it('accepts isActive false without treating it as absent', () => {
@@ -323,6 +304,79 @@ describe('validateUpdateTruckInput', () => {
     expect(validateUpdateTruckInput({ plate: '' })).toContain(
       'plate must have at least 1 character',
     );
+  });
+});
+
+describe('validateSetTruckCapacitiesInput', () => {
+  it('accepts a grid with one row per product', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [
+          { productCode: 'G10', units: 30 },
+          { productCode: 'G45', units: 12 },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  // La grilla vacia es "sin detallar": el estado con el que nace todo camion
+  // despues de la migracion, y al que se vuelve borrando todas las filas.
+  it('accepts an empty grid', () => {
+    expect(validateSetTruckCapacitiesInput({ capacities: [] })).toEqual([]);
+  });
+
+  // 0 es una respuesta real ("este producto no viaja en este camion"), no un
+  // campo ausente: si la validacion usara `if (!units)` lo rechazaria.
+  it('accepts units 0 without confusing it with "campo ausente"', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [{ productCode: 'G10', units: 0 }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects a capacities that is not an array', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: undefined as unknown as [],
+      }),
+    ).toContain('capacities must be an array');
+  });
+
+  it('rejects a negative or fractional units', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [{ productCode: 'G10', units: -1 }],
+      }),
+    ).toContain('units must be a non-negative integer');
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [{ productCode: 'G10', units: 1.5 }],
+      }),
+    ).toContain('units must be a non-negative integer');
+  });
+
+  // Forma, no pertenencia: el catalogo lo define el admin en runtime y quien
+  // corre esta validacion (telefono, navegador) no lo conoce.
+  it('rejects a malformed productCode', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [{ productCode: '  ', units: 1 }],
+      }),
+    ).toContain('productCode is invalid');
+  });
+
+  // Dos filas del mismo producto no tienen respuesta: cual de las dos es la
+  // capacidad? Se rechaza antes de que el unique de la base lo haga.
+  it('rejects a duplicated productCode', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [
+          { productCode: 'G10', units: 1 },
+          { productCode: 'G10', units: 2 },
+        ],
+      }),
+    ).toContain('productCode G10 is duplicated');
   });
 });
 

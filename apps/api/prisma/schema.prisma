@@ -161,7 +161,6 @@ model Customer {
   /// tenia como enum: ya viaja dentro de los payloads de venta encolados en
   /// los telefonos, igual que `productCode`.
   customerType      String
-  zone              String?
   zoneId            String?
   /// Human-readable street address. Independent from latitude/longitude:
   /// a customer may have a pin, an address, both, or neither. Nothing
@@ -190,15 +189,43 @@ model Truck {
   id            String                  @id @default(cuid())
   code          String                  @unique
   plate         String                  @unique
-  capacity      Int
   isActive      Boolean                 @default(true)
   createdAt     DateTime                @default(now())
   updatedAt     DateTime                @updatedAt
   sales         Sale[]
   assignments   DriverTruckAssignment[]
   loadManifests LoadManifest[]
+  capacities    TruckCapacity[]
 
   @@index([isActive, code])
+}
+
+/// Cuantas unidades de cada producto entran en el camion. Reemplaza al total
+/// unico `Truck.capacity`, que no decia QUE carga entra y no se podia repartir
+/// entre productos sin inventar el reparto.
+///
+/// La ausencia de fila significa "sin detallar", y una fila con `units = 0`
+/// significa "este producto no viaja en este camion". Son estados distintos, y
+/// por eso el cero se guarda en vez de omitirse.
+///
+/// Sigue siendo INFORMATIVA: nada valida un remito contra esta grilla.
+model TruckCapacity {
+  id          String   @id @default(cuid())
+  truckId     String
+  productCode String
+  units       Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  /// Cascade, no Restrict: la capacidad es una propiedad DEL camion y no
+  /// significa nada sin el. Es la unica relacion del schema donde el borrado
+  /// en cascada es lo correcto.
+  truck       Truck    @relation(fields: [truckId], references: [id], onDelete: Cascade)
+  /// Restrict, como toda referencia a producto en este schema: un producto que
+  /// alguien referencia no se borra nunca, se da de baja con isActive.
+  product     Product  @relation(fields: [productCode], references: [code], onDelete: Restrict)
+
+  @@unique([truckId, productCode])
+  @@index([truckId])
 }
 
 model DriverTruckAssignment {
@@ -288,6 +315,7 @@ model Product {
   prices          ProductPrice[]
   saleItems       SaleItem[]
   manifestItems   LoadManifestItem[]
+  truckCapacities TruckCapacity[]
 
   @@index([isActive, sortOrder])
 }
