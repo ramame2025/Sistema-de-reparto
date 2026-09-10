@@ -3,8 +3,7 @@
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import {
-  CUSTOMER_TYPES,
-  type CustomerType,
+  type CustomerCategoryRecord,
   type PriceTable,
   type ProductRecord,
 } from "@distribuidor/shared";
@@ -14,20 +13,11 @@ import { ApiError } from "../../../lib/api-client";
 type NewProductForm = {
   code: string;
   name: string;
-  prices: Record<CustomerType, string>;
+  /** Una entrada por categoria activa; cadena vacia significa "sin cargar". */
+  prices: Record<string, string>;
 };
 
-const EMPTY_FORM: NewProductForm = {
-  code: "",
-  name: "",
-  prices: { final: "", comercio: "", distribuidor: "" },
-};
-
-const PRICE_LABEL: Record<CustomerType, string> = {
-  final: "Precio final",
-  comercio: "Precio comercio",
-  distribuidor: "Precio distribuidor",
-};
+const EMPTY_FORM: NewProductForm = { code: "", name: "", prices: {} };
 
 /**
  * El chofer se trae los precios al abrir la app o al sincronizar, no al
@@ -36,6 +26,22 @@ const PRICE_LABEL: Record<CustomerType, string> = {
  */
 const SYNC_NOTICE =
   "Los choferes van a ver el precio nuevo la proxima vez que sincronicen o abran la app.";
+
+/**
+ * El precio guardado de una celda, o cadena vacia si NO HAY precio.
+ *
+ * Nunca `0`: cero es un precio real que el admin puede fijar, y usarlo tambien
+ * como disfraz de "no hay precio" es exactamente lo que hacia que un agujero
+ * pareciera una decision. Una celda vacia grita; un cero miente en silencio.
+ */
+function storedPriceOf(
+  priceTable: PriceTable | undefined,
+  categoryCode: string,
+  productCode: string,
+): string {
+  const amount = priceTable?.[categoryCode]?.[productCode];
+  return amount === undefined ? "" : String(amount);
+}
 
 export default function ProductosPage() {
   const api = useApiClient();
@@ -55,6 +61,11 @@ export default function ProductosPage() {
   const { data: priceTable, mutate: reloadPrices } =
     useSWR<PriceTable>("/prices/table");
 
+  // Solo las categorias vigentes: una dada de baja no se le puede vender a
+  // nadie, asi que pedirle precio seria pedir un dato muerto.
+  const { data: categories = [], mutate: reloadCategories } =
+    useSWR<CustomerCategoryRecord[]>("/customer-categories");
+
   const error = actionError ?? (loadError ? "No se pudo cargar productos." : null);
 
   const orderedProducts = useMemo(
@@ -65,6 +76,28 @@ export default function ProductosPage() {
     [products],
   );
 
+  const orderedCategories = useMemo(
+    () =>
+      [...categories].sort(
+        (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+      ),
+    [categories],
+  );
+
+  // Cuantos productos le faltan a cada categoria. Es lo que deja ver de un
+  // vistazo cual esta inutilizable: a una categoria sin precios no se le puede
+  // vender nada, y el chofer se entera recien frente al cliente.
+  const missingByCategory = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const category of orderedCategories) {
+      const missing = orderedProducts.filter(
+        (product) => priceTable?.[category.code]?.[product.code] === undefined,
+      ).length;
+      counts.set(category.code, missing);
+    }
+    return counts;
+  }, [orderedCategories, orderedProducts, priceTable]);
+
   // Un producto nuevo se agrega al final de la lista que ve el chofer.
   const nextSortOrder = useMemo(
     () =>
@@ -73,7 +106,7 @@ export default function ProductosPage() {
   );
 
   const refresh = async () => {
-    await Promise.all([reloadProducts(), reloadPrices()]);
+    await Promise.all([reloadProducts(), reloadPrices(), reloadCategories()]);
   };
 
   const createProduct = async () => {
@@ -88,11 +121,12 @@ export default function ProductosPage() {
         code,
         name: form.name.trim(),
         sortOrder: nextSortOrder,
-        prices: {
-          final: Number(form.prices.final),
-          comercio: Number(form.prices.comercio),
-          distribuidor: Number(form.prices.distribuidor),
-        },
+        prices: Object.fromEntries(
+          orderedCategories.map((category) => [
+            category.code,
+            Number(form.prices[category.code]),
+          ]),
+        ),
       });
 
       setForm(EMPTY_FORM);
@@ -133,10 +167,16 @@ export default function ProductosPage() {
     }
   };
 
+  // Nace completo o no nace: un producto sin precio para alguna categoria
+  // activa no se le puede vender a esa categoria, y el chofer se entera recien
+  // frente al cliente. Las categorias son las de AHORA, no una lista fija.
   const canCreate =
     form.code.trim().length > 0 &&
     form.name.trim().length >= 2 &&
-    CUSTOMER_TYPES.every((type) => form.prices[type].trim().length > 0);
+    orderedCategories.length > 0 &&
+    orderedCategories.every(
+      (category) => (form.prices[category.code] ?? "").trim().length > 0,
+    );
 
   return (
     <div className="flex flex-col gap-6">
@@ -144,8 +184,8 @@ export default function ProductosPage() {
         <h2 className="text-xl font-semibold">Nuevo producto</h2>
         <p className="mt-2 text-sm text-slate-600">
           El codigo no se puede cambiar despues: viaja dentro de las ventas que
-          los choferes tienen guardadas en el telefono. Los tres precios son
-          obligatorios.
+          los choferes tienen guardadas en el telefono. Hace falta un precio por
+          cada categoria activa.
         </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-5">
           <label className="text-sm text-slate-600">
@@ -166,17 +206,17 @@ export default function ProductosPage() {
               className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
             />
           </label>
-          {CUSTOMER_TYPES.map((type) => (
-            <label key={type} className="text-sm text-slate-600">
-              {PRICE_LABEL[type]}
+          {orderedCategories.map((category) => (
+            <label key={category.code} className="text-sm text-slate-600">
+              {`Precio ${category.name}`}
               <input
                 type="number"
                 min={0}
-                value={form.prices[type]}
+                value={form.prices[category.code] ?? ""}
                 onChange={(event) =>
                   setForm({
                     ...form,
-                    prices: { ...form.prices, [type]: event.target.value },
+                    prices: { ...form.prices, [category.code]: event.target.value },
                   })
                 }
                 className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
@@ -208,6 +248,29 @@ export default function ProductosPage() {
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="text-xl font-semibold">Productos y precios</h2>
 
+        {orderedCategories.length > 0 && orderedProducts.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            {orderedCategories.map((category) => {
+              const missing = missingByCategory.get(category.code) ?? 0;
+              return (
+                <span
+                  key={category.code}
+                  data-testid={`completeness-${category.code}`}
+                  className={
+                    missing > 0
+                      ? "rounded bg-rose-100 px-2 py-1 font-semibold text-rose-800"
+                      : "rounded bg-emerald-100 px-2 py-1 text-emerald-800"
+                  }
+                >
+                  {missing > 0
+                    ? `${category.name}: ${missing} sin precio`
+                    : `${category.name}: completa`}
+                </span>
+              );
+            })}
+          </div>
+        )}
+
         {isLoading && <p className="mt-4 text-slate-600">Cargando productos...</p>}
 
         {!isLoading && orderedProducts.length === 0 && (
@@ -223,9 +286,11 @@ export default function ProductosPage() {
                 <tr className="border-b border-slate-200 text-slate-500">
                   <th className="py-2 pr-4">Codigo</th>
                   <th className="py-2 pr-4">Nombre</th>
-                  <th className="py-2 pr-4">Final</th>
-                  <th className="py-2 pr-4">Comercio</th>
-                  <th className="py-2 pr-4">Distribuidor</th>
+                  {orderedCategories.map((category) => (
+                    <th key={category.code} className="py-2 pr-4">
+                      {category.name}
+                    </th>
+                  ))}
                   <th className="py-2 pr-4">Estado</th>
                   <th className="py-2 pr-4">Acciones</th>
                 </tr>
@@ -235,6 +300,7 @@ export default function ProductosPage() {
                   <ProductRow
                     key={product.id}
                     product={product}
+                    categories={orderedCategories}
                     priceTable={priceTable}
                     api={api}
                     onSaved={async (changedPrices) => {
@@ -261,6 +327,7 @@ export default function ProductosPage() {
 
 type ProductRowProps = {
   product: ProductRecord;
+  categories: CustomerCategoryRecord[];
   priceTable?: PriceTable;
   api: ReturnType<typeof useApiClient>;
   onSaved: (changedPrices: boolean) => Promise<void>;
@@ -270,33 +337,46 @@ type ProductRowProps = {
 
 function ProductRow({
   product,
+  categories,
   priceTable,
   api,
   onSaved,
   onError,
   onToggleActive,
 }: ProductRowProps) {
+  // Los precios se guardan como texto, no como numero, porque "sin precio"
+  // tiene que ser representable y `0` ya significa "vale cero".
   const storedPrices = useMemo(
     () =>
       Object.fromEntries(
-        CUSTOMER_TYPES.map((type) => [type, priceTable?.[type]?.[product.code] ?? 0]),
-      ) as Record<CustomerType, number>,
-    [priceTable, product.code],
+        categories.map((category) => [
+          category.code,
+          storedPriceOf(priceTable, category.code, product.code),
+        ]),
+      ) as Record<string, string>,
+    [categories, priceTable, product.code],
   );
 
   const [name, setName] = useState(product.name);
-  const [prices, setPrices] = useState<Record<CustomerType, number>>(storedPrices);
+  const [prices, setPrices] = useState<Record<string, string>>(storedPrices);
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
     const renamed = name.trim() !== product.name;
-    const changedTypes = CUSTOMER_TYPES.filter(
-      (type) => prices[type] !== storedPrices[type],
-    );
+    // Una celda que sigue vacia no manda nada: `ProductPrice` es append-only y
+    // no hay forma de borrar un precio, asi que mandar 0 seria fijar un precio
+    // real de cero en vez de dejar el agujero como esta.
+    const changedCategories = categories
+      .map((category) => category.code)
+      .filter(
+        (code) =>
+          (prices[code] ?? "").trim().length > 0 &&
+          prices[code] !== storedPrices[code],
+      );
 
     // Guardar sin cambios no manda nada: el validador rechaza un patch vacio,
     // y seria un error que el admin no causo.
-    if (!renamed && changedTypes.length === 0) {
+    if (!renamed && changedCategories.length === 0) {
       return;
     }
 
@@ -306,10 +386,12 @@ function ProductRow({
         await api.patch(`/products/${product.id}`, { name: name.trim() });
       }
       // Cada precio es su propia version nueva; no se pisa ninguna anterior.
-      for (const type of changedTypes) {
-        await api.put(`/prices/${product.code}/${type}`, { amount: prices[type] });
+      for (const code of changedCategories) {
+        await api.put(`/prices/${product.code}/${code}`, {
+          amount: Number(prices[code]),
+        });
       }
-      await onSaved(changedTypes.length > 0);
+      await onSaved(changedCategories.length > 0);
     } catch {
       onError();
     } finally {
@@ -329,20 +411,36 @@ function ProductRow({
           className="w-full rounded border border-slate-300 px-2 py-1"
         />
       </td>
-      {CUSTOMER_TYPES.map((type) => (
-        <td key={type} className="py-2 pr-4">
-          <input
-            type="number"
-            min={0}
-            data-testid={`price-${product.code}-${type}`}
-            value={prices[type]}
-            onChange={(event) =>
-              setPrices({ ...prices, [type]: Number(event.target.value) })
-            }
-            className="w-28 rounded border border-slate-300 px-2 py-1"
-          />
-        </td>
-      ))}
+      {categories.map((category) => {
+        const missing = storedPrices[category.code] === "";
+        return (
+          <td key={category.code} className="py-2 pr-4">
+            <input
+              type="number"
+              min={0}
+              data-testid={`price-${product.code}-${category.code}`}
+              value={prices[category.code] ?? ""}
+              placeholder={missing ? "sin precio" : undefined}
+              onChange={(event) =>
+                setPrices({ ...prices, [category.code]: event.target.value })
+              }
+              className={`w-28 rounded border px-2 py-1 ${
+                missing
+                  ? "border-rose-500 bg-rose-50 placeholder:text-rose-700"
+                  : "border-slate-300"
+              }`}
+            />
+            {missing && (
+              <span
+                data-testid={`price-missing-${product.code}-${category.code}`}
+                className="mt-1 block text-xs font-semibold text-rose-700"
+              >
+                sin precio
+              </span>
+            )}
+          </td>
+        );
+      })}
       <td className="py-2 pr-4">
         <span
           data-testid={`status-${product.id}`}

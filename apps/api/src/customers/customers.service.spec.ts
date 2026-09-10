@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { CreateCustomerInput, UpdateCustomerInput } from '@distribuidor/shared';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CustomersService } from './customers.service';
 
@@ -51,6 +52,7 @@ function buildZoneRow(overrides: Partial<ZoneRow> = {}): ZoneRow {
 
 describe('CustomersService', () => {
   let service: CustomersService;
+  let categoriesService: { assertCategoryAssignable: jest.Mock };
   let prisma: {
     customer: {
       create: jest.Mock;
@@ -82,10 +84,15 @@ describe('CustomersService', () => {
       },
     };
 
+    categoriesService = {
+      assertCategoryAssignable: jest.fn().mockResolvedValue(undefined),
+    };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         CustomersService,
         { provide: PrismaService, useValue: prisma },
+        { provide: CustomerCategoriesService, useValue: categoriesService },
       ],
     }).compile();
 
@@ -174,8 +181,8 @@ describe('CustomersService', () => {
       prisma.customer.create.mockResolvedValue(buildCustomerRow());
     });
 
-    // Se persiste el id, no una copia del nombre: el nombre para mostrar sale
-    // de la relacion.
+    // La columna sombra ya no existe: se persiste el id y nada mas. El nombre
+    // para mostrar sale siempre de la relacion.
     it('persists only the zone id, never a copy of its name', async () => {
       prisma.zone.findUnique.mockResolvedValue(
         buildZoneRow({ id: 'zone-sur', name: 'Sur' }),
@@ -450,6 +457,62 @@ describe('CustomersService', () => {
     });
   });
 
+  describe('customerType assignment', () => {
+    beforeEach(() => {
+      prisma.customer.create.mockResolvedValue(buildCustomerRow());
+      prisma.customer.findUnique.mockResolvedValue(buildCustomerRow());
+      prisma.customer.update.mockResolvedValue(buildCustomerRow());
+    });
+
+    it('validates the customerType against the categories table on create', async () => {
+      await service.createCustomer({ name: 'Kiosco Sur', customerType: 'mayorista' });
+
+      expect(categoriesService.assertCategoryAssignable).toHaveBeenCalledWith(
+        'mayorista',
+      );
+    });
+
+    it('does not write anything when the category is unknown or retired', async () => {
+      categoriesService.assertCategoryAssignable.mockRejectedValue(
+        new BadRequestException('Unknown customerType: fantasma'),
+      );
+
+      await expect(
+        service.createCustomer({ name: 'Kiosco Sur', customerType: 'fantasma' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.customer.create).not.toHaveBeenCalled();
+    });
+
+    it('validates the customerType before writing on update', async () => {
+      await service.updateCustomer('customer-1', { customerType: 'mayorista' });
+
+      expect(categoriesService.assertCategoryAssignable).toHaveBeenCalledWith(
+        'mayorista',
+      );
+    });
+
+    it('does not update anything when the category is unknown or retired', async () => {
+      categoriesService.assertCategoryAssignable.mockRejectedValue(
+        new BadRequestException('Customer category retirada is not active'),
+      );
+
+      await expect(
+        service.updateCustomer('customer-1', { customerType: 'retirada' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.customer.update).not.toHaveBeenCalled();
+    });
+
+    // Un patch que no toca la categoria no la revalida: el cliente puede tener
+    // una categoria dada de baja, y editarle la direccion no puede fallar por
+    // eso.
+    it('leaves an untouched customerType alone, even if it is retired', async () => {
+      await service.updateCustomer('customer-1', { address: 'Calle 1' });
+
+      expect(categoriesService.assertCategoryAssignable).not.toHaveBeenCalled();
+      expect(prisma.customer.update).toHaveBeenCalled();
+    });
+  });
+
   describe('updateCustomer — zone assignment', () => {
     beforeEach(() => {
       prisma.customer.findUnique.mockResolvedValue(buildCustomerRow());
@@ -528,7 +591,7 @@ describe('CustomersService', () => {
       expect(record.zone).toBe('Sur');
     });
 
-    it('reads the display name from the relation, not from the payload', async () => {
+    it('reads the display name from the relation, the only place it lives now', async () => {
       prisma.customer.findMany.mockResolvedValue([
         buildCustomerRow({
           zoneId: 'zone-sur',

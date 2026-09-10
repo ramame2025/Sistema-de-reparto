@@ -65,6 +65,16 @@ export function LoadManifestScreen() {
     [quantities],
   );
 
+  /**
+   * Sin fila para el producto se lee "sin detallar", nunca 0: el 0 lo escribe
+   * el admin cuando ese producto no viaja en este camion, y son dos cosas
+   * distintas.
+   */
+  const capacityFor = (productCode: ProductCode): string => {
+    const entry = truck?.capacities.find((item) => item.productCode === productCode);
+    return entry ? String(entry.units) : 'sin detallar';
+  };
+
   const changeQty = (productCode: ProductCode, delta: number) => {
     setQuantities((previous) => ({
       ...previous,
@@ -206,7 +216,7 @@ export function LoadManifestScreen() {
         <Text style={styles.apiHint}>Chofer: {username}</Text>
         {truck && (
           <Text style={styles.assignedTruck} testID="load-manifest-assigned-truck">
-            Camion: {truck.code} · {truck.plate} · {truck.capacity} u.
+            Camion: {truck.code} · {truck.plate}
             {truck.kind === 'cobertura' ? ' (cobertura)' : ''}
           </Text>
         )}
@@ -227,7 +237,20 @@ export function LoadManifestScreen() {
         <SectionLabel variant="field">Productos</SectionLabel>
         {products.map((product) => (
           <View key={product.code} style={styles.productRow}>
-            <Text style={styles.productName}>{product.name}</Text>
+            <View style={styles.productLabel}>
+              <Text style={styles.productName}>{product.name}</Text>
+              {/*
+                El chofer esta cargando ESTE producto: al lado de la cantidad,
+                lo util es cuanto entra de el. Un total unico no contestaba esa
+                pregunta.
+              */}
+              <Text
+                style={styles.productCapacity}
+                testID={`load-manifest-capacity-${product.code}`}
+              >
+                cap. {capacityFor(product.code)}
+              </Text>
+            </View>
             <View style={styles.qtyRow}>
               <Button
                 label="-"
@@ -339,6 +362,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     paddingBottom: spacing.sm,
+  },
+  productLabel: {
+    flexShrink: 1,
+  },
+  productCapacity: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
   },
   productName: {
     fontSize: typography.sizes.md,

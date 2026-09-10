@@ -1,12 +1,12 @@
 import { BadRequestException, Body, Controller, Get, Param, Put } from '@nestjs/common';
 import {
-  CUSTOMER_TYPES,
   type CustomerType,
   type ProductCode,
   type UpdatePriceInput,
   validateUpdatePriceInput,
 } from '@distribuidor/shared';
 import { Roles } from '../auth/roles.decorator';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
 import { ProductsService } from '../products/products.service';
 import { PricesService } from './prices.service';
 
@@ -16,6 +16,7 @@ export class PricesController {
   constructor(
     private readonly pricesService: PricesService,
     private readonly productsService: ProductsService,
+    private readonly categoriesService: CustomerCategoriesService,
   ) {}
 
   @Get()
@@ -37,16 +38,14 @@ export class PricesController {
     @Param('customerType') customerType: string,
     @Body() input: UpdatePriceInput,
   ) {
-    // Contra el catalogo real, no contra una lista fija: si no, ningun precio
-    // de un producto creado por el admin se podria editar nunca.
+    // Contra los catalogos reales, no contra listas fijas: si no, ningun
+    // precio de un producto ni de una categoria creados por el admin se
+    // podrian editar nunca.
     await this.productsService.assertProductCodesExist([productCode]);
-
-    if (!CUSTOMER_TYPES.includes(customerType as CustomerType)) {
-      throw new BadRequestException({
-        message: 'Invalid customerType',
-        errors: [`customerType must be one of ${CUSTOMER_TYPES.join(', ')}`],
-      });
-    }
+    // Existencia, no vigencia: cargarle el precio a una categoria dada de baja
+    // es inofensivo, y es justo lo que hace falta para poder reactivarla ya
+    // completa.
+    await this.categoriesService.assertCategoryCodesExist([customerType]);
 
     const errors = validateUpdatePriceInput(input);
     if (errors.length > 0) {

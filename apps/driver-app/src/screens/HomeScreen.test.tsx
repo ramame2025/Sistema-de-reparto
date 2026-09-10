@@ -67,7 +67,7 @@ const baseTruckValue = {
     truckId: 'truck-1',
     code: 'CAMION-01',
     plate: 'AB123CD',
-    capacity: 40,
+    capacities: [{ productCode: 'G10', units: 30 }],
     startDate: '2026-02-01T00:00:00.000Z',
     endDate: null,
   },
@@ -158,7 +158,15 @@ describe('HomeScreen/encabezado de la jornada', () => {
     await render(<HomeScreen />);
 
     expect(screen.getByText('chofer1 · CAMION-01')).toBeTruthy();
-    expect(screen.getByText('AB123CD · 40 u. de capacidad')).toBeTruthy();
+    expect(screen.getByText('AB123CD')).toBeTruthy();
+  });
+
+  // La capacidad ya no es un total: es una grilla por producto, y se lee en el
+  // remito, al lado de lo que el chofer esta cargando.
+  it('keeps the capacity out of the header now that it is per product', async () => {
+    await render(<HomeScreen />);
+
+    expect(screen.queryByText(/capacidad/i)).toBeNull();
   });
 
   it('marks a cobertura explicitly, so the driver notices it is not his usual truck', async () => {
@@ -169,7 +177,7 @@ describe('HomeScreen/encabezado de la jornada', () => {
 
     await render(<HomeScreen />);
 
-    expect(screen.getByText('AB123CD · 40 u. de capacidad · cobertura')).toBeTruthy();
+    expect(screen.getByText('AB123CD · cobertura')).toBeTruthy();
   });
 
   it('says plainly when there is no truck for today', async () => {

@@ -1,0 +1,21 @@
+-- Elimina la columna sombra `Customer.zone`, el texto libre que
+-- `20260909120000_distribution_zones` dejo vivo a proposito mientras la
+-- migracion a `Customer.zoneId` estaba en vuelo.
+--
+-- Es seguro porque NADIE la lee ya:
+--   * `CustomersService.toRecord` resuelve el nombre para mostrar desde la
+--     relacion (`customer.zoneRef.name`), no desde la columna.
+--   * `DriverCustomerAssignmentsService` era el ultimo lector directo, y en
+--     este mismo cambio pasa a incluir `zoneRef` y leer de ahi.
+--   * La deteccion de duplicados usa `name + zoneId` desde la fase 1, asi que
+--     no queda ninguna decision colgada del string.
+--
+-- El campo `zone` SIGUE EXISTIENDO en la respuesta de la API: cambia de donde
+-- sale, no que se devuelve. Ningun consumidor -- ni el aviso de duplicado del
+-- chofer ni `/admin/clientes` -- se entera.
+--
+-- DropColumn
+ALTER TABLE "Customer" DROP COLUMN "zone";
+
+-- El enum `CustomerType` ya lo elimino `20260909150000_customer_categories`:
+-- no queda nada que limpiar de la fase 3.

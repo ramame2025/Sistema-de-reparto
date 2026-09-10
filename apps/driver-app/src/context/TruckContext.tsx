@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import type { TruckCapacityEntry } from '@distribuidor/shared';
 import { useAuth } from './AuthContext';
 
 /** El camion que el chofer maneja hoy, ya resuelto por la API. */
@@ -16,7 +17,11 @@ export type AssignedTruck = {
   truckId: string;
   code: string;
   plate: string;
-  capacity: number;
+  /**
+   * Cuantas unidades de cada producto entran. Array vacio = "sin detallar":
+   * nadie la cargo todavia, que no es lo mismo que decir que no entra nada.
+   */
+  capacities: TruckCapacityEntry[];
   startDate: string;
   endDate: string | null;
 };

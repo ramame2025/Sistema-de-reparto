@@ -7,9 +7,17 @@ import type {
   DriverCustomerAssignmentHistoryResponse,
   DriverCustomerAssignmentRecord,
   UserSummary,
+  ZoneRecord,
 } from "@distribuidor/shared";
 import { useApiClient } from "../../../context/AuthContext";
 import { isoDateDaysAgo, todayIsoDate } from "../../../lib/dates";
+
+/**
+ * Un cliente sin zona no es "cualquier zona": es su propio grupo, igual que en
+ * la deteccion de duplicados del servidor. Necesita un valor propio en el
+ * select porque "" ya significa "no filtrar".
+ */
+const NO_ZONE = "__none__";
 
 export default function ClientesAsignadosPage() {
   const api = useApiClient();
@@ -18,6 +26,7 @@ export default function ClientesAsignadosPage() {
   const [date, setDate] = useState(todayIsoDate());
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -32,6 +41,10 @@ export default function ClientesAsignadosPage() {
     isLoading: customersLoading,
     error: customersError,
   } = useSWR<CustomerRecord[]>("/customers");
+
+  // Solo las zonas activas: armar un recorrido de manana con una zona que el
+  // admin ya dio de baja no tiene sentido.
+  const { data: zones = [] } = useSWR<ZoneRecord[]>("/zones");
 
   // La clave solo existe con chofer+dia elegidos: sin eso no hay nada que
   // precargar todavia.
@@ -75,11 +88,33 @@ export default function ClientesAsignadosPage() {
 
   const filteredCustomers = useMemo(() => {
     const normalized = search.trim().toLowerCase();
-    if (!normalized) {
-      return customers;
-    }
-    return customers.filter((customer) => customer.name.toLowerCase().includes(normalized));
-  }, [customers, search]);
+
+    const matchesZone = (customer: CustomerRecord) => {
+      if (zoneFilter === "") return true;
+      if (zoneFilter === NO_ZONE) return !customer.zoneId;
+      return customer.zoneId === zoneFilter;
+    };
+
+    const matchesSearch = (customer: CustomerRecord) =>
+      !normalized || customer.name.toLowerCase().includes(normalized);
+
+    return customers.filter(
+      (customer) => matchesZone(customer) && matchesSearch(customer),
+    );
+  }, [customers, search, zoneFilter]);
+
+  /**
+   * Suma los visibles a lo ya tildado, nunca los reemplaza: el admin arma el
+   * recorrido zona por zona, y la segunda tanda no puede borrar la primera.
+   * Para quitar una zona estan los checkboxes, que es la accion reversible.
+   */
+  const checkAllVisible = () => {
+    setCheckedIds((previous) => {
+      const next = new Set(previous);
+      filteredCustomers.forEach((customer) => next.add(customer.id));
+      return next;
+    });
+  };
 
   const toggleCustomer = (customerId: string) => {
     setCheckedIds((prev) => {
@@ -158,6 +193,23 @@ export default function ClientesAsignadosPage() {
           </label>
 
           <label className="text-sm text-slate-600">
+            Zona
+            <select
+              value={zoneFilter}
+              onChange={(event) => setZoneFilter(event.target.value)}
+              className="mt-1 block w-48 rounded border border-slate-300 px-3 py-2"
+            >
+              <option value="">Todas las zonas</option>
+              {zones.map((zone) => (
+                <option key={zone.id} value={zone.id}>
+                  {zone.name}
+                </option>
+              ))}
+              <option value={NO_ZONE}>Sin zona</option>
+            </select>
+          </label>
+
+          <label className="text-sm text-slate-600">
             Buscar cliente
             <input
               type="text"
@@ -167,6 +219,15 @@ export default function ClientesAsignadosPage() {
               className="mt-1 block w-64 rounded border border-slate-300 px-3 py-2"
             />
           </label>
+
+          <button
+            type="button"
+            onClick={checkAllVisible}
+            disabled={filteredCustomers.length === 0}
+            className="h-10 rounded border border-sky-700 px-4 text-sm font-semibold text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
+          >
+            Tildar los {filteredCustomers.length} visibles
+          </button>
 
           <button
             type="button"
@@ -189,7 +250,7 @@ export default function ClientesAsignadosPage() {
         {!customersLoading && !customersError && (
           <ul className="mt-4 flex max-h-96 flex-col gap-1 overflow-y-auto">
             {filteredCustomers.length === 0 && (
-              <li className="text-sm text-slate-600">Sin clientes que coincidan con la busqueda.</li>
+              <li className="text-sm text-slate-600">Sin clientes que coincidan con los filtros.</li>
             )}
             {filteredCustomers.map((customer) => (
               <li key={customer.id}>
@@ -201,6 +262,7 @@ export default function ClientesAsignadosPage() {
                   />
                   <span>{customer.name}</span>
                   <span className="text-xs text-slate-500">({customer.customerType})</span>
+                  <span className="text-xs text-slate-400">{customer.zone ?? "sin zona"}</span>
                 </label>
               </li>
             ))}

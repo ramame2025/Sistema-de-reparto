@@ -37,11 +37,53 @@ const PRODUCTS = [
   },
 ];
 
+const CATEGORIES = [
+  {
+    id: "c1",
+    code: "final",
+    name: "Final",
+    isActive: true,
+    sortOrder: 0,
+    createdAt: "",
+    updatedAt: "",
+  },
+  {
+    id: "c2",
+    code: "comercio",
+    name: "Comercio",
+    isActive: true,
+    sortOrder: 1,
+    createdAt: "",
+    updatedAt: "",
+  },
+  {
+    id: "c3",
+    code: "distribuidor",
+    name: "Distribuidor",
+    isActive: true,
+    sortOrder: 2,
+    createdAt: "",
+    updatedAt: "",
+  },
+];
+
 const PRICE_TABLE = {
   final: { G10: 8500, G45: 39000 },
   comercio: { G10: 8200, G45: 38000 },
   distribuidor: { G10: 7900, G45: 36500 },
 };
+
+function swrByKey(
+  priceTable: unknown = PRICE_TABLE,
+  categories: unknown = CATEGORIES,
+  products: unknown = PRODUCTS,
+) {
+  return (key: string) => {
+    if (key === "/products?includeInactive=true") return products;
+    if (key === "/customer-categories") return categories;
+    return priceTable;
+  };
+}
 
 describe("ProductosPage", () => {
   const post = jest.fn();
@@ -49,18 +91,22 @@ describe("ProductosPage", () => {
   const put = jest.fn();
   const mutate = jest.fn();
 
+  const mockData = (byKey: (key: string) => unknown) => {
+    mockedUseSWR.mockImplementation((key: string) => ({
+      data: byKey(key),
+      isLoading: false,
+      error: undefined,
+      mutate,
+    }));
+  };
+
   beforeEach(() => {
     post.mockReset().mockResolvedValue({});
     patch.mockReset().mockResolvedValue({});
     put.mockReset().mockResolvedValue({});
     mutate.mockReset();
     mockedUseApiClient.mockReturnValue({ post, patch, put });
-    mockedUseSWR.mockImplementation((key: string) => ({
-      data: key === "/products?includeInactive=true" ? PRODUCTS : PRICE_TABLE,
-      isLoading: false,
-      error: undefined,
-      mutate,
-    }));
+    mockData(swrByKey());
   });
 
   // El nombre se edita en la misma fila, asi que vive en un input, no en un
@@ -72,12 +118,120 @@ describe("ProductosPage", () => {
     expect(screen.getByTestId("name-p2")).toHaveValue("Garrafa 45kg");
   });
 
-  it("shows the current price of each product for the three customer types", () => {
+  it("shows the current price of each product for every active category", () => {
     render(<ProductosPage />);
 
     expect(screen.getByTestId("price-G10-final")).toHaveValue(8500);
     expect(screen.getByTestId("price-G10-comercio")).toHaveValue(8200);
     expect(screen.getByTestId("price-G10-distribuidor")).toHaveValue(7900);
+  });
+
+  // Las columnas ya no son tres fijas: salen de las categorias que el admin
+  // tenga activas en este momento.
+  it("renders one column per active category, named as the admin named it", () => {
+    mockData(
+      swrByKey(
+        { final: { G10: 8500 }, mayorista: { G10: 7000 } },
+        [
+          CATEGORIES[0],
+          {
+            id: "c9",
+            code: "mayorista",
+            name: "Mayorista",
+            isActive: true,
+            sortOrder: 1,
+            createdAt: "",
+            updatedAt: "",
+          },
+        ],
+      ),
+    );
+    render(<ProductosPage />);
+
+    expect(screen.getByRole("columnheader", { name: "Mayorista" })).toBeInTheDocument();
+    expect(screen.getByTestId("price-G10-mayorista")).toHaveValue(7000);
+    expect(screen.queryByTestId("price-G10-comercio")).not.toBeInTheDocument();
+  });
+
+  describe("a price that does not exist", () => {
+    const HOLED_TABLE = {
+      final: { G10: 8500, G45: 39000 },
+      comercio: { G10: 8200, G45: 38000 },
+      distribuidor: { G45: 36500 },
+    };
+
+    // El requisito central: una celda vacia grita, un precio heredado o en
+    // cero miente en silencio. Un 0 es un precio real que el admin puede
+    // fijar, asi que no puede ser tambien el disfraz de "no hay precio".
+    it("renders an empty cell, never a zero", () => {
+      mockData(swrByKey(HOLED_TABLE));
+      render(<ProductosPage />);
+
+      expect(screen.getByTestId("price-G10-distribuidor")).toHaveValue(null);
+    });
+
+    it("marks the empty cell in red", () => {
+      mockData(swrByKey(HOLED_TABLE));
+      render(<ProductosPage />);
+
+      expect(screen.getByTestId("price-missing-G10-distribuidor")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("price-missing-G10-final"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("counts the holes of each category so the admin sees which are unusable", () => {
+      mockData(swrByKey(HOLED_TABLE));
+      render(<ProductosPage />);
+
+      expect(screen.getByTestId("completeness-distribuidor")).toHaveTextContent(
+        "1 sin precio",
+      );
+      expect(screen.getByTestId("completeness-final")).toHaveTextContent("completa");
+    });
+
+    // Una categoria recien creada no tiene ni una celda: la tabla de precios
+    // ni siquiera trae su clave.
+    it("treats a category with no prices at all as entirely missing", () => {
+      mockData(
+        swrByKey({
+          final: { G10: 8500, G45: 39000 },
+          comercio: { G10: 8200, G45: 38000 },
+        }),
+      );
+      render(<ProductosPage />);
+
+      expect(screen.getByTestId("completeness-distribuidor")).toHaveTextContent(
+        "2 sin precio",
+      );
+      expect(screen.getByTestId("price-missing-G10-distribuidor")).toBeInTheDocument();
+      expect(screen.getByTestId("price-missing-G45-distribuidor")).toBeInTheDocument();
+    });
+
+    it("saves a filled hole as a new price", async () => {
+      mockData(swrByKey(HOLED_TABLE));
+      render(<ProductosPage />);
+
+      fireEvent.change(screen.getByTestId("price-G10-distribuidor"), {
+        target: { value: "7900" },
+      });
+      fireEvent.click(screen.getByTestId("save-p1"));
+
+      await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+      expect(put).toHaveBeenCalledWith("/prices/G10/distribuidor", { amount: 7900 });
+    });
+
+    // Un precio no se puede borrar: `ProductPrice` es append-only y no existe
+    // un DELETE. Dejar la celda vacia no manda nada en vez de mandar un 0.
+    it("sends nothing for a hole the admin left empty", async () => {
+      mockData(swrByKey(HOLED_TABLE));
+      render(<ProductosPage />);
+
+      fireEvent.click(screen.getByTestId("save-p1"));
+
+      await waitFor(() => expect(mutate).not.toHaveBeenCalled());
+      expect(put).not.toHaveBeenCalled();
+    });
   });
 
   it("marks which products are deactivated", () => {
@@ -93,18 +247,18 @@ describe("ProductosPage", () => {
       fireEvent.change(screen.getByLabelText("Nombre"), {
         target: { value: "Garrafa 20kg" },
       });
-      fireEvent.change(screen.getByLabelText("Precio final"), {
+      fireEvent.change(screen.getByLabelText("Precio Final"), {
         target: { value: "20000" },
       });
-      fireEvent.change(screen.getByLabelText("Precio comercio"), {
+      fireEvent.change(screen.getByLabelText("Precio Comercio"), {
         target: { value: "19000" },
       });
-      fireEvent.change(screen.getByLabelText("Precio distribuidor"), {
+      fireEvent.change(screen.getByLabelText("Precio Distribuidor"), {
         target: { value: "18000" },
       });
     };
 
-    it("sends the product with its three prices in a single request", async () => {
+    it("sends the product with one price per active category in a single request", async () => {
       render(<ProductosPage />);
 
       fillNewProduct();
@@ -132,12 +286,10 @@ describe("ProductosPage", () => {
       expect(post.mock.calls[0][1].code).toBe("G20");
     });
 
-    // "Nace completo o no nace" sigue rigiendo para el producto: un precio
-    // faltante ya no rompe la tabla entera -- `getPriceTableAt` omite la celda
-    // -- pero deja al chofer sin poder venderlo a ese tipo de cliente, y se
-    // entera recien frente al cliente. Por eso el boton no se habilita hasta
-    // tenerlos.
-    it("keeps the button disabled until code, name and the three prices are filled", () => {
+    // "Nace completo o no nace" sigue rigiendo para el producto -- el chofer
+    // se enteraria del agujero recien frente al cliente -- solo que ahora se
+    // mide contra las categorias activas de hoy.
+    it("keeps the button disabled until every active category has a price", () => {
       render(<ProductosPage />);
       const submit = screen.getByRole("button", { name: "Crear producto" });
 
@@ -145,14 +297,14 @@ describe("ProductosPage", () => {
       fireEvent.change(screen.getByLabelText("Codigo"), { target: { value: "G20" } });
       fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Nueva" } });
       expect(submit).toBeDisabled();
-      fireEvent.change(screen.getByLabelText("Precio final"), {
+      fireEvent.change(screen.getByLabelText("Precio Final"), {
         target: { value: "1" },
       });
-      fireEvent.change(screen.getByLabelText("Precio comercio"), {
+      fireEvent.change(screen.getByLabelText("Precio Comercio"), {
         target: { value: "1" },
       });
       expect(submit).toBeDisabled();
-      fireEvent.change(screen.getByLabelText("Precio distribuidor"), {
+      fireEvent.change(screen.getByLabelText("Precio Distribuidor"), {
         target: { value: "1" },
       });
       expect(submit).toBeEnabled();
@@ -263,12 +415,7 @@ describe("ProductosPage", () => {
   });
 
   it("shows an empty state when there are no products", () => {
-    mockedUseSWR.mockImplementation((key: string) => ({
-      data: key === "/products?includeInactive=true" ? [] : PRICE_TABLE,
-      isLoading: false,
-      error: undefined,
-      mutate,
-    }));
+    mockData(swrByKey(PRICE_TABLE, CATEGORIES, []));
     render(<ProductosPage />);
 
     expect(screen.getByTestId("products-empty")).toBeInTheDocument();

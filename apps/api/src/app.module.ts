@@ -7,6 +7,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
+import { CustomerCategoriesModule } from './customer-categories/customer-categories.module';
 import { CustomersModule } from './customers/customers.module';
 import { DriverCustomerAssignmentsModule } from './driver-customer-assignments/driver-customer-assignments.module';
 import { DriverTruckAssignmentsModule } from './driver-truck-assignments/driver-truck-assignments.module';
@@ -44,6 +45,7 @@ import { ZonesModule } from './zones/zones.module';
     ProductsModule,
     PricesModule,
     ZonesModule,
+    CustomerCategoriesModule,
   ],
   controllers: [AppController],
   providers: [

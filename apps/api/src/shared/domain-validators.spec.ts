@@ -2,6 +2,8 @@ import {
   type CreateAssignmentInput,
   type CreateProductInput,
   type CreateCustomerInput,
+  type CreateCustomerCategoryInput,
+  type UpdateCustomerCategoryInput,
   type CreateZoneInput,
   type UpdateZoneInput,
   type CreateDriverCustomerAssignmentInput,
@@ -23,11 +25,14 @@ import {
   normalizeCustomerName,
   validateCreateProductInput,
   validateCreateCustomerInput,
+  validateCreateCustomerCategoryInput,
+  validateUpdateCustomerCategoryInput,
   validateCreateDriverCustomerAssignmentInput,
   validateCreateLoadManifestInput,
   validateCreateSaleInput,
   validateCreateTruckInput,
   validateRecordEmptyVisitInput,
+  validateSetTruckCapacitiesInput,
   validateUpdatePriceInput,
   validateUpdateSaleInput,
   validateUpdateCustomerInput,
@@ -62,10 +67,34 @@ describe('validateCreateCustomerInput', () => {
     expect(errors).toContain('name must have at least 2 characters');
   });
 
-  it('rejects an invalid customerType', () => {
+  // La pertenencia al catalogo de categorias NO se puede comprobar aca:
+  // `packages/shared` corre en el telefono y en el navegador, y ninguno de los
+  // dos conoce la lista, que el admin define en runtime. Rechazar 'mayorista'
+  // seria rechazar toda categoria nueva y legitima. La existencia se verifica
+  // contra la tabla, del lado del servidor.
+  it('accepts a customerType it has never heard of, as long as it is well formed', () => {
     const errors = validateCreateCustomerInput({
       ...base,
       customerType: 'mayorista' as CreateCustomerInput['customerType'],
+    });
+    expect(errors).toEqual([]);
+  });
+
+  it('rejects an empty or blank customerType', () => {
+    for (const customerType of ['', '   ']) {
+      expect(
+        validateCreateCustomerInput({
+          ...base,
+          customerType: customerType as CreateCustomerInput['customerType'],
+        }),
+      ).toContain('customerType is invalid');
+    }
+  });
+
+  it('rejects a customerType longer than 20 characters', () => {
+    const errors = validateCreateCustomerInput({
+      ...base,
+      customerType: 'x'.repeat(21) as CreateCustomerInput['customerType'],
     });
     expect(errors).toContain('customerType is invalid');
   });
@@ -142,9 +171,16 @@ describe('validateUpdateCustomerInput', () => {
     expect(errors).toContain('name must have at least 2 characters');
   });
 
-  it('rejects an invalid customerType', () => {
+  it('accepts a customerType it has never heard of, as long as it is well formed', () => {
     const errors = validateUpdateCustomerInput({
       customerType: 'mayorista' as UpdateCustomerInput['customerType'],
+    });
+    expect(errors).toEqual([]);
+  });
+
+  it('rejects a blank customerType', () => {
+    const errors = validateUpdateCustomerInput({
+      customerType: '  ' as UpdateCustomerInput['customerType'],
     });
     expect(errors).toContain('customerType is invalid');
   });
@@ -231,7 +267,6 @@ describe('validateCreateTruckInput', () => {
   const base: CreateTruckInput = {
     code: 'T-01',
     plate: 'AA123BB',
-    capacity: 300,
   };
 
   it('accepts a valid payload', () => {
@@ -243,14 +278,9 @@ describe('validateCreateTruckInput', () => {
     expect(errors).toContain('code must have at least 1 character');
   });
 
-  it('rejects a negative capacity', () => {
-    const errors = validateCreateTruckInput({ ...base, capacity: -1 });
-    expect(errors).toContain('capacity must be a non-negative integer');
-  });
-
-  it('rejects a non-integer capacity', () => {
-    const errors = validateCreateTruckInput({ ...base, capacity: 1.5 });
-    expect(errors).toContain('capacity must be a non-negative integer');
+  it('rejects an empty plate', () => {
+    const errors = validateCreateTruckInput({ ...base, plate: '   ' });
+    expect(errors).toContain('plate must have at least 1 character');
   });
 });
 
@@ -259,22 +289,8 @@ describe('validateUpdateTruckInput', () => {
     expect(validateUpdateTruckInput({})).toContain('at least one field must be provided');
   });
 
-  it('accepts a partial payload with only the capacity', () => {
-    expect(validateUpdateTruckInput({ capacity: 45 })).toEqual([]);
-  });
-
-  it('accepts capacity 0 without confusing it with "campo ausente"', () => {
-    // 0 es falsy: si la validacion usara `if (!input.capacity)` lo rechazaria.
-    expect(validateUpdateTruckInput({ capacity: 0 })).toEqual([]);
-  });
-
-  it('rejects a negative or fractional capacity', () => {
-    expect(validateUpdateTruckInput({ capacity: -1 })).toContain(
-      'capacity must be a non-negative integer',
-    );
-    expect(validateUpdateTruckInput({ capacity: 1.5 })).toContain(
-      'capacity must be a non-negative integer',
-    );
+  it('accepts a partial payload with only the plate', () => {
+    expect(validateUpdateTruckInput({ plate: 'AA123BB' })).toEqual([]);
   });
 
   it('accepts isActive false without treating it as absent', () => {
@@ -288,6 +304,79 @@ describe('validateUpdateTruckInput', () => {
     expect(validateUpdateTruckInput({ plate: '' })).toContain(
       'plate must have at least 1 character',
     );
+  });
+});
+
+describe('validateSetTruckCapacitiesInput', () => {
+  it('accepts a grid with one row per product', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [
+          { productCode: 'G10', units: 30 },
+          { productCode: 'G45', units: 12 },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  // La grilla vacia es "sin detallar": el estado con el que nace todo camion
+  // despues de la migracion, y al que se vuelve borrando todas las filas.
+  it('accepts an empty grid', () => {
+    expect(validateSetTruckCapacitiesInput({ capacities: [] })).toEqual([]);
+  });
+
+  // 0 es una respuesta real ("este producto no viaja en este camion"), no un
+  // campo ausente: si la validacion usara `if (!units)` lo rechazaria.
+  it('accepts units 0 without confusing it with "campo ausente"', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [{ productCode: 'G10', units: 0 }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects a capacities that is not an array', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: undefined as unknown as [],
+      }),
+    ).toContain('capacities must be an array');
+  });
+
+  it('rejects a negative or fractional units', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [{ productCode: 'G10', units: -1 }],
+      }),
+    ).toContain('units must be a non-negative integer');
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [{ productCode: 'G10', units: 1.5 }],
+      }),
+    ).toContain('units must be a non-negative integer');
+  });
+
+  // Forma, no pertenencia: el catalogo lo define el admin en runtime y quien
+  // corre esta validacion (telefono, navegador) no lo conoce.
+  it('rejects a malformed productCode', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [{ productCode: '  ', units: 1 }],
+      }),
+    ).toContain('productCode is invalid');
+  });
+
+  // Dos filas del mismo producto no tienen respuesta: cual de las dos es la
+  // capacidad? Se rechaza antes de que el unique de la base lo haga.
+  it('rejects a duplicated productCode', () => {
+    expect(
+      validateSetTruckCapacitiesInput({
+        capacities: [
+          { productCode: 'G10', units: 1 },
+          { productCode: 'G10', units: 2 },
+        ],
+      }),
+    ).toContain('productCode G10 is duplicated');
   });
 });
 
@@ -391,6 +480,22 @@ describe('validateCreateSaleInput (widened with optional FKs)', () => {
 
   it('accepts a payload with no customerId/truckId (unchanged behavior)', () => {
     expect(validateCreateSaleInput(base)).toEqual([]);
+  });
+
+  // Una venta encolada en el telefono trae la categoria que el cliente tenia
+  // en ese momento. El telefono no conoce el catalogo de categorias, asi que
+  // el validador solo mira la forma: rechazar por pertenencia perderia ventas
+  // reales de una categoria creada despues de la ultima sincronizacion.
+  it('accepts a customerType it has never heard of, as long as it is well formed', () => {
+    expect(validateCreateSaleInput({ ...base, customerType: 'mayorista' })).toEqual(
+      [],
+    );
+  });
+
+  it('rejects a blank customerType', () => {
+    expect(validateCreateSaleInput({ ...base, customerType: '  ' })).toContain(
+      'customerType is invalid',
+    );
   });
 
   it('accepts a payload with valid customerId and truckId', () => {
@@ -586,10 +691,18 @@ describe('validateRecordEmptyVisitInput', () => {
     expect(errors).toContain('driverName must have at least 2 characters');
   });
 
-  it('rejects an invalid customerType', () => {
+  it('accepts a customerType it has never heard of, as long as it is well formed', () => {
     const errors = validateRecordEmptyVisitInput({
       ...base,
       customerType: 'mayorista' as RecordEmptyVisitInput['customerType'],
+    });
+    expect(errors).toEqual([]);
+  });
+
+  it('rejects a blank customerType', () => {
+    const errors = validateRecordEmptyVisitInput({
+      ...base,
+      customerType: '  ' as RecordEmptyVisitInput['customerType'],
     });
     expect(errors).toContain('customerType is invalid');
   });
@@ -795,15 +908,35 @@ describe('validateCreateProductInput', () => {
   });
 
   describe('prices', () => {
-    // A product with a missing price breaks getPriceTable for EVERY sale in
-    // the system, not just its own -- so it must never exist, not even
-    // briefly.
-    it('rejects a product missing any customer type', () => {
+    // Completitud ya NO se decide aca. Las categorias las define el admin en
+    // runtime, y este validador corre en el telefono y en el navegador, que no
+    // conocen la lista: exigir "una por categoria" contra una lista fija
+    // rechazaria todo producto creado despues de que el admin agregue una.
+    // La regla "nace completo o no nace" vive en ProductsService, que si
+    // conoce las categorias activas y puede nombrar las que faltan.
+    it('accepts a product priced for only some categories', () => {
       const errors = validateCreateProductInput({
         ...base,
         prices: { final: 15000, comercio: 14500 } as CreateProductInput['prices'],
       });
-      expect(errors).toContain('prices.distribuidor is required');
+      expect(errors).toEqual([]);
+    });
+
+    it('accepts prices for categories it has never heard of', () => {
+      const errors = validateCreateProductInput({
+        ...base,
+        prices: { mayorista: 13000 } as CreateProductInput['prices'],
+      });
+      expect(errors).toEqual([]);
+    });
+
+    it('still rejects a bad amount inside a category it was given', () => {
+      expect(
+        validateCreateProductInput({
+          ...base,
+          prices: { mayorista: -1 } as CreateProductInput['prices'],
+        }),
+      ).toContain('prices.mayorista must be a non-negative integer');
     });
 
     it('rejects prices missing entirely', () => {
@@ -956,6 +1089,100 @@ describe('validateUpdateZoneInput', () => {
 
   it('accepts deactivating a zone', () => {
     expect(validateUpdateZoneInput({ isActive: false })).toEqual([]);
+  });
+});
+
+describe('validateCreateCustomerCategoryInput', () => {
+  const base: CreateCustomerCategoryInput = { code: 'mayorista', name: 'Mayorista' };
+
+  it('accepts a valid category', () => {
+    expect(validateCreateCustomerCategoryInput(base)).toEqual([]);
+  });
+
+  it('accepts an optional sortOrder', () => {
+    expect(validateCreateCustomerCategoryInput({ ...base, sortOrder: 3 })).toEqual([]);
+  });
+
+  describe('code', () => {
+    it('rejects an empty code', () => {
+      expect(validateCreateCustomerCategoryInput({ ...base, code: '  ' })).toContain(
+        'code is required',
+      );
+    });
+
+    // A diferencia de zona y producto, aca se aceptan minusculas: las tres
+    // categorias semilla son 'final', 'comercio' y 'distribuidor' -- los
+    // valores del enum viejo, ya persistidos en ventas encoladas -- y su
+    // codigo es inmutable. Forzar mayusculas dejaria la columna partida en dos
+    // convenciones para siempre.
+    it('accepts the lowercase shapes already seeded', () => {
+      for (const code of ['final', 'comercio', 'distribuidor']) {
+        expect(validateCreateCustomerCategoryInput({ ...base, code })).toEqual([]);
+      }
+    });
+
+    it('rejects spaces and punctuation', () => {
+      for (const code of ['may orista', 'may-orista', 'mayorista!']) {
+        expect(validateCreateCustomerCategoryInput({ ...base, code })).toContain(
+          'code must be letters, digits or underscore',
+        );
+      }
+    });
+
+    it('rejects a code longer than 20 characters', () => {
+      expect(
+        validateCreateCustomerCategoryInput({ ...base, code: 'a'.repeat(21) }),
+      ).toContain('code must be at most 20 characters');
+    });
+  });
+
+  it('rejects a name shorter than 2 characters', () => {
+    expect(validateCreateCustomerCategoryInput({ ...base, name: 'M' })).toContain(
+      'name must have at least 2 characters',
+    );
+  });
+
+  it('rejects a non-integer sortOrder', () => {
+    expect(
+      validateCreateCustomerCategoryInput({ ...base, sortOrder: 1.5 }),
+    ).toContain('sortOrder must be an integer');
+  });
+});
+
+describe('validateUpdateCustomerCategoryInput', () => {
+  it('accepts a patch touching a single field', () => {
+    expect(validateUpdateCustomerCategoryInput({ name: 'Mayorista A' })).toEqual([]);
+  });
+
+  it('rejects an empty patch', () => {
+    expect(validateUpdateCustomerCategoryInput({})).toContain(
+      'at least one field must be provided',
+    );
+  });
+
+  // El codigo ya viaja dentro de ventas encoladas: renombrarlo las dejaria
+  // apuntando a una categoria inexistente, asi que no es parcheable.
+  it('has no way to change the code', () => {
+    const patch = { code: 'otra' } as unknown as UpdateCustomerCategoryInput;
+    expect(validateUpdateCustomerCategoryInput(patch)).toContain(
+      'at least one field must be provided',
+    );
+  });
+
+  it('rejects a short name, a non-boolean isActive and a non-integer sortOrder', () => {
+    expect(validateUpdateCustomerCategoryInput({ name: 'M' })).toContain(
+      'name must have at least 2 characters',
+    );
+    expect(
+      validateUpdateCustomerCategoryInput({ isActive: 'si' as unknown as boolean }),
+    ).toContain('isActive must be a boolean');
+    expect(validateUpdateCustomerCategoryInput({ sortOrder: 1.5 })).toContain(
+      'sortOrder must be an integer',
+    );
+  });
+
+  it('accepts deactivating a category', () => {
+    expect(validateUpdateCustomerCategoryInput({ isActive: false })).toEqual([]);
   });
 });
 
