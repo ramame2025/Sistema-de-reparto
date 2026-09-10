@@ -26,8 +26,32 @@ export type ProductCode = string;
  * lugar que tiene la respuesta.
  */
 export declare function isWellFormedProductCode(code: unknown): boolean;
-export declare const CUSTOMER_TYPES: readonly ["final", "comercio", "distribuidor"];
-export type CustomerType = (typeof CUSTOMER_TYPES)[number];
+/**
+ * Categoria de cliente tal como viaja por la API. Es un string abierto, no una
+ * union cerrada: las categorias las define el admin en runtime, en la tabla
+ * `CustomerCategory`. El codigo es estable e inmutable una vez creado, porque
+ * ya viaja dentro de los payloads de venta encolados offline en los telefonos.
+ */
+export type CustomerType = string;
+/**
+ * Tan largo como el codigo de una zona o un producto, y por la misma razon:
+ * es una clave que se teclea y se lee, no un texto libre.
+ */
+export declare const CUSTOMER_TYPE_MAX_LENGTH = 20;
+/**
+ * Valida la FORMA de una categoria de cliente, no su pertenencia al catalogo.
+ *
+ * Mismo criterio que `isWellFormedProductCode`, y por el mismo motivo:
+ * `packages/shared` corre en el telefono y en el navegador, y ninguno de los
+ * dos conoce la lista de categorias. Comprobar pertenencia aca rechazaria toda
+ * categoria nueva y legitima, y peor: rechazaria una venta encolada con una
+ * categoria creada despues de la ultima sincronizacion. Que la categoria
+ * EXISTA se verifica contra la tabla, del lado del servidor.
+ *
+ * A proposito NO se exige mayusculas: las tres categorias semilla ('final',
+ * 'comercio', 'distribuidor') vienen del enum viejo y su codigo es inmutable.
+ */
+export declare function isWellFormedCustomerType(value: unknown): boolean;
 export declare const PAYMENT_METHODS: readonly ["efectivo", "transferencia", "qr", "tarjeta"];
 export declare const EXPENSE_CATEGORIES: readonly ["combustible", "peaje", "comida", "mantenimiento", "varios"];
 export declare const USER_ROLES: readonly ["admin", "chofer"];
@@ -254,7 +278,11 @@ export type ChangePasswordInput = {
 export type CreateCustomerInput = {
     name: string;
     customerType: CustomerType;
-    zone?: string;
+    /**
+     * Fila de `Zone`, la lista que administra el admin. Es lo que decide si dos
+     * clientes con el mismo nombre son el mismo: una FK, no cuatro grafias.
+     */
+    zoneId?: string;
     /**
      * Human-readable street address. Independent from latitude/longitude:
      * a customer may carry a pin, an address, both, or neither. Nothing
@@ -266,13 +294,13 @@ export type CreateCustomerInput = {
 };
 /**
  * Every field optional — a patch touches only what it names. `null` on
- * `zone`, `address` or the coordinate pair clears the stored value, which
+ * `zoneId`, `address` or the coordinate pair clears the stored value, which
  * `undefined` cannot express.
  */
 export type UpdateCustomerInput = {
     name?: string;
     customerType?: CustomerType;
-    zone?: string | null;
+    zoneId?: string | null;
     address?: string | null;
     latitude?: number | null;
     longitude?: number | null;
@@ -282,6 +310,15 @@ export type CustomerRecord = {
     id: string;
     name: string;
     customerType: CustomerType;
+    /** Fila de `Zone` a la que pertenece el cliente, si tiene una asignada. */
+    zoneId?: string;
+    /**
+     * Nombre para mostrar de esa zona, resuelto SIEMPRE desde la relacion: la
+     * columna sombra homonima ya no existe. Sigue siendo el mismo campo de
+     * siempre, asi que quien solo lo renderiza -- el aviso de duplicado del
+     * chofer, por ejemplo -- no se entera del cambio. Es de solo lectura: para
+     * asignar una zona esta `zoneId`, y no hay otra forma.
+     */
     zone?: string;
     address?: string;
     latitude?: number;
@@ -300,11 +337,22 @@ export type ProductRecord = {
     updatedAt: string;
 };
 /**
- * Un producto nace CON sus tres precios, en la misma transaccion. No es una
- * comodidad: `getPriceTable` falla entera si a cualquier producto le falta el
- * precio de cualquier tipo de cliente, y eso no rompe la venta de ese producto
- * sino TODAS las ventas del sistema. Un producto sin precios no puede existir
- * jamas, ni por un instante.
+ * Un producto nace CON un precio por cada categoria de cliente ACTIVA, en la
+ * misma transaccion. No es una comodidad: la tabla de precios tolera agujeros
+ * -- los omite en vez de fallar entera -- pero un producto sin precio no se
+ * puede vender a la categoria que quedo sin el, y el chofer se entera recien
+ * frente al cliente. Que un producto exista sin precios es evitable, asi que
+ * se evita.
+ *
+ * Cuales son esas categorias solo lo sabe el servidor, asi que la regla se
+ * verifica en `ProductsService.createProduct` y NO en el validador puro, que
+ * corre en el telefono y en el navegador. El validador solo mira que cada
+ * precio que SI vino sea un entero no negativo.
+ *
+ * El caso inverso -- una categoria nueva -- es deliberadamente el opuesto:
+ * nace sin ningun precio, y los productos existentes simplemente no tienen
+ * celda para ella hasta que el admin la cargue. Nada se backfillea, porque un
+ * precio heredado miente en silencio y una celda vacia se ve.
  */
 export type CreateProductInput = {
     code: string;
@@ -322,16 +370,82 @@ export type UpdateProductInput = {
     isActive?: boolean;
     sortOrder?: number;
 };
+export type ZoneRecord = {
+    id: string;
+    code: string;
+    name: string;
+    isActive: boolean;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+};
+export type CreateZoneInput = {
+    code: string;
+    name: string;
+    sortOrder?: number;
+};
+/**
+ * El `code` no se puede cambiar, y por eso no esta aca. Es la clave estable de
+ * la zona, igual que la del producto: se renombra el `name`, que es lo unico
+ * que se muestra.
+ */
+export type UpdateZoneInput = {
+    name?: string;
+    isActive?: boolean;
+    sortOrder?: number;
+};
+export type CustomerCategoryRecord = {
+    id: string;
+    code: string;
+    name: string;
+    isActive: boolean;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+};
+export type CreateCustomerCategoryInput = {
+    code: string;
+    name: string;
+    sortOrder?: number;
+};
+/**
+ * El `code` no se puede cambiar, y por eso no esta aca. Ya viaja dentro de los
+ * payloads de venta encolados en los telefonos, igual que el codigo de
+ * producto: renombrarlo dejaria esas ventas apuntando a una categoria
+ * inexistente.
+ */
+export type UpdateCustomerCategoryInput = {
+    name?: string;
+    isActive?: boolean;
+    sortOrder?: number;
+};
+/**
+ * Cuantas unidades de UN producto entran en el camion. La capacidad dejo de
+ * ser un numero unico: un total no dice que carga entra, y no se puede
+ * repartir entre productos sin inventar el reparto.
+ *
+ * `units: 0` es una respuesta real -- "este producto no viaja en este
+ * camion" -- y por eso se guarda como fila, en vez de omitirse.
+ */
+export type TruckCapacityEntry = {
+    productCode: ProductCode;
+    units: number;
+};
 export type CreateTruckInput = {
     code: string;
     plate: string;
-    capacity: number;
 };
 export type TruckRecord = {
     id: string;
     code: string;
     plate: string;
-    capacity: number;
+    /**
+     * La grilla por producto, ordenada como el catalogo. Un array vacio
+     * significa "sin detallar", NO "no entra nada": por eso no hay aca ningun
+     * total derivado -- un `capacity: 0` calculado seria exactamente esa
+     * mentira.
+     */
+    capacities: TruckCapacityEntry[];
     isActive: boolean;
     createdAt: string;
     updatedAt: string;
@@ -340,8 +454,16 @@ export type TruckRecord = {
 export type UpdateTruckInput = {
     code?: string;
     plate?: string;
-    capacity?: number;
     isActive?: boolean;
+};
+/**
+ * Reemplazo TOTAL de la grilla del camion, nunca un merge. Con un merge
+ * parcial "sacar este producto del camion" no se podria expresar: mandar la
+ * lista entera es lo que hace que una fila ausente signifique borrada. Mismo
+ * contrato que `CreateDriverCustomerAssignmentInput`.
+ */
+export type SetTruckCapacitiesInput = {
+    capacities: TruckCapacityEntry[];
 };
 export type CreateAssignmentInput = {
     driverId: string;
@@ -476,6 +598,13 @@ export declare function normalizeCustomerName(name: string): string;
 export declare function validateCreateCustomerInput(input: CreateCustomerInput): string[];
 export declare function validateUpdateCustomerInput(input: UpdateCustomerInput): string[];
 export declare function validateCreateTruckInput(input: CreateTruckInput): string[];
+/**
+ * Valida la grilla de capacidad. Como en todo el paquete, de los codigos de
+ * producto se comprueba la FORMA y no la pertenencia: el catalogo lo define el
+ * admin en runtime y ni el telefono ni el navegador lo conocen. Que el
+ * producto EXISTA lo asegura el servidor con `assertProductCodesExist`.
+ */
+export declare function validateSetTruckCapacitiesInput(input: SetTruckCapacitiesInput): string[];
 export declare function validateUpdateTruckInput(input: UpdateTruckInput): string[];
 export declare function validateCreateAssignmentInput(input: CreateAssignmentInput): string[];
 export declare function validateUpdatePriceInput(input: UpdatePriceInput): string[];
@@ -487,6 +616,10 @@ export declare function validateUpdatePriceInput(input: UpdatePriceInput): strin
 export declare function validateCreateDriverCustomerAssignmentInput(input: CreateDriverCustomerAssignmentInput): string[];
 export declare function validateCreateProductInput(input: CreateProductInput): string[];
 export declare function validateUpdateProductInput(input: UpdateProductInput): string[];
+export declare function validateCreateZoneInput(input: CreateZoneInput): string[];
+export declare function validateUpdateZoneInput(input: UpdateZoneInput): string[];
+export declare function validateCreateCustomerCategoryInput(input: CreateCustomerCategoryInput): string[];
+export declare function validateUpdateCustomerCategoryInput(input: UpdateCustomerCategoryInput): string[];
 /**
  * Ventana hacia atras que se acepta en `occurredAt`. Cubre de sobra el uso
  * real -- los choferes sincronizan el mismo dia -- y acota el dano de un

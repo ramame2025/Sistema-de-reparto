@@ -21,11 +21,18 @@ const DRIVERS = [
   { id: "a1", username: "admin1", role: "admin", createdAt: "", updatedAt: "" },
 ];
 
+const ZONES = [
+  { id: "z1", code: "NORTE", name: "Norte", isActive: true, sortOrder: 0, createdAt: "", updatedAt: "" },
+  { id: "z2", code: "SUR", name: "Sur", isActive: true, sortOrder: 1, createdAt: "", updatedAt: "" },
+];
+
 const CUSTOMERS = [
   {
     id: "c1",
     name: "Almacen Norte",
     customerType: "comercio",
+    zoneId: "z1",
+    zone: "Norte",
     isActive: true,
     createdAt: "",
     updatedAt: "",
@@ -33,6 +40,16 @@ const CUSTOMERS = [
   {
     id: "c2",
     name: "Kiosco Sur",
+    customerType: "final",
+    zoneId: "z2",
+    zone: "Sur",
+    isActive: true,
+    createdAt: "",
+    updatedAt: "",
+  },
+  {
+    id: "c3",
+    name: "Despensa Errante",
     customerType: "final",
     isActive: true,
     createdAt: "",
@@ -68,6 +85,9 @@ describe("ClientesAsignadosPage", () => {
       }
       if (key === "/customers") {
         return { data: CUSTOMERS, isLoading: false, error: undefined };
+      }
+      if (key === "/zones") {
+        return { data: ZONES, isLoading: false, error: undefined };
       }
       if (isHistoryKey(key)) {
         return emptyHistory;
@@ -124,6 +144,9 @@ describe("ClientesAsignadosPage", () => {
       if (key === "/customers") {
         return { data: CUSTOMERS, isLoading: false, error: undefined };
       }
+      if (key === "/zones") {
+        return { data: ZONES, isLoading: false, error: undefined };
+      }
       if (key === "/driver-customer-assignments?driverId=d1&date=2026-08-21") {
         return {
           data: [
@@ -160,6 +183,61 @@ describe("ClientesAsignadosPage", () => {
     expect(almacenCheckbox.checked).toBe(false);
   });
 
+  it("filters the customer list by zone", () => {
+    render(<ClientesAsignadosPage />);
+
+    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "z1" } });
+
+    expect(screen.getByLabelText(/Almacen Norte/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Kiosco Sur/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Despensa Errante/)).not.toBeInTheDocument();
+  });
+
+  it("the 'sin zona' option isolates customers that have no zone assigned", () => {
+    render(<ClientesAsignadosPage />);
+
+    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "__none__" } });
+
+    expect(screen.getByLabelText(/Despensa Errante/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Almacen Norte/)).not.toBeInTheDocument();
+  });
+
+  it("checks every visible customer at once without dropping what another zone already checked", async () => {
+    render(<ClientesAsignadosPage />);
+
+    fireEvent.change(screen.getByLabelText("Chofer"), { target: { value: "d1" } });
+
+    // Primero una zona, se tilda entera; despues otra. La segunda tanda no
+    // puede pisar a la primera: el admin esta sumando zonas al recorrido.
+    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "z1" } });
+    fireEvent.click(screen.getByRole("button", { name: /tildar/i }));
+
+    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "z2" } });
+    fireEvent.click(screen.getByRole("button", { name: /tildar/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /guardar lista/i }));
+
+    await waitFor(() => {
+      expect(put).toHaveBeenCalledWith("/driver-customer-assignments", {
+        driverId: "d1",
+        date: expect.any(String),
+        customerIds: ["c1", "c2"],
+      });
+    });
+  });
+
+  it("combines the zone filter with the name search", () => {
+    render(<ClientesAsignadosPage />);
+
+    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "z1" } });
+    fireEvent.change(screen.getByLabelText("Buscar cliente"), {
+      target: { value: "kiosco" },
+    });
+
+    expect(screen.queryByLabelText(/Almacen Norte/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Kiosco Sur/)).not.toBeInTheDocument();
+  });
+
   describe("historial paginado", () => {
     const historyPage = (
       overrides: Partial<{
@@ -193,6 +271,9 @@ describe("ClientesAsignadosPage", () => {
         }
         if (key === "/customers") {
           return { data: CUSTOMERS, isLoading: false, error: undefined };
+        }
+        if (key === "/zones") {
+          return { data: ZONES, isLoading: false, error: undefined };
         }
         if (isHistoryKey(key)) {
           return resolver(key);

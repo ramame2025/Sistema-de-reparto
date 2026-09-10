@@ -11,7 +11,11 @@ import React from 'react';
 import { Text } from 'react-native';
 import { render, screen, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { PriceTable, ProductRecord } from '@distribuidor/shared';
+import type {
+  CustomerCategoryRecord,
+  PriceTable,
+  ProductRecord,
+} from '@distribuidor/shared';
 import { CatalogProvider, useCatalog } from './CatalogContext';
 import { useAuth } from './AuthContext';
 import { CATALOG_CACHE_KEY } from '../services/catalog';
@@ -28,6 +32,22 @@ const product = (code: string, sortOrder: number, isActive = true): ProductRecor
   updatedAt: '2026-01-01T00:00:00.000Z',
 });
 
+const category = (
+  code: string,
+  sortOrder: number,
+  isActive = true,
+): CustomerCategoryRecord => ({
+  id: `k-${code}`,
+  code,
+  name: code.charAt(0).toUpperCase() + code.slice(1),
+  isActive,
+  sortOrder,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+});
+
+const CATEGORIES = [category('final', 0), category('comercio', 1)];
+
 const PRODUCTS = [product('G10', 0), product('G15', 1)];
 const PRICES: PriceTable = {
   final: { G10: 8500, G15: 13000 },
@@ -36,7 +56,7 @@ const PRICES: PriceTable = {
 };
 
 function Probe() {
-  const { products, prices, status, stale, canSell } = useCatalog();
+  const { products, prices, categories, status, stale, canSell } = useCatalog();
   return (
     <>
       <Text testID="status">{status}</Text>
@@ -44,6 +64,7 @@ function Probe() {
       <Text testID="can-sell">{String(canSell)}</Text>
       <Text testID="codes">{products.map((p) => p.code).join(',')}</Text>
       <Text testID="g10">{String(prices?.final?.G10 ?? 'none')}</Text>
+      <Text testID="categories">{categories.map((c) => c.code).join(',')}</Text>
     </>
   );
 }
@@ -64,10 +85,16 @@ describe('CatalogContext', () => {
     mockedUseAuth.mockReturnValue({ api: { get }, token: 'tok' });
   });
 
-  const givenApiReturns = (products: ProductRecord[], prices: PriceTable) => {
-    get.mockImplementation((path: string) =>
-      Promise.resolve(path === '/products' ? products : prices),
-    );
+  const givenApiReturns = (
+    products: ProductRecord[],
+    prices: PriceTable,
+    categories: CustomerCategoryRecord[] = CATEGORIES,
+  ) => {
+    get.mockImplementation((path: string) => {
+      if (path === '/products') return Promise.resolve(products);
+      if (path === '/customer-categories') return Promise.resolve(categories);
+      return Promise.resolve(prices);
+    });
   };
 
   it('loads the catalogue from the API and allows selling', async () => {
@@ -80,6 +107,35 @@ describe('CatalogContext', () => {
     expect(screen.getByTestId('g10')).toHaveTextContent('8500');
     expect(screen.getByTestId('stale')).toHaveTextContent('false');
     expect(screen.getByTestId('can-sell')).toHaveTextContent('true');
+    expect(screen.getByTestId('categories')).toHaveTextContent('final,comercio');
+  });
+
+  // El chofer da de alta clientes sin senal, asi que la lista de categorias
+  // viaja en el MISMO bundle cacheado que productos y precios: un catalogo a
+  // medias no sirve.
+  it('caches the categories alongside the products and prices', async () => {
+    givenApiReturns(PRODUCTS, PRICES);
+
+    renderProbe();
+
+    await waitFor(async () => {
+      const raw = await AsyncStorage.getItem(CATALOG_CACHE_KEY);
+      expect(raw).not.toBeNull();
+      expect(JSON.parse(raw as string).categories).toHaveLength(2);
+    });
+  });
+
+  it('hides deactivated categories from the driver, ordered by sortOrder', async () => {
+    givenApiReturns(PRODUCTS, PRICES, [
+      category('mayorista', 2),
+      category('final', 0),
+      category('retirada', 1, false),
+    ]);
+
+    renderProbe();
+
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('ready'));
+    expect(screen.getByTestId('categories')).toHaveTextContent('final,mayorista');
   });
 
   it('caches what it fetched, so the next launch works offline', async () => {
@@ -100,6 +156,7 @@ describe('CatalogContext', () => {
       JSON.stringify({
         products: PRODUCTS,
         prices: PRICES,
+        categories: CATEGORIES,
         fetchedAt: '2026-08-26T10:00:00.000Z',
       }),
     );
@@ -111,6 +168,7 @@ describe('CatalogContext', () => {
     expect(screen.getByTestId('stale')).toHaveTextContent('true');
     expect(screen.getByTestId('can-sell')).toHaveTextContent('true');
     expect(screen.getByTestId('g10')).toHaveTextContent('8500');
+    expect(screen.getByTestId('categories')).toHaveTextContent('final,comercio');
   });
 
   // Sin cache no hay ningun precio honesto que mostrar. Se bloquea la venta en

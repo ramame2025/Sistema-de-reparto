@@ -7,7 +7,11 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { PriceTable, ProductRecord } from '@distribuidor/shared';
+import type {
+  CustomerCategoryRecord,
+  PriceTable,
+  ProductRecord,
+} from '@distribuidor/shared';
 import { loadCachedCatalog, saveCatalogToCache } from '../services/catalog';
 import { useAuth } from './AuthContext';
 
@@ -17,6 +21,12 @@ export type CatalogContextValue = {
   /** Solo los activos, en el orden que definio el admin. */
   products: ProductRecord[];
   prices: PriceTable | null;
+  /**
+   * Solo las activas, en el orden que definio el admin. Viven en el catalogo y
+   * no en su propio contexto porque el alta rapida de clientes pasa sin senal:
+   * tienen que sobrevivir en la misma cache que los precios.
+   */
+  categories: CustomerCategoryRecord[];
   status: CatalogStatus;
   /** Los precios salieron del cache: pueden estar desactualizados. */
   stale: boolean;
@@ -43,6 +53,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
 
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [prices, setPrices] = useState<PriceTable | null>(null);
+  const [categories, setCategories] = useState<CustomerCategoryRecord[]>([]);
   const [status, setStatus] = useState<CatalogStatus>('idle');
   const [stale, setStale] = useState(false);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
@@ -58,14 +69,16 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
 
     try {
       // En paralelo, pero se guardan juntos: un catalogo a medias no sirve.
-      const [fetchedProducts, fetchedPrices] = await Promise.all([
+      const [fetchedProducts, fetchedPrices, fetchedCategories] = await Promise.all([
         api.get<ProductRecord[]>('/products'),
         api.get<PriceTable>('/prices/table'),
+        api.get<CustomerCategoryRecord[]>('/customer-categories'),
       ]);
 
       const now = new Date().toISOString();
       setProducts(fetchedProducts);
       setPrices(fetchedPrices);
+      setCategories(fetchedCategories);
       setStale(false);
       setFetchedAt(now);
       setStatus('ready');
@@ -73,6 +86,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       await saveCatalogToCache({
         products: fetchedProducts,
         prices: fetchedPrices,
+        categories: fetchedCategories,
         fetchedAt: now,
       });
     } catch {
@@ -83,6 +97,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       if (cached) {
         setProducts(cached.products);
         setPrices(cached.prices);
+        setCategories(cached.categories);
         setStale(true);
         setFetchedAt(cached.fetchedAt);
         setStatus('ready');
@@ -92,6 +107,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
 
       setProducts([]);
       setPrices(null);
+      setCategories([]);
       setStale(false);
       setFetchedAt(null);
       setStatus('error');
@@ -111,10 +127,19 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     [products],
   );
 
+  const visibleCategories = useMemo(
+    () =>
+      categories
+        .filter((category) => category.isActive)
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
+    [categories],
+  );
+
   const value = useMemo<CatalogContextValue>(
     () => ({
       products: visibleProducts,
       prices,
+      categories: visibleCategories,
       status,
       stale,
       fetchedAt,
@@ -122,7 +147,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       error,
       reload: load,
     }),
-    [visibleProducts, prices, status, stale, fetchedAt, error, load],
+    [visibleProducts, prices, visibleCategories, status, stale, fetchedAt, error, load],
   );
 
   return <CatalogContext.Provider value={value}>{children}</CatalogContext.Provider>;

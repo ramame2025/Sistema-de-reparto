@@ -200,7 +200,6 @@ export function HomeScreen() {
         driverName={username}
         truckCode={truck?.code}
         truckPlate={truck?.plate}
-        truckCapacity={truck?.capacity}
         truckKind={truck?.kind}
       />
 

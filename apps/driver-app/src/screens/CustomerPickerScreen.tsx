@@ -4,7 +4,6 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
-  CUSTOMER_TYPES,
   distanceKm,
   sortByProximity,
   type CustomerRecord,
@@ -21,6 +20,7 @@ import { TextField } from '../components/TextField';
 import { useKeyboardAwareField } from '../components/KeyboardAwareField';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAuth } from '../context/AuthContext';
+import { useCatalog } from '../context/CatalogContext';
 import { ApiError } from '../services/apiClient';
 import { captureDeviceLocation, type CapturedLocation } from '../services/location';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
@@ -83,7 +83,19 @@ export function CustomerPickerScreen() {
   const [location, setLocation] = useState<CapturedLocation | null>(null);
 
   const [quickCreateName, setQuickCreateName] = useState('');
-  const [quickCreateType, setQuickCreateType] = useState<CustomerType>('final');
+  // Las categorias salen del catalogo cacheado, no de una constante: el alta
+  // rapida pasa en la calle, y la lista tiene que sobrevivir sin senal.
+  const { categories } = useCatalog();
+  // Cadena vacia hasta que el chofer elija: cual es la primera categoria solo
+  // se sabe cuando la cache llego.
+  const [quickCreateType, setQuickCreateType] = useState<CustomerType>('');
+  const selectedQuickCreateType = quickCreateType || categories[0]?.code || '';
+
+  // El nombre para mostrar de cada categoria, por codigo.
+  const categoryNames = useMemo(
+    () => new Map(categories.map((category) => [category.code, category.name])),
+    [categories],
+  );
   const [creating, setCreating] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<CustomerRecord | null>(null);
@@ -172,7 +184,11 @@ export function CustomerPickerScreen() {
   const quickCreateField = useKeyboardAwareField();
 
   const subtitleFor = (customer: CustomerRecord): string => {
-    const type = CUSTOMER_TYPE_LABELS[customer.customerType] ?? customer.customerType;
+    // Cae al codigo crudo a proposito: el cliente puede arrastrar una
+    // categoria que la cache no conoce -- creada despues de la ultima
+    // sincronizacion, o dada de baja y ya fuera de la lista -- y mostrar el
+    // codigo es mejor que mostrar nada.
+    const type = categoryNames.get(customer.customerType) ?? customer.customerType;
     if (!location || customer.latitude === undefined || customer.longitude === undefined) {
       return type;
     }
@@ -200,7 +216,7 @@ export function CustomerPickerScreen() {
         allowDuplicate ? '/customers?allowDuplicate=true' : '/customers',
         {
           name: quickCreateName,
-          customerType: quickCreateType,
+          customerType: selectedQuickCreateType,
           // Omitido (no las keys) si no hubo lectura de ubicacion exitosa --
           // mismo criterio "best-effort" que saveSale usa para
           // latitude/longitude en NewSaleScreen (Open Question 4).
@@ -309,20 +325,26 @@ export function CustomerPickerScreen() {
           testID="customer-picker-quick-create-name"
         />
         <View style={styles.segmentRow}>
-          {CUSTOMER_TYPES.map((type) => (
+          {categories.map((category) => (
             <Button
-              key={type}
-              label={type}
-              variant={quickCreateType === type ? 'primary' : 'secondary'}
-              onPress={() => setQuickCreateType(type)}
-              testID={`customer-picker-quick-create-type-${type}`}
+              key={category.code}
+              label={category.name}
+              variant={
+                selectedQuickCreateType === category.code ? 'primary' : 'secondary'
+              }
+              onPress={() => setQuickCreateType(category.code)}
+              testID={`customer-picker-quick-create-type-${category.code}`}
             />
           ))}
         </View>
         <Button
           label={creating ? 'Creando...' : 'Crear cliente'}
           onPress={() => void submitQuickCreate(false)}
-          disabled={creating || quickCreateName.trim().length === 0}
+          disabled={
+            creating ||
+            quickCreateName.trim().length === 0 ||
+            selectedQuickCreateType.length === 0
+          }
           testID="customer-picker-quick-create-submit"
         />
         {duplicate && (
@@ -357,12 +379,6 @@ export function CustomerPickerScreen() {
     </ScreenContainer>
   );
 }
-
-const CUSTOMER_TYPE_LABELS: Record<string, string> = {
-  final: 'Final',
-  comercio: 'Comercio',
-  distribuidor: 'Distribuidor',
-};
 
 const styles = StyleSheet.create({
   card: {

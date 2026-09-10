@@ -14,6 +14,14 @@ jest.mock('../services/location', () => ({
   captureDeviceLocation: jest.fn(),
 }));
 
+jest.mock('../context/CatalogContext', () => {
+  const actual = jest.requireActual('../context/CatalogContext');
+  return {
+    ...actual,
+    useCatalog: jest.fn(),
+  };
+});
+
 const mockedNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
@@ -26,14 +34,37 @@ jest.mock('@react-navigation/native', () => {
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
-import type { CustomerRecord } from '@distribuidor/shared';
+import type { CustomerCategoryRecord, CustomerRecord } from '@distribuidor/shared';
 import { CustomerPickerScreen } from './CustomerPickerScreen';
+import { useCatalog } from '../context/CatalogContext';
 import { ApiError } from '../services/apiClient';
 import { useAuth } from '../context/AuthContext';
 import { captureDeviceLocation } from '../services/location';
 import { MIN_TOUCH_TARGET } from '../theme/spacing';
 
 const mockedUseAuth = useAuth as jest.Mock;
+const mockedUseCatalog = useCatalog as jest.Mock;
+
+const CATEGORIES: CustomerCategoryRecord[] = [
+  {
+    id: 'k1',
+    code: 'final',
+    name: 'Final',
+    isActive: true,
+    sortOrder: 0,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'k2',
+    code: 'comercio',
+    name: 'Comercio',
+    isActive: true,
+    sortOrder: 1,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+];
 const mockedCaptureDeviceLocation = captureDeviceLocation as jest.Mock;
 let mockedApiGet: jest.Mock;
 let mockedApiPost: jest.Mock;
@@ -105,6 +136,7 @@ const readerLocation = { latitude: -34.6037, longitude: -58.3816 };
 
 beforeEach(() => {
   mockedNavigate.mockClear();
+  mockedUseCatalog.mockReturnValue({ categories: CATEGORIES });
   mockedApiGet = jest.fn().mockResolvedValue(customers);
   mockedApiPost = jest.fn();
   mockedCaptureDeviceLocation.mockReset();
@@ -520,5 +552,88 @@ describe('CustomerPickerScreen/alta rapida colapsada', () => {
 
     expect(screen.getByTestId('customer-picker-quick-create-name')).toBeTruthy();
     expect(screen.queryByTestId('customer-picker-quick-create-open')).toBeNull();
+  });
+});
+
+describe('CustomerPickerScreen — categories from the cached catalogue', () => {
+  // La lista sale del catalogo cacheado, no de una constante de tres valores:
+  // el chofer da de alta clientes sin senal y tiene que ver las categorias que
+  // el admin definio, aunque la ultima sincronizacion haya sido ayer.
+  it('offers one quick-create button per cached category, named as the admin named it', async () => {
+    mockedUseCatalog.mockReturnValue({
+      categories: [
+        CATEGORIES[0],
+        {
+          ...CATEGORIES[1],
+          code: 'mayorista',
+          name: 'Mayorista',
+        },
+      ],
+    });
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+
+    await render(<CustomerPickerScreen />);
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-open'));
+
+    expect(
+      screen.getByTestId('customer-picker-quick-create-type-mayorista'),
+    ).toBeTruthy();
+    expect(screen.getByText('Mayorista')).toBeTruthy();
+    expect(
+      screen.queryByTestId('customer-picker-quick-create-type-comercio'),
+    ).toBeNull();
+  });
+
+  it('creates the customer with the first cached category when none is picked', async () => {
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+    mockedApiPost.mockResolvedValue({
+      id: 'created-1',
+      name: 'Cliente Nuevo',
+      customerType: 'final',
+      isActive: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    await render(<CustomerPickerScreen />);
+    await waitFor(() => expect(mockedCaptureDeviceLocation).toHaveBeenCalledTimes(1));
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-open'));
+    await fireEvent.changeText(
+      screen.getByTestId('customer-picker-quick-create-name'),
+      'Cliente Nuevo',
+    );
+    await fireEvent.press(screen.getByTestId('customer-picker-quick-create-submit'));
+
+    await waitFor(() =>
+      expect(mockedApiPost).toHaveBeenCalledWith('/customers', {
+        name: 'Cliente Nuevo',
+        customerType: 'final',
+      }),
+    );
+  });
+
+  it('labels a customer with the name of its category', async () => {
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+
+    await render(<CustomerPickerScreen />);
+
+    expect(
+      await screen.findByTestId('customer-picker-subtitle-customer-1'),
+    ).toHaveTextContent('Comercio');
+  });
+
+  // Un cliente puede arrastrar una categoria que la cache no conoce: creada
+  // despues de la ultima sincronizacion, o dada de baja y ya fuera de la
+  // lista. Se muestra el codigo crudo antes que una etiqueta vacia.
+  it('falls back to the raw code for a category the cache does not know', async () => {
+    mockedUseCatalog.mockReturnValue({ categories: [CATEGORIES[0]] });
+    mockedCaptureDeviceLocation.mockResolvedValue(null);
+
+    await render(<CustomerPickerScreen />);
+
+    expect(
+      await screen.findByTestId('customer-picker-subtitle-customer-1'),
+    ).toHaveTextContent('comercio');
   });
 });

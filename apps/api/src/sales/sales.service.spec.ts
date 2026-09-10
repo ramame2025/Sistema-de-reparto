@@ -9,6 +9,7 @@ import type {
 } from '@distribuidor/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
 import { ProductsService } from '../products/products.service';
 import { SalesService } from './sales.service';
 
@@ -105,6 +106,7 @@ describe('SalesService', () => {
   };
   let pricesService: { getPriceTable: jest.Mock; getPriceTableAt: jest.Mock };
   let productsService: { assertProductCodesExist: jest.Mock };
+  let categoriesService: { assertCategoryCodesExist: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -120,6 +122,9 @@ describe('SalesService', () => {
       getPriceTableAt: jest.fn().mockResolvedValue(CUSTOM_PRICE_TABLE),
     };
     productsService = { assertProductCodesExist: jest.fn().mockResolvedValue(undefined) };
+    categoriesService = {
+      assertCategoryCodesExist: jest.fn().mockResolvedValue(undefined),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -127,6 +132,7 @@ describe('SalesService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: PricesService, useValue: pricesService },
         { provide: ProductsService, useValue: productsService },
+        { provide: CustomerCategoriesService, useValue: categoriesService },
       ],
     }).compile();
 
@@ -345,6 +351,30 @@ describe('SalesService', () => {
       );
 
       expect(productsService.assertProductCodesExist).toHaveBeenCalledWith(['G10']);
+    });
+
+    // La validacion pura ya no puede comprobar pertenencia -- las categorias
+    // las define el admin en runtime -- asi que la existencia se verifica aca,
+    // igual que la del producto.
+    it('verifies the customerType against the categories table before writing', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(buildCreateInput({ customerType: 'comercio' }));
+
+      expect(categoriesService.assertCategoryCodesExist).toHaveBeenCalledWith([
+        'comercio',
+      ]);
+    });
+
+    it('does not write anything when the customerType does not exist', async () => {
+      categoriesService.assertCategoryCodesExist.mockRejectedValue(
+        new Error('Unknown customerType: fantasma'),
+      );
+
+      await expect(
+        service.createSale(buildCreateInput({ customerType: 'fantasma' })),
+      ).rejects.toThrow(/fantasma/);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
     });
 
     it('does not write anything when a productCode is not in the catalogue', async () => {

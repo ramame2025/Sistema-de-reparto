@@ -77,11 +77,25 @@ describe('ProductsController behaviour', () => {
       expect(service.createProduct).toHaveBeenCalledWith(valid);
     });
 
-    it('rejects a product with a missing price before reaching the service', async () => {
+    // Completitud ya NO se decide aca: el validador puro no conoce las
+    // categorias, que el admin define en runtime. La exige el servicio, que
+    // las lee de la base y puede nombrar las que faltan.
+    it('forwards a partially priced payload and lets the service judge it', async () => {
+      const partial = {
+        ...valid,
+        prices: { final: 15000, comercio: 14500 } as typeof valid.prices,
+      };
+
+      await controller.createProduct(partial);
+
+      expect(service.createProduct).toHaveBeenCalledWith(partial);
+    });
+
+    it('still rejects a malformed amount before reaching the service', async () => {
       await expect(
         controller.createProduct({
           ...valid,
-          prices: { final: 15000, comercio: 14500 } as typeof valid.prices,
+          prices: { ...valid.prices, final: -1 },
         }),
       ).rejects.toThrow(BadRequestException);
       expect(service.createProduct).not.toHaveBeenCalled();
