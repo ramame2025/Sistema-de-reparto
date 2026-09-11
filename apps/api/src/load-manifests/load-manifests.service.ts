@@ -3,6 +3,7 @@ import {
   type CreateLoadManifestInput,
   type LoadManifestRecord,
   type ProductCode,
+  type TruckDayStock,
   type TruckStockLine,
   type TruckStockSummary,
 } from '@distribuidor/shared';
@@ -20,6 +21,12 @@ import { ProductsService } from '../products/products.service';
 function endOfBusinessDayUtc(asOf: string): Date {
   const [year, month, day] = asOf.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day + 1, 3, 0, 0, 0));
+}
+
+/** El otro extremo del mismo dia habil: la medianoche local de `day`. */
+function startOfBusinessDayUtc(day: string): Date {
+  const [year, month, dayOfMonth] = day.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, dayOfMonth, 3, 0, 0, 0));
 }
 
 @Injectable()
@@ -117,6 +124,53 @@ export class LoadManifestsService {
       }),
     ]);
 
+    const lines = await this.buildStockLines(loadedItems, soldItems);
+
+    return { truckId, asOf, lines };
+  }
+
+  /**
+   * Stock del DIA, no acumulado: el remito de `day` menos lo vendido ese mismo
+   * dia. `getTruckStock` contesta otra pregunta (el saldo historico del
+   * camion) y por eso no se toca: la portada del chofer necesita que los
+   * numeros cierren contra el remito que el mismo cargo a la manana.
+   */
+  async getTruckStockForDay(truckId: string, day: string): Promise<TruckDayStock> {
+    const createdAt = {
+      gte: startOfBusinessDayUtc(day),
+      lt: endOfBusinessDayUtc(day),
+    };
+
+    const [loadedItems, soldItems, lastManifest] = await Promise.all([
+      this.prisma.loadManifestItem.findMany({
+        where: { manifest: { truckId, createdAt } },
+      }),
+      this.prisma.saleItem.findMany({
+        where: { sale: { truckId, status: 'active', createdAt } },
+      }),
+      // Un dia puede tener mas de un remito (recarga al mediodia). El ultimo
+      // es el que le dice al chofer desde cuando valen estos numeros.
+      this.prisma.loadManifest.findFirst({
+        where: { truckId, createdAt },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      }),
+    ]);
+
+    const lines = await this.buildStockLines(loadedItems, soldItems);
+
+    return {
+      truckId,
+      date: day,
+      manifestAt: lastManifest ? lastManifest.createdAt.toISOString() : null,
+      lines,
+    };
+  }
+
+  private async buildStockLines(
+    loadedItems: { productCode: string; quantity: number }[],
+    soldItems: { productCode: string; quantity: number }[],
+  ): Promise<TruckStockLine[]> {
     const loadedByProduct = new Map<ProductCode, number>();
     for (const item of loadedItems) {
       const productCode = item.productCode as ProductCode;
@@ -138,15 +192,13 @@ export class LoadManifestsService {
       orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
     });
 
-    const lines: TruckStockLine[] = products.map(({ code: productCode }) => {
+    return products.map(({ code: productCode }) => {
       const loaded = loadedByProduct.get(productCode) ?? 0;
       const sold = soldByProduct.get(productCode) ?? 0;
       // No se clampea: un remaining negativo es un problema de datos real
       // (se vendio mas de lo cargado) y debe verse, no esconderse.
       return { productCode, loaded, sold, remaining: loaded - sold };
     });
-
-    return { truckId, asOf, lines };
   }
 
   private toRecord(manifest: LoadManifest & { items: LoadManifestItem[] }): LoadManifestRecord {
