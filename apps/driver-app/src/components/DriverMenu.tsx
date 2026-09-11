@@ -37,6 +37,16 @@ export type DriverMenuProps = {
   truckCode?: string;
   truckPlate?: string;
   onPressManifest: () => void;
+  /**
+   * Hora ya formateada del ultimo remito de hoy, p. ej. "07:10". Sin remito
+   * todavia, se omite.
+   *
+   * La fila no decide si se puede cargar otro: un dia puede llevar mas de un
+   * remito (la recarga del mediodia es normal, y el stock del dia los suma).
+   * Lo que decide es a donde lleva -- a ver lo que ya hay, o a cargar lo
+   * primero del dia.
+   */
+  manifestLoadedAt?: string;
   onPressPriceList: () => void;
   onPressLogout: () => void;
   /**
@@ -73,6 +83,7 @@ export function DriverMenu({
   truckCode,
   truckPlate,
   onPressManifest,
+  manifestLoadedAt,
   onPressPriceList,
   onPressLogout,
   priceListUpdatedAt,
@@ -236,6 +247,7 @@ export function DriverMenu({
 
           <MenuRow
             title="Remito de carga"
+            value={manifestLoadedAt ? `Cargado ${manifestLoadedAt}` : 'Sin cargar hoy'}
             onPress={onPressManifest}
             testID="driver-menu-manifest"
           />

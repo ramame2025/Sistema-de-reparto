@@ -43,6 +43,7 @@ import { HomeScreen } from './HomeScreen';
 import { useAuth } from '../context/AuthContext';
 import { useCatalog } from '../context/CatalogContext';
 import { useSync } from '../context/SyncContext';
+import { formatClock } from '../utils/jornada';
 import { useTruck } from '../context/TruckContext';
 
 const mockedUseAuth = useAuth as jest.Mock;
@@ -676,5 +677,62 @@ describe('HomeScreen/encabezados', () => {
     ].map(sizeOf);
 
     expect(new Set(sizes).size).toBe(1);
+  });
+});
+
+describe('HomeScreen/remito desde el menu', () => {
+  const openMenu = async () => {
+    await fireEvent.press(screen.getByTestId('jornada-header-menu'));
+  };
+
+  /**
+   * `beforeEach` ya le entrego a useAuth la referencia anterior de
+   * `mockedApiGet`: reasignar la variable sola no la alcanza, hay que volver a
+   * entregar el objeto `api`.
+   */
+  const withStock = (stock: MyTruckStockResponse) => {
+    mockedApiGet = apiReturning({ stock });
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated' as const,
+      token: 'tok',
+      username: 'chofer1',
+      loading: false,
+      api: { get: mockedApiGet },
+      login: jest.fn(),
+      logout: mockedLogout,
+      requireAuthToken: jest.fn(() => 'tok'),
+    });
+  };
+
+  it('opens the blank form while nothing is loaded today', async () => {
+    withStock(noStockToday());
+
+    await render(<HomeScreen />);
+    await openMenu();
+
+    expect(screen.getByText('Sin cargar hoy')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('driver-menu-manifest'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('LoadManifest');
+  });
+
+  it('shows what is already loaded instead of a blank form, once today is loaded', async () => {
+    // Abrir el formulario en blanco con un remito ya cargado escondia lo que
+    // el chofer ya habia hecho, y no contestaba "que cargue".
+    withStock(stockToday());
+
+    await render(<HomeScreen />);
+    await waitFor(() => expect(screen.getByTestId('home-truck-stock')).toBeTruthy());
+    await openMenu();
+
+    // La hora se deriva, no se hardcodea: el mock es UTC y la fila muestra
+    // hora local, asi que un literal ataria el test al huso del runner.
+    const expected = `Cargado ${formatClock(`${today()}T07:10:00.000Z`)}`;
+    await waitFor(() => expect(screen.getByText(expected)).toBeTruthy());
+
+    await fireEvent.press(screen.getByTestId('driver-menu-manifest'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('ManifestHistory');
   });
 });
