@@ -5,7 +5,7 @@ import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner, type FeedbackTone } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { ScreenHeading } from '../components/ScreenHeading';
+import { SyncHeader } from '../components/SyncHeader';
 import { SectionLabel } from '../components/SectionLabel';
 import { StatusBadge } from '../components/StatusBadge';
 import { useSync } from '../context/SyncContext';
@@ -13,6 +13,7 @@ import { useColors } from '../theme/ThemeContext';
 import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
+import { formatClock } from '../utils/jornada';
 
 /**
  * Relocated (and expanded) from the pre-PR5 App.tsx "Estado de
@@ -33,7 +34,7 @@ import { typography } from '../theme/typography';
 export function SyncScreen() {
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { pendingSales, syncing, syncPendingSales } = useSync();
+  const { pendingSales, syncing, syncPendingSales, lastSyncAt, assignedTruckCode } = useSync();
 
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<FeedbackTone>('info');
@@ -60,9 +61,18 @@ export function SyncScreen() {
   };
 
   return (
-    <ScreenContainer testID="sync-screen" scroll>
-      <ScreenHeading eyebrow="Distribuidor · App chofer" />
-
+    <ScreenContainer
+      testID="sync-screen"
+      scroll
+      header={
+        <SyncHeader
+          testID="sync-header"
+          pendingCount={pendingSales.length}
+          truckCode={assignedTruckCode || undefined}
+          lastSyncAt={lastSyncAt ? (formatClock(lastSyncAt) ?? undefined) : undefined}
+        />
+      }
+    >
       <Card style={styles.card}>
         <SectionLabel variant="field">Cola de sincronizacion</SectionLabel>
 
