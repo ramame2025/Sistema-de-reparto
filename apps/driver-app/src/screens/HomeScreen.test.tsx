@@ -38,7 +38,7 @@ jest.mock('@react-navigation/native', () => {
 import React from 'react';
 import { Alert } from 'react-native';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
-import type { LoadManifestRecord, PriceTable, SaleRecord } from '@distribuidor/shared';
+import type { MyTruckStockResponse, PriceTable, SaleRecord } from '@distribuidor/shared';
 import { HomeScreen } from './HomeScreen';
 import { useAuth } from '../context/AuthContext';
 import { useCatalog } from '../context/CatalogContext';
@@ -109,23 +109,30 @@ const buildSale = (overrides: Partial<SaleRecord> = {}): SaleRecord => ({
   ...overrides,
 });
 
-const manifestToday = (overrides: Partial<LoadManifestRecord> = {}): LoadManifestRecord => ({
-  id: 'm1',
-  createdAt: `${today()}T07:10:00.000Z`,
-  driverName: 'chofer1',
-  truckId: 'truck-1',
-  items: [
-    { productCode: 'G10', quantity: 50 },
-    { productCode: 'G15', quantity: 21 },
-  ],
-  ...overrides,
+const stockToday = (overrides: Partial<MyTruckStockResponse['stock']> = {}): MyTruckStockResponse => ({
+  date: today(),
+  stock: {
+    truckId: 'truck-1',
+    date: today(),
+    manifestAt: `${today()}T07:10:00.000Z`,
+    lines: [
+      { productCode: 'G10', loaded: 50, sold: 38, remaining: 12 },
+      { productCode: 'G15', loaded: 21, sold: 12, remaining: 9 },
+    ],
+    ...overrides,
+  },
+});
+
+const noStockToday = (): MyTruckStockResponse => ({
+  date: today(),
+  stock: { truckId: 'truck-1', date: today(), manifestAt: null, lines: [] },
 });
 
 /** Rutea las tres llamadas que la portada hace al montarse. */
-const apiReturning = (options: { manifests?: unknown; customers?: unknown } = {}) =>
+const apiReturning = (options: { stock?: unknown; customers?: unknown } = {}) =>
   jest.fn().mockImplementation((path: string) => {
-    if (path.startsWith('/load-manifests/mine')) {
-      return Promise.resolve(options.manifests ?? []);
+    if (path.startsWith('/load-manifests/my-stock')) {
+      return Promise.resolve(options.stock ?? noStockToday());
     }
     if (path.startsWith('/driver-customer-assignments/me')) {
       return Promise.resolve(options.customers ?? { date: today(), customers: [] });
@@ -359,9 +366,9 @@ describe('HomeScreen/cobrado hoy', () => {
   });
 });
 
-describe('HomeScreen/remito', () => {
-  it('fetches the manifest on mount and counts the units it carried', async () => {
-    mockedApiGet = apiReturning({ manifests: [manifestToday()] });
+describe('HomeScreen/en el camion', () => {
+  const withApi = (get: jest.Mock) => {
+    mockedApiGet = get;
     mockedUseAuth.mockReturnValue({
       status: 'authenticated' as const,
       token: 'tok',
@@ -372,62 +379,85 @@ describe('HomeScreen/remito', () => {
       logout: mockedLogout,
       requireAuthToken: jest.fn(() => 'tok'),
     });
+  };
+
+  it('asks the server what is left on the truck today, not for the raw manifest list', async () => {
+    withApi(apiReturning({ stock: stockToday() }));
 
     await render(<HomeScreen />);
 
     await waitFor(() =>
-      expect(screen.getByText('Remito cargado · 71 envases')).toBeTruthy(),
+      expect(mockedApiGet).toHaveBeenCalledWith(
+        `/load-manifests/my-stock?date=${today()}`,
+        { cache: 'no-store' },
+      ),
     );
-    expect(mockedApiGet).toHaveBeenCalledWith('/load-manifests/mine', { cache: 'no-store' });
+  });
+
+  it('leads with what is still on board, backed by the manifest it came from', async () => {
+    withApi(apiReturning({ stock: stockToday() }));
+
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-truck-stock-remaining-total')).toHaveTextContent('quedan 21'),
+    );
+    expect(screen.getByTestId('home-truck-stock-manifest-line')).toHaveTextContent(/71 cargados$/);
+  });
+
+  it('subtracts sales still queued on this phone, so the count survives a dead signal', async () => {
+    syncWith({
+      pendingSales: [
+        {
+          queueId: 'q1',
+          kind: 'sale',
+          payload: { customerType: 'comercio', items: [{ productCode: 'G10', quantity: 4 }] },
+          createdAt: `${today()}T12:00:00.000Z`,
+          retries: 0,
+          nextRetryAt: 0,
+        },
+      ] as never,
+    });
+    withApi(apiReturning({ stock: stockToday() }));
+
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-truck-stock-tile-G10-value')).toHaveTextContent('8'),
+    );
+    // Lo cargado no lo toca la cola: solo cambia lo que queda.
+    expect(screen.getByTestId('home-truck-stock-tile-G10-loaded')).toHaveTextContent('/50');
   });
 
   it('prompts to load the truck when today has no manifest, explaining why it matters', async () => {
     await render(<HomeScreen />);
 
-    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
-    expect(screen.getByText('Cargá el camión para que cierren los números')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('home-truck-stock-load-cta')).toBeTruthy());
+    expect(screen.getByText('Sin remito no sabemos qué te queda')).toBeTruthy();
 
-    await fireEvent.press(screen.getByTestId('home-manifest-missing'));
+    await fireEvent.press(screen.getByTestId('home-truck-stock-load-cta'));
     expect(mockedNavigate).toHaveBeenCalledWith('LoadManifest');
   });
 
-  it('ignores a manifest from another day when deciding what to show', async () => {
-    mockedApiGet = apiReturning({
-      manifests: [manifestToday({ createdAt: '2020-01-01T07:10:00.000Z' })],
-    });
-    mockedUseAuth.mockReturnValue({
-      status: 'authenticated' as const,
-      token: 'tok',
-      username: 'chofer1',
-      loading: false,
-      api: { get: mockedApiGet },
-      login: jest.fn(),
-      logout: mockedLogout,
-      requireAuthToken: jest.fn(() => 'tok'),
-    });
+  it('opens the manifest history from the loaded card', async () => {
+    withApi(apiReturning({ stock: stockToday() }));
 
     await render(<HomeScreen />);
+    await waitFor(() => expect(screen.getByTestId('home-truck-stock-remaining-total')).toBeTruthy());
 
-    await waitFor(() => expect(screen.getByTestId('home-manifest-missing')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('home-truck-stock'));
+    expect(mockedNavigate).toHaveBeenCalledWith('ManifestHistory');
   });
 
-  it('shows a visible error when the manifest fetch fails, without blocking the rest', async () => {
-    mockedApiGet = jest.fn().mockImplementation((path: string) => {
-      if (path.startsWith('/load-manifests/mine')) {
-        return Promise.reject(new Error('No se pudo verificar el remito de hoy.'));
-      }
-      return Promise.resolve({ date: today(), customers: [] });
-    });
-    mockedUseAuth.mockReturnValue({
-      status: 'authenticated' as const,
-      token: 'tok',
-      username: 'chofer1',
-      loading: false,
-      api: { get: mockedApiGet },
-      login: jest.fn(),
-      logout: mockedLogout,
-      requireAuthToken: jest.fn(() => 'tok'),
-    });
+  it('shows a visible error when the stock fetch fails, without blocking the rest', async () => {
+    withApi(
+      jest.fn().mockImplementation((path: string) => {
+        if (path.startsWith('/load-manifests/my-stock')) {
+          return Promise.reject(new Error('No se pudo verificar el remito de hoy.'));
+        }
+        return Promise.resolve({ date: today(), customers: [] });
+      }),
+    );
 
     await render(<HomeScreen />);
 

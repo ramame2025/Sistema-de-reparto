@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { LoadManifestRecord, MyAssignedCustomersResponse } from '@distribuidor/shared';
+import type { MyAssignedCustomersResponse, MyTruckStockResponse } from '@distribuidor/shared';
 import { Card } from '../components/Card';
 import { DayStatusCard } from '../components/DayStatusCard';
 import { FeedbackBanner } from '../components/FeedbackBanner';
@@ -13,6 +13,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionLabel } from '../components/SectionLabel';
 import { StatTile } from '../components/StatTile';
 import { SummaryRow } from '../components/SummaryRow';
+import { TruckStockCard } from '../components/TruckStockCard';
 import { useAuth } from '../context/AuthContext';
 import { useCatalog } from '../context/CatalogContext';
 import { useSync } from '../context/SyncContext';
@@ -23,6 +24,7 @@ import {
   countVisitedCustomers,
   type SaleProblem,
 } from '../services/dayProblems';
+import { buildTruckStockLines } from '../services/truckStock';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
@@ -30,17 +32,6 @@ import { formatArs } from '../utils/currency';
 import { formatJornada } from '../utils/jornada';
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<HomeStackParamList, 'Home'>;
-
-const pad = (value: number): string => String(value).padStart(2, '0');
-
-/** Hora local del remito, para el renglon "Hoy 07:10". */
-const formatTime = (iso: string): string => {
-  const date = new Date(iso);
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
-
-const sumManifestUnits = (manifest: LoadManifestRecord): number =>
-  manifest.items.reduce((sum, item) => sum + item.quantity, 0);
 
 /**
  * Portada de la jornada. Responde tres preguntas en orden de urgencia: hay algo
@@ -63,7 +54,7 @@ export function HomeScreen() {
     todaySales,
   } = useSync();
   const { truck } = useTruck();
-  const { prices } = useCatalog();
+  const { prices, products } = useCatalog();
   const { api, username, logout } = useAuth();
   const navigation = useNavigation<HomeScreenNavigationProp>();
 
@@ -94,27 +85,25 @@ export function HomeScreen() {
     ]);
   }, [logout, pendingSales.length]);
 
-  const [manifest, setManifest] = useState<LoadManifestRecord | null>(null);
-  const [manifestError, setManifestError] = useState<string | null>(null);
+  const [truckStock, setTruckStock] = useState<MyTruckStockResponse | null>(null);
+  const [truckStockError, setTruckStockError] = useState<string | null>(null);
 
-  const refreshManifestStatus = useCallback(async () => {
+  const refreshTruckStock = useCallback(async () => {
     try {
-      const manifests = await api.get<LoadManifestRecord[]>('/load-manifests/mine', {
-        cache: 'no-store',
-      });
-      const today = new Date().toISOString().slice(0, 10);
-      // Se guarda el remito entero, no un booleano: la portada muestra cuantos
-      // envases se cargaron y a que hora, y ambos datos ya venian en esta
-      // misma respuesta.
-      setManifest(
-        manifests.find((entry) => entry.createdAt.slice(0, 10) === today) ?? null,
+      // El servidor ya resuelve el camion desde el token y devuelve el remito
+      // de hoy junto con lo que queda: son la misma pregunta, y separarlas
+      // dejaria a la portada pintando dos respuestas de instantes distintos.
+      const response = await api.get<MyTruckStockResponse>(
+        `/load-manifests/my-stock?date=${localDay()}`,
+        { cache: 'no-store' },
       );
-      setManifestError(null);
+      setTruckStock(response);
+      setTruckStockError(null);
     } catch (error) {
       // Visible-error posture, same as summaryError — no silent catch.
       const message =
         error instanceof Error ? error.message : 'No se pudo verificar el remito de hoy.';
-      setManifestError(message);
+      setTruckStockError(message);
     }
   }, [api]);
 
@@ -139,7 +128,7 @@ export function HomeScreen() {
 
   useEffect(() => {
     void refreshDaySummary();
-    void refreshManifestStatus();
+    void refreshTruckStock();
     void refreshAssignedCustomersStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh once on mount only, matches the original's mount-time fetch
   }, []);
@@ -147,6 +136,22 @@ export function HomeScreen() {
   const problems = useMemo(
     () => buildDayProblems(pendingSales, todaySales ?? [], prices),
     [pendingSales, todaySales, prices],
+  );
+
+  /**
+   * Lo que el servidor sabe, menos lo que todavia no le llego. Sin descontar
+   * la cola, la tarjeta le miente al chofer justo cuando mas la necesita: sin
+   * senal, con ventas ya hechas que el servidor no vio.
+   */
+  const truckStockLines = useMemo(
+    () =>
+      buildTruckStockLines(
+        truckStock?.stock?.lines ?? [],
+        pendingSales,
+        products,
+        truckStock?.date ?? localDay(),
+      ),
+    [truckStock, pendingSales, products],
   );
 
   const visitedCount = useMemo(
@@ -183,9 +188,9 @@ export function HomeScreen() {
 
   const refreshAll = useCallback(() => {
     void refreshDaySummary();
-    void refreshManifestStatus();
+    void refreshTruckStock();
     void refreshAssignedCustomersStatus();
-  }, [refreshDaySummary, refreshManifestStatus, refreshAssignedCustomersStatus]);
+  }, [refreshDaySummary, refreshTruckStock, refreshAssignedCustomersStatus]);
 
   return (
     <ScreenContainer
@@ -253,23 +258,17 @@ export function HomeScreen() {
         />
       </Card>
 
-      {manifestError ? (
+      {truckStockError ? (
         <View testID="home-manifest-error">
-          <FeedbackBanner message={manifestError} tone="error" />
+          <FeedbackBanner message={truckStockError} tone="error" />
         </View>
-      ) : manifest ? (
-        <SummaryRow
-          title={`Remito cargado · ${sumManifestUnits(manifest)} envases`}
-          subtitle={`Hoy ${formatTime(manifest.createdAt)}`}
-          onPress={() => navigation.navigate('ManifestHistory')}
-          testID="home-manifest-loaded"
-        />
       ) : (
-        <SummaryRow
-          title="Sin remito de carga"
-          subtitle="Cargá el camión para que cierren los números"
-          onPress={() => navigation.navigate('LoadManifest')}
-          testID="home-manifest-missing"
+        <TruckStockCard
+          lines={truckStockLines}
+          manifestAt={truckStock?.stock?.manifestAt ?? null}
+          onLoadManifest={() => navigation.navigate('LoadManifest')}
+          onPress={() => navigation.navigate('ManifestHistory')}
+          testID="home-truck-stock"
         />
       )}
 
