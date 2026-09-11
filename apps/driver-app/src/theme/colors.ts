@@ -27,6 +27,24 @@ export type Colors = {
    * -- casi negro sobre azul marino.
    */
   onPrimary: string;
+  /**
+   * El azul de la marca cuando se usa DELANTE y no detras: el numero de una
+   * tarjeta, el relleno de una barra de avance, el indicador de carga, el
+   * franjeado al costado de una fila.
+   *
+   * Mismo problema que `onPrimary` y misma solucion. `primary` esta pensado
+   * para ser un FONDO oscuro; delante de un fondo oscuro no se ve. En claro
+   * vale exactamente lo mismo que `primary`, asi que nada cambia de aspecto.
+   */
+  accent: string;
+  /**
+   * Una superficie apoyada sobre otra: los mosaicos dentro de la tarjeta de
+   * "En el camion". Sin esto, una card adentro de otra card es del mismo
+   * color que su contenedor y solo la separa el borde.
+   */
+  surfaceRaised: string;
+  /** Fondo tenue para una fila que avisa de un problema, no para un boton. */
+  errorSurface: string;
 };
 
 export const lightColors: Colors = {
@@ -42,6 +60,9 @@ export const lightColors: Colors = {
   warning: '#D89614',
   error: '#D93B3B',
   onPrimary: '#FFFFFF',
+  accent: '#1E3A5F',
+  surfaceRaised: '#FFFFFF',
+  errorSurface: '#FDF2F2',
 };
 
 /**
@@ -64,6 +85,9 @@ export const darkColors: Colors = {
   warning: '#E0A32E',
   error: '#EF5B5B',
   onPrimary: '#FFFFFF',
+  accent: '#7BA9D9',
+  surfaceRaised: '#232932',
+  errorSurface: '#2E1B1D',
 };
 
 /**

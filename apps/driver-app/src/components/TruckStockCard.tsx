@@ -66,7 +66,7 @@ const toneOf = (remaining: number): ProgressBarTone => {
 const toneColor = (colors: Colors, tone: ProgressBarTone): string =>
   ({
     success: colors.success,
-    primary: colors.primary,
+    primary: colors.accent,
     warning: colors.warning,
     error: colors.error,
   })[tone];
@@ -213,7 +213,7 @@ const makeStyles = (colors: Colors) =>
     flexShrink: 1,
     minWidth: 130,
     gap: spacing.xs,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceRaised,
     borderColor: colors.border,
     borderWidth: 1,
     borderRadius: spacing.sm,

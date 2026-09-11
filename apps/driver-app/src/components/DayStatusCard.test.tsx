@@ -1,7 +1,9 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { render, screen, fireEvent } from '@testing-library/react-native';
 import { DayStatusCard } from './DayStatusCard';
 import type { SaleProblem } from '../services/dayProblems';
+import { colors } from '../theme/colors';
 
 const notSent: SaleProblem = {
   kind: 'not-sent',
@@ -143,5 +145,33 @@ describe('DayStatusCard/con problemas', () => {
 
     await fireEvent.press(screen.getByTestId('day-status-resolve'));
     expect(onResolve).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DayStatusCard/contraste', () => {
+  const problem: SaleProblem = {
+    id: 'sale-1',
+    kind: 'missing-proof',
+    customerName: 'Ramirito',
+    total: 60000,
+    paymentMethod: 'qr',
+  };
+
+  it('takes the alert tint from the palette, so the text on it stays readable', async () => {
+    // Estuvo hardcodeado en '#FDF2F2': con el tema oscuro el fondo se quedaba
+    // claro mientras el titulo encima se volvia casi blanco.
+    await render(
+      <DayStatusCard
+        testID="card"
+        problems={[problem]}
+        sentCount={0}
+        onPressProblem={jest.fn()}
+        onResolve={jest.fn()}
+      />
+    );
+
+    const row = StyleSheet.flatten(screen.getByTestId('day-status-problem-sale-1').props.style);
+
+    expect(row.backgroundColor).toBe(colors.errorSurface);
   });
 });

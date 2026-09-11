@@ -16,7 +16,7 @@ export type ProgressBarProps = {
 const toneColor = (colors: Colors, tone: ProgressBarTone): string =>
   ({
     success: colors.success,
-    primary: colors.primary,
+    primary: colors.accent,
     warning: colors.warning,
     error: colors.error,
   })[tone];

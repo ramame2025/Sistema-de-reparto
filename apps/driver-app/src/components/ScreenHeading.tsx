@@ -40,7 +40,7 @@ const makeStyles = (colors: Colors) =>
     gap: spacing.xs,
   },
   eyebrow: {
-    color: colors.primary,
+    color: colors.accent,
     fontSize: typography.sizes.xs,
     fontWeight: typography.weights.bold,
     textTransform: 'uppercase',

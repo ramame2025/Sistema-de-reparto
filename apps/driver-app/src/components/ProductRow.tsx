@@ -89,7 +89,7 @@ const makeStyles = (colors: Colors) =>
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderWidth: 1,
-    borderLeftColor: colors.primary,
+    borderLeftColor: colors.accent,
     borderLeftWidth: 3,
     borderRadius: spacing.sm,
     paddingHorizontal: spacing.md,
