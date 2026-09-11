@@ -4,6 +4,7 @@ import { AssignedCustomersScreen } from '../screens/AssignedCustomersScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { LoadManifestScreen } from '../screens/LoadManifestScreen';
 import { ManifestHistoryScreen } from '../screens/ManifestHistoryScreen';
+import { PriceListScreen } from '../screens/PriceListScreen';
 import { SaleDetailScreen } from '../screens/SaleDetailScreen';
 import { SalesHistoryScreen } from '../screens/SalesHistoryScreen';
 
@@ -20,6 +21,7 @@ export type HomeStackParamList = {
    */
   SaleDetail: { sale: SaleRecord };
   ManifestHistory: undefined;
+  PriceList: undefined;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -79,6 +81,11 @@ export function HomeStack() {
         name="ManifestHistory"
         component={ManifestHistoryScreen}
         options={{ headerShown: true, title: 'Historial de remitos' }}
+      />
+      <Stack.Screen
+        name="PriceList"
+        component={PriceListScreen}
+        options={{ headerShown: true, title: 'Lista de precios' }}
       />
     </Stack.Navigator>
   );

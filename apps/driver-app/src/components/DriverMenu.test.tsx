@@ -9,6 +9,7 @@ const baseProps = {
   truckCode: 'C-04',
   truckPlate: 'AB123CD',
   onPressManifest: jest.fn(),
+  onPressPriceList: jest.fn(),
   onPressLogout: jest.fn(),
 };
 
@@ -38,6 +39,14 @@ describe('DriverMenu', () => {
     await fireEvent.press(screen.getByTestId('driver-menu-manifest'));
 
     expect(baseProps.onPressManifest).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the price list', async () => {
+    await render(<DriverMenu {...baseProps} />);
+
+    await fireEvent.press(screen.getByTestId('driver-menu-prices'));
+
+    expect(baseProps.onPressPriceList).toHaveBeenCalledTimes(1);
   });
 
   it('dates the price list the app is actually holding', async () => {
