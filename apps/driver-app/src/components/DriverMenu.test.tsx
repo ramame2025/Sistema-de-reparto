@@ -1,5 +1,11 @@
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
+
 import React from 'react';
 import { StyleSheet } from 'react-native';
+import { ThemeProvider } from '../theme/ThemeProvider';
+import { darkColors } from '../theme/colors';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { DriverMenu } from './DriverMenu';
 
@@ -78,13 +84,44 @@ describe('DriverMenu', () => {
     expect(baseProps.onPressLogout).toHaveBeenCalledTimes(1);
   });
 
-  it('marks the dark theme as not built yet instead of offering a switch that does nothing', async () => {
+  it('offers both themes and marks the one in use', async () => {
+    await render(
+      <ThemeProvider>
+        <DriverMenu {...baseProps} />
+      </ThemeProvider>
+    );
+
+    expect(screen.getByTestId('driver-menu-theme-light').props.accessibilityState.selected).toBe(
+      true
+    );
+    expect(screen.getByTestId('driver-menu-theme-dark').props.accessibilityState.selected).toBe(
+      false
+    );
+  });
+
+  it('switches the app to the dark palette from the menu', async () => {
+    await render(
+      <ThemeProvider>
+        <DriverMenu {...baseProps} />
+      </ThemeProvider>
+    );
+
+    await fireEvent.press(screen.getByTestId('driver-menu-theme-dark'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('driver-menu-theme-dark').props.accessibilityState.selected).toBe(
+        true
+      )
+    );
+
+    const panel = StyleSheet.flatten(screen.getByTestId('driver-menu-panel').props.style);
+    expect(panel.backgroundColor).toBe(darkColors.surface);
+  });
+
+  it('carries no Ayuda row, because nothing was ever behind it', async () => {
     await render(<DriverMenu {...baseProps} />);
 
-    expect(screen.getByText('Oscuro')).toBeTruthy();
-    expect(String(screen.getByTestId('driver-menu-theme-hint').props.children)).toContain(
-      'Próximamente'
-    );
+    expect(screen.queryByTestId('driver-menu-help')).toBeNull();
   });
 
   it('renders nothing while it is closed', async () => {

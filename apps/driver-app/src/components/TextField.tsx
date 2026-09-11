@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, TextInput, type TextInputProps } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { radii } from '../theme/radii';
 import { spacing } from '../theme/spacing';
 
@@ -16,19 +17,25 @@ export type TextFieldProps = TextInputProps;
  * `useKeyboardAwareField` (que necesita el handle nativo del campo).
  */
 export const TextField = React.forwardRef<TextInput, TextFieldProps>(
-  ({ style, placeholderTextColor, ...rest }, ref) => (
-    <TextInput
-      ref={ref}
-      style={[styles.input, style]}
-      placeholderTextColor={placeholderTextColor ?? colors.textSecondary}
-      {...rest}
-    />
-  ),
+  ({ style, placeholderTextColor, ...rest }, ref) => {
+    const colors = useColors();
+    const styles = useMemo(() => makeStyles(colors), [colors]);
+
+    return (
+      <TextInput
+        ref={ref}
+        style={[styles.input, style]}
+        placeholderTextColor={placeholderTextColor ?? colors.textSecondary}
+        {...rest}
+      />
+    );
+  },
 );
 
 TextField.displayName = 'TextField';
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   input: {
     borderWidth: 1,
     borderColor: colors.border,

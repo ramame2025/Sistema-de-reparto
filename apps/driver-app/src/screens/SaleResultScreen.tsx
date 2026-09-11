@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -9,7 +10,8 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionLabel } from '../components/SectionLabel';
 import { useSync } from '../context/SyncContext';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -34,6 +36,8 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
  * ofrece editar: no hay nada del otro lado que editar todavia.
  */
 export function SaleResultScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const route = useRoute<RouteProp<NewSaleStackParamList, 'SaleResult'>>();
   const navigation = useNavigation<SaleResultNavigationProp>();
   const { daySummary, pendingSales } = useSync();
@@ -55,7 +59,7 @@ export function SaleResultScreen() {
           <Ionicons
             name={sent ? 'checkmark' : 'cloud-upload-outline'}
             size={36}
-            color={colors.surface}
+            color={colors.onPrimary}
           />
         </View>
 
@@ -122,7 +126,8 @@ export function SaleResultScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   hero: {
     alignItems: 'center',
     gap: spacing.sm,

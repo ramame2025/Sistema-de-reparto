@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -10,6 +11,8 @@ export type EmptyStateProps = {
 };
 
 export function EmptyState({ title, description }: EmptyStateProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{title}</Text>
@@ -22,7 +25,8 @@ export function EmptyState({ title, description }: EmptyStateProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',

@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -29,6 +30,8 @@ export function ExpenseHeader({
   subtitle,
   testID,
 }: ExpenseHeaderProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const amountLeads = !title;
 
   return (
@@ -54,7 +57,8 @@ export function ExpenseHeader({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   bar: {
     backgroundColor: colors.primary,
     paddingHorizontal: spacing.md,
@@ -62,7 +66,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   eyebrow: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.xs,
     fontWeight: typography.weights.bold,
     letterSpacing: 0.7,
@@ -80,27 +84,27 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   title: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.bold,
   },
   amountLead: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: 32,
     fontWeight: typography.weights.bold,
   },
   amountTrailing: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.bold,
   },
   amountLabel: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.xs,
     opacity: 0.8,
   },
   subtitle: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.xs,
     opacity: 0.85,
   },

@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -13,11 +14,12 @@ export type StatTileProps = {
   testID?: string;
 };
 
-const TONE_COLORS: Record<StatTileTone, string> = {
-  neutral: colors.textPrimary,
-  warning: colors.warning,
-  error: colors.error,
-};
+const toneColor = (colors: Colors, tone: StatTileTone): string =>
+  ({
+    neutral: colors.textPrimary,
+    warning: colors.warning,
+    error: colors.error,
+  })[tone];
 
 /**
  * Un numero de la jornada con su etiqueta.
@@ -27,7 +29,9 @@ const TONE_COLORS: Record<StatTileTone, string> = {
  * problema. Solo destaca lo que efectivamente pide atencion.
  */
 export function StatTile({ value, label, tone = 'neutral', testID }: StatTileProps) {
-  const color = value === 0 ? colors.textSecondary : TONE_COLORS[tone];
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const color = value === 0 ? colors.textSecondary : toneColor(colors, tone);
 
   return (
     <View style={styles.tile} testID={testID}>
@@ -39,7 +43,8 @@ export function StatTile({ value, label, tone = 'neutral', testID }: StatTilePro
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   tile: {
     flex: 1,
     backgroundColor: colors.background,

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { radii } from '../theme/radii';
 import { typography } from '../theme/typography';
@@ -33,6 +34,8 @@ export function JornadaHeader({
   onPressMenu,
   testID,
 }: JornadaHeaderProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const hasTruck = Boolean(truckCode);
 
   return (
@@ -61,14 +64,15 @@ export function JornadaHeader({
           style={styles.menuButton}
           testID="jornada-header-menu"
         >
-          <Ionicons name="menu" size={24} color={colors.surface} />
+          <Ionicons name="menu" size={24} color={colors.onPrimary} />
         </Pressable>
       ) : null}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -91,24 +95,24 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryLight,
   },
   jornada: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.xs,
     fontWeight: typography.weights.bold,
     letterSpacing: 0.7,
     opacity: 0.85,
   },
   driver: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.bold,
   },
   truck: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.xs,
     opacity: 0.8,
   },
   noTruck: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.xs,
     fontWeight: typography.weights.semibold,
   },

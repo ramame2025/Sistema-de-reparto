@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -32,6 +33,8 @@ export function ProductRow({
   onIncrement,
   onDecrement,
 }: ProductRowProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const canDecrement = quantity > 0;
   const subtitle = unitPrice === undefined ? name : `${name} · ${formatArs(unitPrice)}`;
 
@@ -76,7 +79,8 @@ export function ProductRow({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -145,6 +149,6 @@ const styles = StyleSheet.create({
   incrementLabel: {
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
-    color: colors.surface,
+    color: colors.onPrimary,
   },
 });

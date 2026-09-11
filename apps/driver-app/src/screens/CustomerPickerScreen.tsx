@@ -25,7 +25,8 @@ import { ApiError } from '../services/apiClient';
 import { captureDeviceLocation, type CapturedLocation } from '../services/location';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { formatDistance } from '../utils/distance';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { radii } from '../theme/radii';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
@@ -73,6 +74,8 @@ function conflictingCustomerFrom(error: unknown): CustomerRecord | null {
  * to NewSaleScreen's free-text customerName field.
  */
 export function CustomerPickerScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { api } = useAuth();
   const navigation = useNavigation<CustomerPickerNavigationProp>();
 
@@ -380,7 +383,8 @@ export function CustomerPickerScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   card: {
     gap: spacing.sm,
   },

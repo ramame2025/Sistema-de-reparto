@@ -4,6 +4,13 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 
 jest.mock('../context/SyncContext', () => ({ useSync: jest.fn() }));
 
+// Estas pruebas invocan MainTabs() como funcion pelada para inspeccionar el
+// arbol que devuelve, asi que no hay dispatcher de hooks: la paleta se sirve
+// directa, igual que useSync.
+jest.mock('../theme/ThemeContext', () => ({
+  useColors: () => require('../theme/colors').lightColors,
+}));
+
 import React from 'react';
 import { MainTabs, type MainTabParamList } from './MainTabs';
 import { useSync } from '../context/SyncContext';

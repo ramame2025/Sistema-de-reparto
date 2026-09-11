@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Modal,
@@ -13,7 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MenuRow } from './MenuRow';
 import { SectionLabel } from './SectionLabel';
-import { colors } from '../theme/colors';
+import { useColors, useTheme } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { radii } from '../theme/radii';
 import { typography } from '../theme/typography';
@@ -79,6 +80,9 @@ export function DriverMenu({
   lastSyncAt,
   testID,
 }: DriverMenuProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const { scheme, setScheme } = useTheme();
   const { width } = useWindowDimensions();
   const panelWidth = width * PANEL_RATIO;
 
@@ -172,7 +176,7 @@ export function DriverMenu({
               style={styles.closeButton}
               testID="driver-menu-close"
             >
-              <Ionicons name="close" size={22} color={colors.surface} />
+              <Ionicons name="close" size={22} color={colors.onPrimary} />
             </Pressable>
           </View>
         </SafeAreaView>
@@ -181,21 +185,52 @@ export function DriverMenu({
           <View style={styles.themeBlock}>
             <SectionLabel>PANTALLA</SectionLabel>
 
-            {/* Deshabilitado a proposito: el tema oscuro todavia no existe y
-                un toggle que no hace nada es peor que no tenerlo. */}
             <View style={styles.themeChoices}>
-              <View style={[styles.themeOption, styles.themeOptionActive]}>
-                <Ionicons name="sunny-outline" size={18} color={colors.surface} />
-                <Text style={styles.themeLabelActive}>Claro</Text>
-              </View>
-              <View style={[styles.themeOption, styles.themeOptionDisabled]}>
-                <Ionicons name="moon-outline" size={18} color={colors.textSecondary} />
-                <Text style={styles.themeLabelDisabled}>Oscuro</Text>
-              </View>
+              <Pressable
+                accessibilityRole="radio"
+                accessibilityState={{ selected: scheme === 'light' }}
+                onPress={() => setScheme('light')}
+                style={[
+                  styles.themeOption,
+                  scheme === 'light' ? styles.themeOptionActive : styles.themeOptionIdle,
+                ]}
+                testID="driver-menu-theme-light"
+              >
+                <Ionicons
+                  name="sunny-outline"
+                  size={18}
+                  color={scheme === 'light' ? colors.onPrimary : colors.textSecondary}
+                />
+                <Text
+                  style={scheme === 'light' ? styles.themeLabelActive : styles.themeLabelIdle}
+                >
+                  Claro
+                </Text>
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="radio"
+                accessibilityState={{ selected: scheme === 'dark' }}
+                onPress={() => setScheme('dark')}
+                style={[
+                  styles.themeOption,
+                  scheme === 'dark' ? styles.themeOptionActive : styles.themeOptionIdle,
+                ]}
+                testID="driver-menu-theme-dark"
+              >
+                <Ionicons
+                  name="moon-outline"
+                  size={18}
+                  color={scheme === 'dark' ? colors.onPrimary : colors.textSecondary}
+                />
+                <Text style={scheme === 'dark' ? styles.themeLabelActive : styles.themeLabelIdle}>
+                  Oscuro
+                </Text>
+              </Pressable>
             </View>
 
             <Text style={styles.themeHint} testID="driver-menu-theme-hint">
-              Oscuro ayuda de noche; con sol, dejalo en claro · Próximamente
+              Oscuro ayuda de noche; con sol, dejalo en claro
             </Text>
           </View>
 
@@ -210,7 +245,6 @@ export function DriverMenu({
             onPress={onPressPriceList}
             testID="driver-menu-prices"
           />
-          <MenuRow title="Ayuda" disabled testID="driver-menu-help" />
         </ScrollView>
 
         <SafeAreaView edges={['bottom', 'right']} style={styles.footer}>
@@ -235,7 +269,8 @@ export function DriverMenu({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   overlay: {
     flex: 1,
     flexDirection: 'row',
@@ -275,12 +310,12 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   driver: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
   },
   truck: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.sm,
     opacity: 0.8,
   },
@@ -322,16 +357,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  themeOptionDisabled: {
+  themeOptionIdle: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
   },
   themeLabelActive: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.bold,
   },
-  themeLabelDisabled: {
+  themeLabelIdle: {
     color: colors.textSecondary,
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.bold,

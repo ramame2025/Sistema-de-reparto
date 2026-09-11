@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
@@ -9,7 +9,8 @@ import { ScreenHeading } from '../components/ScreenHeading';
 import { SectionLabel } from '../components/SectionLabel';
 import { StatusBadge } from '../components/StatusBadge';
 import { useSync } from '../context/SyncContext';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -30,6 +31,8 @@ import { typography } from '../theme/typography';
  * entry regardless of `nextRetryAt`.
  */
 export function SyncScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { pendingSales, syncing, syncPendingSales } = useSync();
 
   const [message, setMessage] = useState<string | null>(null);
@@ -105,7 +108,8 @@ export function SyncScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   card: {
     gap: spacing.sm,
   },

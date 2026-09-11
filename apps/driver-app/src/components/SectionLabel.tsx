@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, type TextProps } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { typography } from '../theme/typography';
 
 export type SectionLabelVariant = 'section' | 'field';
@@ -24,6 +25,9 @@ export function SectionLabel({
   style,
   ...rest
 }: SectionLabelProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
   return (
     <Text style={[styles[variant], style]} {...rest}>
       {children}
@@ -31,7 +35,8 @@ export function SectionLabel({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   section: {
     fontSize: typography.sizes.xs,
     fontWeight: typography.weights.bold,

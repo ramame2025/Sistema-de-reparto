@@ -5,7 +5,7 @@ import { ExpensesStack } from './ExpensesStack';
 import { HomeStack } from './HomeStack';
 import { NewSaleStack } from './NewSaleStack';
 import { useSync } from '../context/SyncContext';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
 import { typography } from '../theme/typography';
 
 export type MainTabParamList = {
@@ -32,6 +32,7 @@ const makeTabIcon =
  * carries primary visual emphasis (distinct active tint + bold label).
  */
 export function MainTabs() {
+  const colors = useColors();
   // El contador va en la barra y no dentro de la pantalla de Sincronizacion:
   // una venta que sigue en el telefono hay que verla sin entrar a buscarla.
   const { pendingSales } = useSync();

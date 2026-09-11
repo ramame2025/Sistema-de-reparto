@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -13,7 +13,8 @@ import {
 // in App.tsx.
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { ScreenScrollContext } from './KeyboardAwareField';
 
@@ -76,6 +77,8 @@ export function ScreenContainer({
   refreshing = false,
   testID,
 }: ScreenContainerProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const scrollRef = useRef<ScrollView>(null);
 
   return (
@@ -144,7 +147,8 @@ export function ScreenContainer({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,

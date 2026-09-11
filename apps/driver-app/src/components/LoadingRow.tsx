@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -15,6 +16,8 @@ export type LoadingRowProps = {
  * `loadingText`) en seis pantallas.
  */
 export function LoadingRow({ label, testID }: LoadingRowProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.row} testID={testID}>
       <ActivityIndicator color={colors.primary} />
@@ -23,7 +26,8 @@ export function LoadingRow({ label, testID }: LoadingRowProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',

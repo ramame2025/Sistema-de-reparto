@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExpenseCategory } from '@distribuidor/shared';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -45,6 +46,8 @@ export function ExpenseRow({
   receiptRef,
   testID,
 }: ExpenseRowProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const hasReceipt = Boolean(receiptRef);
   const detail = note ? `${formatTime(createdAt)} · ${note}` : formatTime(createdAt);
 
@@ -72,7 +75,8 @@ export function ExpenseRow({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',

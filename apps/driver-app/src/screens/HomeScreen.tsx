@@ -28,7 +28,8 @@ import {
   type SaleProblem,
 } from '../services/dayProblems';
 import { buildTruckStockLines } from '../services/truckStock';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -48,6 +49,8 @@ type HomeScreenNavigationProp = NativeStackNavigationProp<HomeStackParamList, 'H
  * recordatorio al cierre, no una validacion.
  */
 export function HomeScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const {
     daySummary,
     summaryLoading,
@@ -335,7 +338,8 @@ export function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   // La separacion ENTRE cards la pone el `gap` de ScreenContainer.
   card: {
     gap: spacing.sm,

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { radii } from '../theme/radii';
 import { spacing, MIN_TOUCH_TARGET } from '../theme/spacing';
 
@@ -27,6 +28,8 @@ export function PasswordInput({
   onSubmitEditing,
   testID,
 }: PasswordInputProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [visible, setVisible] = useState(false);
 
   return (
@@ -64,7 +67,8 @@ export function PasswordInput({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -28,7 +28,8 @@ import { formatJornadaTitle } from '../utils/jornada';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../services/apiClient';
 import { API_URL } from '../services/config';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -49,6 +50,8 @@ type ExpensesScreenNavigationProp = NativeStackNavigationProp<
 >;
 
 export function ExpensesScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { api, username, requireAuthToken } = useAuth();
   const navigation = useNavigation<ExpensesScreenNavigationProp>();
 
@@ -285,7 +288,8 @@ export function ExpensesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   // Bloque "label + control": el label pega con su control; la separacion con
   // el bloque siguiente la pone el `gap` de ScreenContainer.
   field: {

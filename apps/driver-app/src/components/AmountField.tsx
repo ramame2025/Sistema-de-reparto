@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -26,6 +27,8 @@ const groupDigits = (value: number): string =>
  * un importe a los toques sin abrir el teclado.
  */
 export function AmountField({ value, onChange, testID }: AmountFieldProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.wrap}>
       <View style={styles.field}>
@@ -67,7 +70,8 @@ export function AmountField({ value, onChange, testID }: AmountFieldProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   wrap: {
     gap: spacing.sm,
   },

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import type { CustomerRecord, MyAssignedCustomersResponse } from '@distribuidor/shared';
 import { Card } from '../components/Card';
@@ -9,7 +9,8 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionLabel } from '../components/SectionLabel';
 import { useAuth } from '../context/AuthContext';
 import { localDay } from '../context/TruckContext';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -25,6 +26,8 @@ import { typography } from '../theme/typography';
  * switch tabs if they want to sell to someone on it.
  */
 export function AssignedCustomersScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { api } = useAuth();
 
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
@@ -99,7 +102,8 @@ export function AssignedCustomersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   card: {
     gap: spacing.sm,
   },

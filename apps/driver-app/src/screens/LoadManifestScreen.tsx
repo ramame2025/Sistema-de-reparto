@@ -19,7 +19,8 @@ import { useTruck } from '../context/TruckContext';
 import { useCatalog } from '../context/CatalogContext';
 import { ApiError } from '../services/apiClient';
 import { API_URL } from '../services/config';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -39,6 +40,8 @@ const EMPTY_QUANTITIES: Record<ProductCode, number> = {};
  * decision 8) — a failed POST shows an error, it is never enqueued.
  */
 export function LoadManifestScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { api, username, requireAuthToken } = useAuth();
   // El remito no lleva precios, pero si tiene que ofrecer los mismos productos
   // que el catalogo: si el admin da de alta uno nuevo, se tiene que poder
@@ -327,7 +330,8 @@ export function LoadManifestScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   // El espaciado ENTRE cards lo pone el `gap` de ScreenContainer; la card solo
   // define la separacion de su contenido interno.
   card: {

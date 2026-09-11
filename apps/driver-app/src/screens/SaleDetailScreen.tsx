@@ -25,7 +25,8 @@ import { useSync } from '../context/SyncContext';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { ApiError } from '../services/apiClient';
 import { API_URL } from '../services/config';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -67,6 +68,8 @@ const formatDateTime = (iso: string): string => {
  * is already holding.
  */
 export function SaleDetailScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const route = useRoute<RouteProp<HomeStackParamList, 'SaleDetail'>>();
   const navigation = useNavigation<SaleDetailNavigationProp>();
   const { api, username, requireAuthToken } = useAuth();
@@ -422,7 +425,8 @@ export function SaleDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   card: {
     gap: spacing.sm,
   },
