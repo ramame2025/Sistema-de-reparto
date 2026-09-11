@@ -22,6 +22,13 @@ export type DriverMenuProps = {
    * "07:05". Sin catalogo todavia, se omite.
    */
   priceListUpdatedAt?: string;
+  /** Version instalada, para que un reporte de error diga cual. */
+  appVersion?: string;
+  /**
+   * Hora ya formateada de la ultima vez que la app hablo con el servidor.
+   * Se omite mientras no hubo ninguna.
+   */
+  lastSyncAt?: string;
   testID?: string;
 };
 
@@ -45,11 +52,22 @@ export function DriverMenu({
   onPressManifest,
   onPressLogout,
   priceListUpdatedAt,
+  appVersion,
+  lastSyncAt,
   testID,
 }: DriverMenuProps) {
   const truckLine = truckCode
     ? `Camión ${truckCode}${truckPlate ? ` · ${truckPlate}` : ''}`
     : 'Sin camión asignado para hoy';
+
+  // Dos datos de soporte en un renglon: se muestra lo que se sabe, y si no se
+  // sabe ninguno el renglon no existe en vez de mentir un valor.
+  const footnote = [
+    appVersion ? `Versión ${appVersion}` : null,
+    lastSyncAt ? `sincronizado ${lastSyncAt}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <Modal
@@ -124,6 +142,12 @@ export function DriverMenu({
           >
             <Text style={styles.logoutLabel}>Cerrar sesión</Text>
           </Pressable>
+
+          {footnote ? (
+            <Text style={styles.footnote} testID="driver-menu-footnote">
+              {footnote}
+            </Text>
+          ) : null}
         </SafeAreaView>
       </View>
     </Modal>
@@ -225,10 +249,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: MIN_TOUCH_TARGET,
-    margin: spacing.md,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.error,
+  },
+  footnote: {
+    textAlign: 'center',
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
+    paddingBottom: spacing.md,
   },
   logoutLabel: {
     color: colors.error,

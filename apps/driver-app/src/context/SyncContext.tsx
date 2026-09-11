@@ -44,6 +44,12 @@ export type SyncContextValue = {
   todaySales: SaleRecord[];
   summaryLoading: boolean;
   summaryError: string | null;
+  /**
+   * ISO de la ultima vez que la app hablo con el servidor y le creyo la
+   * respuesta. Es lo que el chofer necesita para saber si lo que ve es de
+   * ahora o de hace tres horas sin senal. `null` mientras no hubo ninguna.
+   */
+  lastSyncAt: string | null;
   /** Codigo del camion que el chofer tiene asignado hoy, o '' si no tiene. */
   assignedTruckCode: string;
   trySendSale(payload: CreateSaleInput): Promise<string>;
@@ -81,6 +87,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [todaySales, setTodaySales] = useState<SaleRecord[]>([]);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
 
   const persistPendingSales = useCallback(async (next: PendingSale[]) => {
     setPendingSales(next);
@@ -103,6 +110,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       });
       setTodaySales(todaySales);
       setSummaryError(null);
+      // Se marca aca y no al empezar: lo que se fecha es el dato que llego,
+      // no el intento. Un refresh que fallo deja la marca vieja, que es
+      // justamente el aviso de que se esta mirando algo viejo.
+      setLastSyncAt(new Date().toISOString());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo actualizar el resumen.';
       setSummaryError(message);
@@ -302,6 +313,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       todaySales,
       summaryLoading,
       summaryError,
+      lastSyncAt,
       assignedTruckCode,
       trySendSale,
       enqueueSale,
@@ -317,6 +329,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       todaySales,
       summaryLoading,
       summaryError,
+      lastSyncAt,
       assignedTruckCode,
       trySendSale,
       enqueueSale,

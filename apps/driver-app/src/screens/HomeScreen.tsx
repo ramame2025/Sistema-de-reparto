@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import Constants from 'expo-constants';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MyAssignedCustomersResponse, MyTruckStockResponse } from '@distribuidor/shared';
 import { Card } from '../components/Card';
@@ -54,6 +55,7 @@ export function HomeScreen() {
     refreshDaySummary,
     pendingSales,
     todaySales,
+    lastSyncAt,
   } = useSync();
   const { truck } = useTruck();
   const { prices, products, fetchedAt } = useCatalog();
@@ -315,6 +317,8 @@ export function HomeScreen() {
         truckCode={truck?.code}
         truckPlate={truck?.plate}
         priceListUpdatedAt={fetchedAt ? (formatClock(fetchedAt) ?? undefined) : undefined}
+        appVersion={Constants.expoConfig?.version ?? undefined}
+        lastSyncAt={lastSyncAt ? (formatClock(lastSyncAt) ?? undefined) : undefined}
         onPressManifest={() => {
           // Cerrar primero: el Modal tapa la pantalla entera, y navegar por
           // detras dejaria al chofer mirando el menu sobre la pantalla nueva.

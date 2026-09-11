@@ -535,6 +535,54 @@ describe('SyncContext/4.4 refreshDaySummary chaining + visible summaryError', ()
   });
 });
 
+describe('SyncContext/marca de ultima sincronizacion', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  it('dates the moment the server answered, not the moment the app asked', async () => {
+    globalThis.fetch = makeFetchRouter({ getSales: () => Promise.resolve(emptySalesResponse()) });
+    const result = await renderAuthenticated();
+
+    await waitFor(() => expect(result.current.sync.lastSyncAt).not.toBeNull());
+    expect(Number.isNaN(Date.parse(result.current.sync.lastSyncAt as string))).toBe(false);
+  });
+
+  it('leaves the mark unset while no refresh ever succeeded', async () => {
+    // Sin esto el chofer veria una hora de sincronizacion que nunca ocurrio,
+    // que es justo lo contrario de lo que el renglon existe para avisar.
+    globalThis.fetch = makeFetchRouter({
+      getSales: () =>
+        Promise.resolve({ ok: false, status: 500, text: async () => 'summary down' } as Response),
+    });
+    const result = await renderAuthenticated();
+
+    await waitFor(() => expect(result.current.sync.summaryError).toBe('summary down'));
+    expect(result.current.sync.lastSyncAt).toBeNull();
+  });
+
+  it('keeps the old mark when a later refresh fails, so the driver sees the data is stale', async () => {
+    let shouldFail = false;
+    globalThis.fetch = makeFetchRouter({
+      getSales: () =>
+        shouldFail
+          ? Promise.resolve({ ok: false, status: 500, text: async () => 'summary down' } as Response)
+          : Promise.resolve(emptySalesResponse()),
+    });
+    const result = await renderAuthenticated();
+    await waitFor(() => expect(result.current.sync.lastSyncAt).not.toBeNull());
+    const firstMark = result.current.sync.lastSyncAt;
+
+    shouldFail = true;
+    await act(async () => {
+      await result.current.sync.refreshDaySummary();
+    });
+
+    expect(result.current.sync.summaryError).toBe('summary down');
+    expect(result.current.sync.lastSyncAt).toBe(firstMark);
+  });
+});
+
 describe('SyncContext/10.3 driver-scoped sales endpoint (PR10)', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();

@@ -1,4 +1,4 @@
-import { formatJornada, formatJornadaTitle } from './jornada';
+import { formatClock, formatJornada, formatJornadaTitle } from './jornada';
 
 describe('formatJornada', () => {
   it('names the weekday and the day/month, the way the header reads it', () => {
@@ -30,5 +30,16 @@ describe('formatJornadaTitle', () => {
   it('uses the same calendar as the uppercase header, so both agree on the day', () => {
     const date = new Date(2026, 7, 27, 23, 30);
     expect(formatJornadaTitle(date)).toBe(formatJornada(date).toLowerCase());
+  });
+});
+
+describe('formatClock', () => {
+  it('reads the local hour of an instant, zero-padded', () => {
+    expect(formatClock(new Date(2026, 7, 28, 7, 5).toISOString())).toBe('07:05');
+  });
+
+  it('returns null on something that is not a date, so the caller decides what to show', () => {
+    // Mejor que el renglon no exista a que diga "sincronizado NaN:NaN".
+    expect(formatClock('no soy una fecha')).toBeNull();
   });
 });
