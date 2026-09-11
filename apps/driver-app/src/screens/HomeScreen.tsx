@@ -6,6 +6,7 @@ import type { MyAssignedCustomersResponse, MyTruckStockResponse } from '@distrib
 import { Card } from '../components/Card';
 import { CardHeader } from '../components/CardHeader';
 import { DayStatusCard } from '../components/DayStatusCard';
+import { DriverMenu } from '../components/DriverMenu';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { JornadaHeader } from '../components/JornadaHeader';
 import { LoadingRow } from '../components/LoadingRow';
@@ -30,7 +31,7 @@ import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
-import { formatJornada } from '../utils/jornada';
+import { formatClock, formatJornada } from '../utils/jornada';
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<HomeStackParamList, 'Home'>;
 
@@ -55,7 +56,7 @@ export function HomeScreen() {
     todaySales,
   } = useSync();
   const { truck } = useTruck();
-  const { prices, products } = useCatalog();
+  const { prices, products, fetchedAt } = useCatalog();
   const { api, username, logout } = useAuth();
   const navigation = useNavigation<HomeScreenNavigationProp>();
 
@@ -65,6 +66,8 @@ export function HomeScreen() {
   // SEPARATE AsyncStorage key that `logout()` does NOT touch, so queued sales
   // survive a logout — but they will not sync again until the driver signs
   // back in on this phone, which is worth warning about before a stray tap.
+  const [menuOpen, setMenuOpen] = useState(false);
+
   const handleLogout = useCallback(() => {
     const pendingCount = pendingSales.length;
     const message =
@@ -207,6 +210,7 @@ export function HomeScreen() {
           truckCode={truck?.code}
           truckPlate={truck?.plate}
           truckKind={truck?.kind}
+          onPressMenu={() => setMenuOpen(true)}
         />
       }
     >
@@ -303,19 +307,22 @@ export function HomeScreen() {
         </Card>
       )}
 
-      <View style={styles.session}>
-        <Text style={styles.sessionLine} testID="home-session-user">
-          Sesión de {username}
-        </Text>
-        <Text
-          accessibilityRole="button"
-          onPress={handleLogout}
-          style={styles.logout}
-          testID="home-logout-button"
-        >
-          Cerrar sesión
-        </Text>
-      </View>
+      <DriverMenu
+        testID="home-driver-menu"
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        driverName={username}
+        truckCode={truck?.code}
+        truckPlate={truck?.plate}
+        priceListUpdatedAt={fetchedAt ? (formatClock(fetchedAt) ?? undefined) : undefined}
+        onPressManifest={() => {
+          // Cerrar primero: el Modal tapa la pantalla entera, y navegar por
+          // detras dejaria al chofer mirando el menu sobre la pantalla nueva.
+          setMenuOpen(false);
+          navigation.navigate('LoadManifest');
+        }}
+        onPressLogout={handleLogout}
+      />
     </ScreenContainer>
   );
 }
@@ -337,23 +344,5 @@ const styles = StyleSheet.create({
   clientsCount: {
     fontSize: typography.sizes.xs,
     color: colors.textSecondary,
-  },
-  // La zona de cuenta/sesion se separa a proposito mas que el resto: cierra la
-  // pantalla y no compite con el contenido del dia.
-  session: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.md,
-  },
-  sessionLine: {
-    fontSize: typography.sizes.xs,
-    color: colors.textSecondary,
-  },
-  logout: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.bold,
-    color: colors.secondary,
-    paddingVertical: spacing.sm,
   },
 });
