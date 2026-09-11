@@ -547,14 +547,15 @@ export function NewSaleScreen() {
           disabled={footerAction.disabled}
         />
       }
+      header={
+        <SaleHeader
+          testID="new-sale-header"
+          saleNumber={daySummary.activeCount + 1}
+          truckCode={truck?.code}
+          queuedCount={pendingSales.length}
+        />
+      }
     >
-      <SaleHeader
-        testID="new-sale-header"
-        saleNumber={daySummary.activeCount + 1}
-        truckCode={truck?.code}
-        queuedCount={pendingSales.length}
-      />
-
       {!truck && truckStatus === 'error' && (
         <FeedbackBanner
           testID="new-sale-truck-error"

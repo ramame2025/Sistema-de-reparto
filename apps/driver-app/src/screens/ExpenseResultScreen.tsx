@@ -88,14 +88,20 @@ export function ExpenseResultScreen() {
   ].join(' · ');
 
   return (
-    <ScreenContainer testID="expense-result-screen" scroll onRefresh={() => void load()} refreshing={loading}>
-      <ExpenseHeader
-        testID="expense-result-header"
-        eyebrow={`GASTOS · ${formatJornada(new Date())}`}
-        amount={summary.todayTotal}
-        subtitle={countLine}
-      />
-
+    <ScreenContainer
+      testID="expense-result-screen"
+      scroll
+      onRefresh={() => void load()}
+      refreshing={loading}
+      header={
+        <ExpenseHeader
+          testID="expense-result-header"
+          eyebrow={`GASTOS · ${formatJornada(new Date())}`}
+          amount={summary.todayTotal}
+          subtitle={countLine}
+        />
+      }
+    >
       <View style={styles.savedCard} testID="expense-result-saved">
         <View style={styles.savedBadge}>
           <Ionicons name="checkmark" size={18} color={colors.surface} />
