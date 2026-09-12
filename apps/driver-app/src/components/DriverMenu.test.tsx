@@ -188,4 +188,28 @@ describe('DriverMenu', () => {
       await waitFor(() => expect(screen.queryByTestId('driver-menu-panel')).toBeNull());
     });
   });
+
+  describe('remito de carga', () => {
+    it('says at a glance whether today is already loaded', async () => {
+      await render(<DriverMenu {...baseProps} manifestLoadedAt="07:10" />);
+
+      expect(screen.getByText('Cargado 07:10')).toBeTruthy();
+    });
+
+    it('says the day is still unloaded rather than staying silent about it', async () => {
+      await render(<DriverMenu {...baseProps} />);
+
+      expect(screen.getByText('Sin cargar hoy')).toBeTruthy();
+    });
+
+    it('stays pressable once loaded, because a midday reload is normal', async () => {
+      // El stock del dia SUMA los remitos: bloquear el segundo romperia al
+      // chofer que vuelve al deposito a recargar.
+      await render(<DriverMenu {...baseProps} manifestLoadedAt="07:10" />);
+
+      await fireEvent.press(screen.getByTestId('driver-menu-manifest'));
+
+      expect(baseProps.onPressManifest).toHaveBeenCalledTimes(1);
+    });
+  });
 });

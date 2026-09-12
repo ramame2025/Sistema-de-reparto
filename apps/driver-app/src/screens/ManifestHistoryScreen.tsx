@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { LoadManifestRecord } from '@distribuidor/shared';
+import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { LoadingRow } from '../components/LoadingRow';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { ScreenHeading } from '../components/ScreenHeading';
 import { useAuth } from '../context/AuthContext';
+import type { HomeStackParamList } from '../navigation/HomeStack';
 import { useColors } from '../theme/ThemeContext';
 import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
@@ -37,6 +41,8 @@ export function ManifestHistoryScreen() {
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { api } = useAuth();
+  const navigation =
+    useNavigation<NativeStackNavigationProp<HomeStackParamList, 'ManifestHistory'>>();
 
   const [manifests, setManifests] = useState<LoadManifestRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,6 +86,19 @@ export function ManifestHistoryScreen() {
     <ScreenContainer testID="manifest-history-screen">
       <View style={styles.wrap}>
         <ScreenHeading title="Historial de remitos" />
+
+        {/*
+          Un dia puede llevar mas de un remito: el chofer que vuelve al deposito
+          al mediodia recarga, y el stock del dia los suma. Sin esta salida, el
+          menu de Inicio lo dejaba mirando lo que ya cargo sin forma de sumar lo
+          nuevo.
+        */}
+        <Button
+          label="Cargar otro remito"
+          variant="secondary"
+          onPress={() => navigation.navigate('LoadManifest')}
+          testID="manifest-history-load-cta"
+        />
 
         {error ? (
           <FeedbackBanner message={error} tone="error" />

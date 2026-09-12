@@ -116,6 +116,9 @@ export function HomeScreen() {
     }
   }, [api]);
 
+  /** Ultimo remito de hoy, o null. Ya viene con el stock: no se vuelve a pedir. */
+  const manifestAt = truckStock?.stock?.manifestAt ?? null;
+
   const [assignedCustomerIds, setAssignedCustomerIds] = useState<string[]>([]);
   const [assignedCustomersError, setAssignedCustomersError] = useState<string | null>(null);
 
@@ -277,7 +280,7 @@ export function HomeScreen() {
       ) : (
         <TruckStockCard
           lines={truckStockLines}
-          manifestAt={truckStock?.stock?.manifestAt ?? null}
+          manifestAt={manifestAt}
           onLoadManifest={() => navigation.navigate('LoadManifest')}
           onPress={() => navigation.navigate('ManifestHistory')}
           testID="home-truck-stock"
@@ -322,11 +325,14 @@ export function HomeScreen() {
         priceListUpdatedAt={fetchedAt ? (formatClock(fetchedAt) ?? undefined) : undefined}
         appVersion={Constants.expoConfig?.version ?? undefined}
         lastSyncAt={lastSyncAt ? (formatClock(lastSyncAt) ?? undefined) : undefined}
+        manifestLoadedAt={manifestAt ? (formatClock(manifestAt) ?? undefined) : undefined}
         onPressManifest={() => {
           // Cerrar primero: el Modal tapa la pantalla entera, y navegar por
           // detras dejaria al chofer mirando el menu sobre la pantalla nueva.
           setMenuOpen(false);
-          navigation.navigate('LoadManifest');
+          // Con remito cargado la pregunta es "que cargue", no "que cargo":
+          // abrir el formulario en blanco escondia lo que ya estaba hecho.
+          navigation.navigate(manifestAt ? 'ManifestHistory' : 'LoadManifest');
         }}
         onPressPriceList={() => {
           setMenuOpen(false);

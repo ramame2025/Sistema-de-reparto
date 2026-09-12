@@ -2,6 +2,13 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
+const mockedNavigate = jest.fn();
+
+jest.mock('@react-navigation/native', () => ({
+  ...jest.requireActual('@react-navigation/native'),
+  useNavigation: () => ({ navigate: mockedNavigate }),
+}));
+
 jest.mock('../context/AuthContext', () => {
   const actual = jest.requireActual('../context/AuthContext');
   return {
@@ -11,7 +18,7 @@ jest.mock('../context/AuthContext', () => {
 });
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { LoadManifestRecord } from '@distribuidor/shared';
 import { ManifestHistoryScreen } from './ManifestHistoryScreen';
 import { useAuth } from '../context/AuthContext';
@@ -134,5 +141,21 @@ describe('ManifestHistoryScreen/error', () => {
       expect(screen.getByText('No se pudo conectar con el servidor.')).toBeTruthy(),
     );
     expect(screen.queryByText('Todavía no cargaste ningún remito')).toBeNull();
+  });
+});
+
+describe('ManifestHistoryScreen/recarga', () => {
+  it('offers a way to add another manifest, since a day can carry more than one', async () => {
+    // El stock del dia SUMA los remitos. Sin esta salida, el chofer que llega
+    // desde el menu de Inicio con un remito ya cargado queda mirando la lista
+    // sin forma de registrar la recarga del mediodia.
+    mockedApiGet = jest.fn().mockResolvedValue([]);
+    mockedUseAuth.mockReturnValue({ api: { get: mockedApiGet } });
+
+    await render(<ManifestHistoryScreen />);
+
+    await fireEvent.press(screen.getByTestId('manifest-history-load-cta'));
+
+    expect(mockedNavigate).toHaveBeenCalledWith('LoadManifest');
   });
 });
