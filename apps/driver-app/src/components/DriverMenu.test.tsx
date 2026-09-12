@@ -1,5 +1,6 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { DriverMenu } from './DriverMenu';
 
 const baseProps = {
@@ -110,5 +111,44 @@ describe('DriverMenu', () => {
     await render(<DriverMenu {...baseProps} />);
 
     expect(screen.queryByTestId('driver-menu-footnote')).toBeNull();
+  });
+
+  describe('panel lateral', () => {
+    it('leaves the day behind it visible instead of taking the whole screen', async () => {
+      await render(<DriverMenu {...baseProps} />);
+
+      const panel = StyleSheet.flatten(screen.getByTestId('driver-menu-panel').props.style);
+
+      expect(panel.width).toBe('70%');
+    });
+
+    it('closes when the driver taps outside it', async () => {
+      // Con una sola mano, acertarle a la zona de afuera es mucho mas facil
+      // que apuntar a la X de la esquina.
+      await render(<DriverMenu {...baseProps} />);
+
+      await fireEvent.press(screen.getByTestId('driver-menu-backdrop'));
+
+      expect(baseProps.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not mount the panel until it is opened', async () => {
+      await render(<DriverMenu {...baseProps} visible={false} />);
+
+      expect(screen.queryByTestId('driver-menu-panel')).toBeNull();
+    });
+
+    it('stays mounted while it slides out, then goes away on its own', async () => {
+      // El riesgo del panel animado: si el desmontaje no ocurriera, el menu
+      // quedaria tapando la pantalla para siempre con el Modal invisible.
+      const { rerender } = await render(<DriverMenu {...baseProps} />);
+      expect(screen.getByTestId('driver-menu-panel')).toBeTruthy();
+
+      await act(async () => {
+        rerender(<DriverMenu {...baseProps} visible={false} />);
+      });
+
+      await waitFor(() => expect(screen.queryByTestId('driver-menu-panel')).toBeNull());
+    });
   });
 });

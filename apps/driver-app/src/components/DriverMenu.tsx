@@ -1,5 +1,14 @@
-import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MenuRow } from './MenuRow';
@@ -8,6 +17,17 @@ import { colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { radii } from '../theme/radii';
 import { typography } from '../theme/typography';
+
+/**
+ * Cuanto del ancho del telefono ocupa el panel. El resto queda a la vista a
+ * proposito: el chofer no pierde de vista la jornada que hay detras, y tiene
+ * una zona grande para cerrar sin apuntar a un boton chico.
+ */
+const PANEL_RATIO = 0.7;
+
+const OPEN_MS = 220;
+/** Cerrar va mas rapido que abrir: ya se sabe a donde se vuelve. */
+const CLOSE_MS = 180;
 
 export type DriverMenuProps = {
   visible: boolean;
@@ -40,9 +60,10 @@ export type DriverMenuProps = {
  * accesos que no merecen una card en la portada, y el cierre de sesion, que
  * hasta ahora vivia al fondo del scroll de Inicio donde nadie lo encontraba.
  *
- * Va como Modal a pantalla completa y no como panel lateral: en un celular
- * sostenido con una mano, media pantalla de menu y media de fondo es peor de
- * leer que una pantalla entera.
+ * Entra como panel desde la derecha y tapa el 70% del ancho, no la pantalla
+ * entera: el pulgar de la mano que sostiene el telefono llega a todo, y lo que
+ * queda del Inicio detras recuerda de donde se vino y da una zona grande para
+ * cerrar sin apuntar.
  */
 export function DriverMenu({
   visible,
@@ -58,6 +79,37 @@ export function DriverMenu({
   lastSyncAt,
   testID,
 }: DriverMenuProps) {
+  const { width } = useWindowDimensions();
+  const panelWidth = width * PANEL_RATIO;
+
+  // El Modal sobrevive al cierre hasta que el panel termina de salir: si
+  // siguiera el `visible` del padre al pie de la letra, desapareceria de golpe
+  // y la animacion no se veria nunca.
+  const [mounted, setMounted] = useState(visible);
+  const slide = useRef(new Animated.Value(panelWidth)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      Animated.timing(slide, {
+        toValue: 0,
+        duration: OPEN_MS,
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+
+    Animated.timing(slide, {
+      toValue: panelWidth,
+      duration: CLOSE_MS,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setMounted(false);
+      }
+    });
+  }, [visible, panelWidth, slide]);
+
   const truckLine = truckCode
     ? `Camión ${truckCode}${truckPlate ? ` · ${truckPlate}` : ''}`
     : 'Sin camión asignado para hoy';
@@ -73,13 +125,38 @@ export function DriverMenu({
 
   return (
     <Modal
-      visible={visible}
-      animationType="slide"
+      visible={mounted}
+      transparent
+      // La animacion la maneja el panel, no el Modal: el "slide" nativo entra
+      // desde abajo y lo que se quiere es de derecha a izquierda.
+      animationType="none"
       onRequestClose={onClose}
       testID={testID}
     >
-      <View style={styles.screen}>
-        <SafeAreaView edges={['top']} style={styles.header}>
+      <View style={styles.overlay}>
+        <Animated.View
+          style={[
+            styles.backdrop,
+            { opacity: slide.interpolate({
+                inputRange: [0, panelWidth || 1],
+                outputRange: [1, 0],
+              }) },
+          ]}
+        >
+          {/* Tocar afuera cierra: es el gesto que el chofer ya espera, y es
+              mucho mas facil de acertar que la X con una sola mano. */}
+          <Pressable
+            style={styles.backdropPress}
+            onPress={onClose}
+            testID="driver-menu-backdrop"
+          />
+        </Animated.View>
+
+        <Animated.View
+          testID="driver-menu-panel"
+          style={[styles.panel, { transform: [{ translateX: slide }] }]}
+        >
+        <SafeAreaView edges={['top', 'right']} style={styles.header}>
           <View style={styles.headerRow}>
             <View style={styles.headerText}>
               <Text style={styles.driver}>{driverName}</Text>
@@ -136,7 +213,7 @@ export function DriverMenu({
           <MenuRow title="Ayuda" disabled testID="driver-menu-help" />
         </ScrollView>
 
-        <SafeAreaView edges={['bottom']} style={styles.footer}>
+        <SafeAreaView edges={['bottom', 'right']} style={styles.footer}>
           <Pressable
             accessibilityRole="button"
             onPress={onPressLogout}
@@ -152,15 +229,35 @@ export function DriverMenu({
             </Text>
           ) : null}
         </SafeAreaView>
+        </Animated.View>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
+  overlay: {
     flex: 1,
+    flexDirection: 'row',
+  },
+  // Se come el ancho que el panel no usa, y oscurece lo que quedo detras.
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+  },
+  backdropPress: {
+    flex: 1,
+  },
+  panel: {
+    width: `${PANEL_RATIO * 100}%`,
     backgroundColor: colors.surface,
+    // La sombra cae hacia la izquierda: el panel se lee como una hoja apoyada
+    // sobre la pantalla, no como otra pantalla.
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: -2, height: 0 },
+    elevation: 16,
   },
   header: {
     backgroundColor: colors.primary,
