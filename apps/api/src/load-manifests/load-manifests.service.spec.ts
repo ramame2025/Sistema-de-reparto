@@ -31,7 +31,7 @@ function buildCreateInput(overrides: Partial<CreateLoadManifestInput> = {}): Cre
 describe('LoadManifestsService', () => {
   let service: LoadManifestsService;
   let prisma: {
-    loadManifest: { create: jest.Mock; findMany: jest.Mock };
+    loadManifest: { create: jest.Mock; findMany: jest.Mock; findFirst: jest.Mock };
     loadManifestItem: { findMany: jest.Mock };
     saleItem: { findMany: jest.Mock };
     product: { findMany: jest.Mock };
@@ -43,7 +43,7 @@ describe('LoadManifestsService', () => {
   beforeEach(async () => {
     productsService = { assertProductCodesExist: jest.fn().mockResolvedValue(undefined) };
     prisma = {
-      loadManifest: { create: jest.fn(), findMany: jest.fn() },
+      loadManifest: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() },
       loadManifestItem: { findMany: jest.fn() },
       saleItem: { findMany: jest.fn() },
       // El catalogo del stock sale de la base, no de PRODUCT_CODES.
@@ -379,6 +379,96 @@ describe('LoadManifestsService', () => {
       };
       const lateEveningSaleUtc = new Date('2026-02-01T01:00:00.000Z');
       expect(lateEveningSaleUtc.getTime()).toBeLessThan(callArgs.where.sale.createdAt.lt.getTime());
+    });
+  });
+  describe('getTruckStockForDay', () => {
+    beforeEach(() => {
+      prisma.loadManifestItem.findMany.mockResolvedValue([]);
+      prisma.saleItem.findMany.mockResolvedValue([]);
+      prisma.loadManifest.findFirst.mockResolvedValue(null);
+    });
+
+    it('computes loaded, sold, and remaining per product for that single day', async () => {
+      prisma.loadManifestItem.findMany.mockResolvedValue([
+        { productCode: 'G10', quantity: 30 },
+        { productCode: 'G15', quantity: 25 },
+      ]);
+      prisma.saleItem.findMany.mockResolvedValue([
+        { productCode: 'G10', quantity: 18 },
+        { productCode: 'G15', quantity: 16 },
+      ]);
+
+      const result = await service.getTruckStockForDay('truck-1', '2026-01-31');
+
+      expect(result.truckId).toBe('truck-1');
+      expect(result.date).toBe('2026-01-31');
+      expect(result.lines).toEqual(
+        expect.arrayContaining([
+          { productCode: 'G10', loaded: 30, sold: 18, remaining: 12 },
+          { productCode: 'G15', loaded: 25, sold: 16, remaining: 9 },
+          { productCode: 'G45', loaded: 0, sold: 0, remaining: 0 },
+          { productCode: 'G15_AUTO', loaded: 0, sold: 0, remaining: 0 },
+        ]),
+      );
+    });
+
+    it('bounds both queries to the business day, so yesterday never leaks into today', async () => {
+      await service.getTruckStockForDay('truck-1', '2026-01-31');
+
+      const dayWindow = {
+        gte: new Date('2026-01-31T03:00:00.000Z'),
+        lt: new Date('2026-02-01T03:00:00.000Z'),
+      };
+
+      expect(prisma.loadManifestItem.findMany).toHaveBeenCalledWith({
+        where: { manifest: { truckId: 'truck-1', createdAt: dayWindow } },
+      });
+      expect(prisma.saleItem.findMany).toHaveBeenCalledWith({
+        where: { sale: { truckId: 'truck-1', status: 'active', createdAt: dayWindow } },
+      });
+    });
+
+    it('reports the LAST manifest of the day as manifestAt', async () => {
+      prisma.loadManifest.findFirst.mockResolvedValue({
+        createdAt: new Date('2026-01-31T10:10:00.000Z'),
+      });
+
+      const result = await service.getTruckStockForDay('truck-1', '2026-01-31');
+
+      expect(result.manifestAt).toBe('2026-01-31T10:10:00.000Z');
+      expect(prisma.loadManifest.findFirst).toHaveBeenCalledWith({
+        where: {
+          truckId: 'truck-1',
+          createdAt: {
+            gte: new Date('2026-01-31T03:00:00.000Z'),
+            lt: new Date('2026-02-01T03:00:00.000Z'),
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+    });
+
+    it('returns manifestAt null and zeroed lines when nothing was loaded today', async () => {
+      const result = await service.getTruckStockForDay('truck-1', '2026-01-31');
+
+      expect(result.manifestAt).toBeNull();
+      expect(result.lines).toHaveLength(4);
+      expect(result.lines.every((line) => line.loaded === 0)).toBe(true);
+    });
+
+    it('does not clamp remaining when a sale exceeds what was loaded today', async () => {
+      prisma.loadManifestItem.findMany.mockResolvedValue([{ productCode: 'G10', quantity: 5 }]);
+      prisma.saleItem.findMany.mockResolvedValue([{ productCode: 'G10', quantity: 8 }]);
+
+      const result = await service.getTruckStockForDay('truck-1', '2026-01-31');
+
+      expect(result.lines.find((line) => line.productCode === 'G10')).toEqual({
+        productCode: 'G10',
+        loaded: 5,
+        sold: 8,
+        remaining: -3,
+      });
     });
   });
 });

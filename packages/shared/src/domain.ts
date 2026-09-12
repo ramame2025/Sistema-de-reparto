@@ -290,6 +290,34 @@ export type TruckStockSummary = {
   lines: TruckStockLine[];
 };
 
+/**
+ * Stock de UN dia, no acumulado: lo que entro en el remito de `date` menos lo
+ * vendido ese mismo dia. Es una pregunta distinta de la que contesta
+ * `TruckStockSummary`, que arrastra el saldo historico del camion: el chofer
+ * mira su remito de hoy, no el balance de vida del camion.
+ *
+ * `manifestAt` es el instante del ULTIMO remito del dia (un dia puede tener
+ * mas de uno). `null` significa "hoy todavia no se cargo nada", y entonces las
+ * lineas valen cero pero siguen viajando: sin ellas el cliente no sabe que
+ * productos existen.
+ */
+export type TruckDayStock = {
+  truckId: string;
+  date: string;
+  manifestAt: string | null;
+  lines: TruckStockLine[];
+};
+
+/**
+ * Igual que `MyTruckResponse` en driver-truck-assignments: el sobre nunca es
+ * `null` pelado, asi el cliente distingue "hoy no manejas" (`stock: null`) de
+ * una respuesta rota, y sabe para que dia se resolvio.
+ */
+export type MyTruckStockResponse = {
+  date: string;
+  stock: TruckDayStock | null;
+};
+
 export type LoginInput = {
   username: string;
   password: string;
