@@ -32,3 +32,21 @@ export function formatJornada(date: Date): string {
 export function formatJornadaTitle(date: Date): string {
   return formatJornada(date).toLowerCase();
 }
+
+/**
+ * Hora local en formato "07:05", para los renglones que fechan un dato del
+ * dia: cuando se trajo la lista de precios, cuando fue la ultima
+ * sincronizacion. Devuelve null si el ISO no es una fecha valida, para que
+ * quien lo llame decida que mostrar en su lugar.
+ */
+export function formatClock(iso: string): string | null {
+  const date = new Date(iso);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const pad = (value: number): string => String(value).padStart(2, '0');
+
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}

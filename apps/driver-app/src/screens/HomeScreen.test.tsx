@@ -37,7 +37,7 @@ jest.mock('@react-navigation/native', () => {
 
 import React from 'react';
 import { Alert } from 'react-native';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react-native';
 import type { MyTruckStockResponse, PriceTable, SaleRecord } from '@distribuidor/shared';
 import { HomeScreen } from './HomeScreen';
 import { useAuth } from '../context/AuthContext';
@@ -553,22 +553,35 @@ describe('HomeScreen/clientes de hoy', () => {
 });
 
 describe('HomeScreen/logout', () => {
+  /**
+   * Cerrar sesion dejo de vivir al pie del scroll de Inicio: ahora esta en el
+   * menu del chofer, detras del boton de la barra.
+   */
+  const openMenu = async () => {
+    await fireEvent.press(screen.getByTestId('jornada-header-menu'));
+  };
+
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('shows a logout control tied to the current username', async () => {
+  it('keeps logout reachable, behind the menu button on the bar', async () => {
     await render(<HomeScreen />);
 
-    expect(screen.getByText('Sesión de chofer1')).toBeTruthy();
-    expect(screen.getByTestId('home-logout-button')).toBeTruthy();
+    expect(screen.queryByTestId('driver-menu-logout')).toBeNull();
+
+    await openMenu();
+
+    expect(screen.getByTestId('driver-menu-logout')).toBeTruthy();
+    expect(within(screen.getByTestId('home-driver-menu')).getByText('chofer1')).toBeTruthy();
   });
 
   it('asks for confirmation and only calls logout() once the driver confirms', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
     await render(<HomeScreen />);
-    await fireEvent.press(screen.getByTestId('home-logout-button'));
+    await openMenu();
+    await fireEvent.press(screen.getByTestId('driver-menu-logout'));
 
     const [, , buttons] = alertSpy.mock.calls[0];
     expect(mockedLogout).not.toHaveBeenCalled();
@@ -584,7 +597,8 @@ describe('HomeScreen/logout', () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
     await render(<HomeScreen />);
-    await fireEvent.press(screen.getByTestId('home-logout-button'));
+    await openMenu();
+    await fireEvent.press(screen.getByTestId('driver-menu-logout'));
 
     const [, , buttons] = alertSpy.mock.calls[0];
     (buttons as { text: string; onPress?: () => void }[])
@@ -599,7 +613,8 @@ describe('HomeScreen/logout', () => {
     syncWith({ pendingSales: [{ queueId: 'q1' }, { queueId: 'q2' }] });
 
     await render(<HomeScreen />);
-    await fireEvent.press(screen.getByTestId('home-logout-button'));
+    await openMenu();
+    await fireEvent.press(screen.getByTestId('driver-menu-logout'));
 
     expect(String(alertSpy.mock.calls[0][1])).toContain('2 ventas sin sincronizar');
   });
@@ -608,7 +623,8 @@ describe('HomeScreen/logout', () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
     await render(<HomeScreen />);
-    await fireEvent.press(screen.getByTestId('home-logout-button'));
+    await openMenu();
+    await fireEvent.press(screen.getByTestId('driver-menu-logout'));
 
     expect(String(alertSpy.mock.calls[0][1])).not.toContain('sin sincronizar');
   });

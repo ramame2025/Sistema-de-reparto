@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
 import { JornadaHeader } from './JornadaHeader';
 
 describe('JornadaHeader', () => {
@@ -68,5 +68,24 @@ describe('JornadaHeader', () => {
     );
 
     expect(screen.getByText('AB123CD')).toBeTruthy();
+  });
+
+  describe('menu button', () => {
+    it('opens the menu from the bar', async () => {
+      const onPressMenu = jest.fn();
+      await render(
+        <JornadaHeader jornada="JUEVES 28/08" driverName="chofer1" onPressMenu={onPressMenu} />
+      );
+
+      await fireEvent.press(screen.getByTestId('jornada-header-menu'));
+
+      expect(onPressMenu).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows no button on a bar that has no menu behind it', async () => {
+      await render(<JornadaHeader jornada="JUEVES 28/08" driverName="chofer1" />);
+
+      expect(screen.queryByTestId('jornada-header-menu')).toBeNull();
+    });
   });
 });
