@@ -82,4 +82,24 @@ describe('DriverMenu', () => {
 
     expect(screen.queryByTestId('driver-menu-logout')).toBeNull();
   });
+
+  it('names the installed version and when the app last reached the server', async () => {
+    await render(<DriverMenu {...baseProps} appVersion="1.4.2" lastSyncAt="9:38" />);
+
+    expect(screen.getByTestId('driver-menu-footnote').props.children).toBe(
+      'Versión 1.4.2 · sincronizado 9:38'
+    );
+  });
+
+  it('shows the half it knows rather than inventing the other', async () => {
+    await render(<DriverMenu {...baseProps} appVersion="1.4.2" />);
+
+    expect(screen.getByTestId('driver-menu-footnote').props.children).toBe('Versión 1.4.2');
+  });
+
+  it('drops the support line entirely when it knows neither', async () => {
+    await render(<DriverMenu {...baseProps} />);
+
+    expect(screen.queryByTestId('driver-menu-footnote')).toBeNull();
+  });
 });
