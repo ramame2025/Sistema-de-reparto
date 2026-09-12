@@ -35,7 +35,8 @@ import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { ApiError } from '../services/apiClient';
 import { API_URL } from '../services/config';
 import { captureDeviceLocation } from '../services/location';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { radii } from '../theme/radii';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
@@ -86,6 +87,8 @@ const buildClientGeneratedId = () =>
  * endpoint distinto que siempre fue.
  */
 export function NewSaleScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const {
     trySendSale,
     enqueueSale,
@@ -674,7 +677,8 @@ export function NewSaleScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   products: {
     gap: spacing.sm,
   },

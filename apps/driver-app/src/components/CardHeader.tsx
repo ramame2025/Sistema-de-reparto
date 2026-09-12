@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -27,6 +28,8 @@ export type CardHeaderProps = {
  * para decir, nunca el tamaño de su titulo.
  */
 export function CardHeader({ title, subtitle, trailing, testID }: CardHeaderProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.header} testID={testID}>
       <View style={styles.text}>
@@ -44,7 +47,8 @@ export function CardHeader({ title, subtitle, trailing, testID }: CardHeaderProp
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',

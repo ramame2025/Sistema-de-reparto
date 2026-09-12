@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { PaymentMethod } from '@distribuidor/shared';
 import { Button } from './Button';
 import type { SaleProblem } from '../services/dayProblems';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -49,6 +50,8 @@ export function DayStatusCard({
   onResolve,
   testID,
 }: DayStatusCardProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const hasProblems = problems.length > 0;
 
   if (!hasProblems) {
@@ -56,7 +59,7 @@ export function DayStatusCard({
       <View style={[styles.card, styles.cardOk]} testID={testID}>
         <View style={styles.headline}>
           <View style={[styles.badge, styles.badgeOk]}>
-            <Ionicons name="checkmark" size={18} color={colors.surface} />
+            <Ionicons name="checkmark" size={18} color={colors.onPrimary} />
           </View>
           <View style={styles.headlineText}>
             <Text style={styles.title}>Todo en orden</Text>
@@ -73,7 +76,7 @@ export function DayStatusCard({
     <View style={[styles.card, styles.cardProblem]} testID={testID}>
       <View style={styles.headline}>
         <View style={[styles.badge, styles.badgeProblem]}>
-          <Ionicons name="alert" size={18} color={colors.surface} />
+          <Ionicons name="alert" size={18} color={colors.onPrimary} />
         </View>
         <View style={styles.headlineText}>
           <Text style={styles.title}>
@@ -112,7 +115,8 @@ export function DayStatusCard({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.border,

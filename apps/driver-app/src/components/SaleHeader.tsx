@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -22,6 +23,8 @@ export type SaleHeaderProps = {
  * queue) — this component only shows them.
  */
 export function SaleHeader({ saleNumber, truckCode, queuedCount, testID }: SaleHeaderProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const title = truckCode ? `VENTA ${saleNumber} · ${truckCode}` : `VENTA ${saleNumber}`;
 
   return (
@@ -30,7 +33,7 @@ export function SaleHeader({ saleNumber, truckCode, queuedCount, testID }: SaleH
 
       {queuedCount > 0 && (
         <View testID="sale-header-queued" style={styles.queued}>
-          <Ionicons name="cloud-upload-outline" size={14} color={colors.surface} />
+          <Ionicons name="cloud-upload-outline" size={14} color={colors.onPrimary} />
           <Text style={styles.queuedLabel}>{queuedCount} EN COLA</Text>
         </View>
       )}
@@ -38,7 +41,8 @@ export function SaleHeader({ saleNumber, truckCode, queuedCount, testID }: SaleH
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -48,7 +52,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   title: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.xs,
     fontWeight: typography.weights.bold,
     letterSpacing: 0.7,
@@ -59,7 +63,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   queuedLabel: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.xs,
     fontWeight: typography.weights.semibold,
     letterSpacing: 0.5,

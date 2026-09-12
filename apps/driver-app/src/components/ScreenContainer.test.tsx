@@ -1,9 +1,15 @@
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
+
 import React from 'react';
-import { render, screen, within } from '@testing-library/react-native';
+import { act, render, screen, waitFor, within } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StyleSheet, Text } from 'react-native';
 import { ScreenContainer } from './ScreenContainer';
 import { ScreenScrollContext } from './KeyboardAwareField';
-import { colors } from '../theme/colors';
+import { colors, darkColors } from '../theme/colors';
+import { ThemeProvider } from '../theme/ThemeProvider';
 
 describe('ScreenContainer', () => {
   it('renders its children', async () => {
@@ -195,5 +201,39 @@ describe('ScreenContainer', () => {
 
       expect(screen.queryByTestId('screen-header')).toBeNull();
     });
+  });
+
+  it('repaints the screen when the driver switches to the dark theme', async () => {
+    // La prueba de que el refactor de tema llega hasta el fondo de pantalla y
+    // no se queda en los componentes que se miraron a mano.
+    await render(
+      <ThemeProvider>
+        <ScreenContainer testID="screen">
+          <Text>Contenido</Text>
+        </ScreenContainer>
+      </ThemeProvider>
+    );
+
+    expect(StyleSheet.flatten(screen.getByTestId('screen').props.style).backgroundColor).toBe(
+      colors.background
+    );
+
+    await act(async () => {
+      await AsyncStorage.setItem('@distribuidor/color-scheme', 'dark');
+    });
+
+    await render(
+      <ThemeProvider>
+        <ScreenContainer testID="screen-dark">
+          <Text>Contenido</Text>
+        </ScreenContainer>
+      </ThemeProvider>
+    );
+
+    await waitFor(() =>
+      expect(
+        StyleSheet.flatten(screen.getByTestId('screen-dark').props.style).backgroundColor
+      ).toBe(darkColors.background)
+    );
   });
 });

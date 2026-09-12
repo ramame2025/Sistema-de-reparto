@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { ProductCode } from '@distribuidor/shared';
 import { Button } from './Button';
 import { CardHeader } from './CardHeader';
 import { ProgressBar, type ProgressBarTone } from './ProgressBar';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -62,14 +63,17 @@ const toneOf = (remaining: number): ProgressBarTone => {
   return remaining <= LOW_STOCK_THRESHOLD ? 'warning' : 'primary';
 };
 
-const TONE_COLORS: Record<ProgressBarTone, string> = {
-  success: colors.success,
-  primary: colors.primary,
-  warning: colors.warning,
-  error: colors.error,
-};
+const toneColor = (colors: Colors, tone: ProgressBarTone): string =>
+  ({
+    success: colors.success,
+    primary: colors.primary,
+    warning: colors.warning,
+    error: colors.error,
+  })[tone];
 
 function StockTile({ line, testID }: { line: TruckStockCardLine; testID: string }) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const known = hasNumbers(line);
   const tone = toneOf(line.remaining);
 
@@ -79,7 +83,7 @@ function StockTile({ line, testID }: { line: TruckStockCardLine; testID: string 
         <Text style={styles.tileLabel}>{line.label}</Text>
         <View style={styles.tileNumbers}>
           <Text
-            style={[styles.tileValue, { color: known ? TONE_COLORS[tone] : colors.textSecondary }]}
+            style={[styles.tileValue, { color: known ? toneColor(colors, tone) : colors.textSecondary }]}
             testID={`${testID}-value`}
           >
             {known ? line.remaining : '—'}
@@ -118,6 +122,8 @@ export function TruckStockCard({
   onPress,
   testID,
 }: TruckStockCardProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const tiles = (
     <View style={styles.tiles}>
       {lines.map((line) => (
@@ -173,7 +179,8 @@ export function TruckStockCard({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.border,

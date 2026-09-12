@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -21,6 +22,8 @@ export type CustomerCardProps = {
  * price list. Both values are owned by the admin-side directory.
  */
 export function CustomerCard({ name, subtitle, onPress, testID }: CustomerCardProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const picked = Boolean(name);
 
   return (
@@ -30,19 +33,20 @@ export function CustomerCard({ name, subtitle, onPress, testID }: CustomerCardPr
       testID={testID}
       style={styles.card}
     >
-      <Ionicons name="person-outline" size={22} color={colors.surface} />
+      <Ionicons name="person-outline" size={22} color={colors.onPrimary} />
 
       <View style={styles.text}>
         <Text style={styles.name}>{picked ? name : 'Elegí un cliente'}</Text>
         <Text style={styles.subtitle}>{picked ? subtitle : 'Tocá para buscarlo'}</Text>
       </View>
 
-      <Ionicons name="chevron-forward" size={20} color={colors.surface} />
+      <Ionicons name="chevron-forward" size={20} color={colors.onPrimary} />
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -57,12 +61,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.bold,
   },
   subtitle: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.xs,
     opacity: 0.8,
     marginTop: 2,

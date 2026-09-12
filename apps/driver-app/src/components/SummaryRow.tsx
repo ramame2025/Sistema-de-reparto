@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -14,6 +15,8 @@ export type SummaryRowProps = {
 
 /** Fila pulsable con chevron: titulo, un renglon de contexto, y a donde lleva. */
 export function SummaryRow({ title, subtitle, onPress, testID }: SummaryRowProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Pressable
       accessibilityRole="button"
@@ -30,7 +33,8 @@ export function SummaryRow({ title, subtitle, onPress, testID }: SummaryRowProps
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',

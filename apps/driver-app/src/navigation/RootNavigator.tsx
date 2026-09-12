@@ -1,7 +1,9 @@
+import { useMemo } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { AuthStack } from './AuthStack';
 import { MainTabs } from './MainTabs';
 
@@ -15,6 +17,8 @@ import { MainTabs } from './MainTabs';
  * stale screen state for free (design decision #2).
  */
 export function RootNavigator() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { status } = useAuth();
 
   if (status === 'checking') {
@@ -32,7 +36,8 @@ export function RootNavigator() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   loading: {
     flex: 1,
     alignItems: 'center',

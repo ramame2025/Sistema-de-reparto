@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
@@ -5,7 +6,8 @@ import { LoadingRow } from '../components/LoadingRow';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { ScreenHeading } from '../components/ScreenHeading';
 import { useCatalog } from '../context/CatalogContext';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -22,6 +24,8 @@ import { formatClock } from '../utils/jornada';
  * distintos para el mismo producto.
  */
 export function PriceListScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { products, prices, categories, status, stale, fetchedAt, error, reload } = useCatalog();
 
   const loading = status === 'loading' && products.length === 0;
@@ -90,7 +94,8 @@ export function PriceListScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   // Sin `scroll`: el FlatList es el unico contenedor scrolleable.
   wrap: {
     flex: 1,

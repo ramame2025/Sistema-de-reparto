@@ -1,9 +1,9 @@
-import { colors } from './colors';
+import { colors, darkColors, lightColors } from './colors';
 import { radii } from './radii';
 import { spacing, MIN_TOUCH_TARGET } from './spacing';
 
 describe('theme/colors', () => {
-  it('exposes the 11 confirmed placeholder tokens with exact hex values', () => {
+  it('exposes the confirmed placeholder tokens with exact hex values', () => {
     expect(colors.primary).toBe('#1E3A5F');
     expect(colors.primaryLight).toBe('#2E5A8F');
     expect(colors.secondary).toBe('#0F9B8E');
@@ -15,9 +15,14 @@ describe('theme/colors', () => {
     expect(colors.success).toBe('#2E9E5B');
     expect(colors.warning).toBe('#D89614');
     expect(colors.error).toBe('#D93B3B');
+    expect(colors.onPrimary).toBe('#FFFFFF');
   });
 
-  it('exposes exactly the 11 confirmed tokens, no more, no less', () => {
+  it('defaults to the light palette', () => {
+    expect(colors).toBe(lightColors);
+  });
+
+  it('exposes exactly the confirmed tokens, no more, no less', () => {
     expect(Object.keys(colors).sort()).toEqual(
       [
         'primary',
@@ -31,8 +36,26 @@ describe('theme/colors', () => {
         'success',
         'warning',
         'error',
+        'onPrimary',
       ].sort()
     );
+  });
+
+  it('gives the dark palette exactly the same tokens as the light one', () => {
+    // Un token que existe en una paleta y no en la otra es una pantalla rota
+    // en un solo tema, y es el tipo de bug que no se ve hasta la noche.
+    expect(Object.keys(darkColors).sort()).toEqual(Object.keys(lightColors).sort());
+  });
+
+  it('keeps the bars branded in both themes, so what goes on them stays white', () => {
+    expect(darkColors.primary).toBe(lightColors.primary);
+    expect(darkColors.onPrimary).toBe(lightColors.onPrimary);
+  });
+
+  it('actually darkens the surfaces it is named after', () => {
+    expect(darkColors.background).not.toBe(lightColors.background);
+    expect(darkColors.surface).not.toBe(lightColors.surface);
+    expect(darkColors.textPrimary).not.toBe(lightColors.textPrimary);
   });
 });
 

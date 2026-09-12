@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -23,6 +24,8 @@ export type ScreenHeadingProps = {
  * pelado de las pantallas de historial.
  */
 export function ScreenHeading({ eyebrow, title, testID }: ScreenHeadingProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.wrap} testID={testID}>
       {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
@@ -31,7 +34,8 @@ export function ScreenHeading({ eyebrow, title, testID }: ScreenHeadingProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   wrap: {
     gap: spacing.xs,
   },

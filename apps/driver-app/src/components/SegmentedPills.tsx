@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -36,6 +37,9 @@ export function SegmentedPills<T extends string>({
   wrap = false,
   testID,
 }: SegmentedPillsProps<T>) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
   return (
     <View style={[styles.row, wrap && styles.rowWrap]}>
       {options.map((option) => {
@@ -64,7 +68,8 @@ export function SegmentedPills<T extends string>({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   row: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -99,7 +104,7 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.semibold,
   },
   labelSelected: {
-    color: colors.surface,
+    color: colors.onPrimary,
   },
   labelIdle: {
     color: colors.textPrimary,

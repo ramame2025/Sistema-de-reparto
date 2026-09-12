@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, StyleSheet, ViewProps } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 
 export type CardProps = ViewProps & {
@@ -8,6 +9,8 @@ export type CardProps = ViewProps & {
 };
 
 export function Card({ children, style, ...rest }: CardProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={[styles.card, style]} {...rest}>
       {children}
@@ -15,7 +18,8 @@ export function Card({ children, style, ...rest }: CardProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.border,

@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
@@ -34,6 +35,8 @@ export function SaleFooterBar({
   disabled = false,
   testID,
 }: SaleFooterBarProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.bar} testID={testID}>
       <View style={styles.totalWrap}>
@@ -59,7 +62,8 @@ export function SaleFooterBar({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -101,7 +105,7 @@ const styles = StyleSheet.create({
   actionLabel: {
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.bold,
-    color: colors.surface,
+    color: colors.onPrimary,
   },
   actionLabelDisabled: {
     color: colors.textSecondary,

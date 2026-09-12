@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import type { ExpenseCategory, ExpenseRecord } from '@distribuidor/shared';
 import { EmptyState } from '../components/EmptyState';
@@ -7,7 +7,8 @@ import { LoadingRow } from '../components/LoadingRow';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { ScreenHeading } from '../components/ScreenHeading';
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -40,6 +41,8 @@ const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
 };
 
 export function ExpensesHistoryScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { api } = useAuth();
 
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
@@ -122,7 +125,8 @@ export function ExpensesHistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   // Historial sin `scroll`: el FlatList es el unico contenedor scrolleable.
   // El `gap` iguala la separacion heading <-> lista al resto de la app.
   wrap: {

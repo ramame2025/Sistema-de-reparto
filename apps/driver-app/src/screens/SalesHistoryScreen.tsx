@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -10,7 +10,8 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { ScreenHeading } from '../components/ScreenHeading';
 import { useAuth } from '../context/AuthContext';
 import type { HomeStackParamList } from '../navigation/HomeStack';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -44,6 +45,8 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 type SalesHistoryNavigationProp = NativeStackNavigationProp<HomeStackParamList, 'SalesHistory'>;
 
 export function SalesHistoryScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { api } = useAuth();
   const navigation = useNavigation<SalesHistoryNavigationProp>();
 
@@ -137,7 +140,8 @@ export function SalesHistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   // Estas pantallas de historial NO usan `scroll`: el FlatList es el unico
   // contenedor scrolleable (no anidar VirtualizedList). El `wrap` con flex:1
   // le da altura; el `gap` iguala la separacion heading <-> lista al resto.

@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Switch, Text, View } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -19,6 +20,8 @@ export type ToggleRowProps = {
 
 /** Label plus state read-back on the left, switch on the right. */
 export function ToggleRow({ label, subtitle, value, onValueChange, testID }: ToggleRowProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.row} testID={testID}>
       <View style={styles.text}>
@@ -37,7 +40,8 @@ export function ToggleRow({ label, subtitle, value, onValueChange, testID }: Tog
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',

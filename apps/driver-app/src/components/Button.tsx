@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { spacing, MIN_TOUCH_TARGET } from '../theme/spacing';
 import { typography } from '../theme/typography';
 
@@ -21,6 +22,8 @@ export function Button({
   disabled = false,
   testID,
 }: ButtonProps) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const backgroundColor =
     variant === 'primary' ? colors.primary : colors.secondary;
 
@@ -41,7 +44,8 @@ export function Button({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   base: {
     minHeight: MIN_TOUCH_TARGET,
     minWidth: MIN_TOUCH_TARGET,
@@ -52,7 +56,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   label: {
-    color: colors.surface,
+    color: colors.onPrimary,
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.semibold,
   },

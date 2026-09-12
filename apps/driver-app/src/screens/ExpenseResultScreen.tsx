@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -16,7 +16,8 @@ import { SummaryRow } from '../components/SummaryRow';
 import { useAuth } from '../context/AuthContext';
 import type { ExpensesStackParamList } from '../navigation/ExpensesStack';
 import { summarizeExpenses, todayExpensesOf } from '../services/expenseTotals';
-import { colors } from '../theme/colors';
+import { useColors } from '../theme/ThemeContext';
+import type { Colors } from '../theme/colors';
 import { radii } from '../theme/radii';
 import { spacing } from '../theme/spacing';
 import { typography } from '../theme/typography';
@@ -37,6 +38,8 @@ type ExpenseResultNavigationProp = NativeStackNavigationProp<
  * servidor lo tiene.
  */
 export function ExpenseResultScreen() {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const route = useRoute<RouteProp<ExpensesStackParamList, 'ExpenseResult'>>();
   const navigation = useNavigation<ExpenseResultNavigationProp>();
   const { api } = useAuth();
@@ -104,7 +107,7 @@ export function ExpenseResultScreen() {
     >
       <View style={styles.savedCard} testID="expense-result-saved">
         <View style={styles.savedBadge}>
-          <Ionicons name="checkmark" size={18} color={colors.surface} />
+          <Ionicons name="checkmark" size={18} color={colors.onPrimary} />
         </View>
         <View style={styles.savedText}>
           <Text style={styles.savedTitle}>Gasto guardado</Text>
@@ -161,7 +164,8 @@ export function ExpenseResultScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   savedCard: {
     flexDirection: 'row',
     alignItems: 'center',
