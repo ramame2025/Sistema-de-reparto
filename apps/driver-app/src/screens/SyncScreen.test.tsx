@@ -11,7 +11,7 @@ jest.mock('../context/SyncContext', () => {
 });
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { SyncScreen } from './SyncScreen';
 import { useSync } from '../context/SyncContext';
 
@@ -157,5 +157,41 @@ describe('SyncScreen/no discard control', () => {
     // delete/discard/eliminar-type action, for any queued entry.
     expect(screen.queryAllByText(/eliminar|borrar|descartar|delete|discard/i)).toHaveLength(0);
     expect(screen.queryAllByTestId(/eliminar|borrar|descartar|delete|discard/i)).toHaveLength(0);
+  });
+});
+
+describe('SyncScreen/barra superior', () => {
+  it('carries the same dark bar as the other sections, fed from the queue', async () => {
+    mockedUseSync.mockReturnValue({
+      ...baseSyncValue,
+      pendingSales: [freshEntry],
+      assignedTruckCode: 'C-04',
+      lastSyncAt: new Date(2026, 8, 11, 9, 38).toISOString(),
+    });
+
+    await render(<SyncScreen />);
+
+    expect(screen.getByTestId('sync-header')).toBeTruthy();
+    expect(screen.getByTestId('sync-header-eyebrow').props.children).toBe('SINCRONIZACIÓN · C-04');
+    expect(screen.getByTestId('sync-header-title').props.children).toBe('1 venta en cola');
+    expect(screen.getByTestId('sync-header-last').props.children).toBe(
+      'Última sincronización 09:38'
+    );
+  });
+
+  it('rides outside the scroll, like every other section bar', async () => {
+    mockedUseSync.mockReturnValue({ ...baseSyncValue, pendingSales: [] });
+
+    await render(<SyncScreen />);
+
+    expect(within(screen.getByTestId('sync-screen-header')).getByTestId('sync-header')).toBeTruthy();
+  });
+
+  it('leaves the truck out of the bar when none is assigned today', async () => {
+    mockedUseSync.mockReturnValue({ ...baseSyncValue, pendingSales: [], assignedTruckCode: '' });
+
+    await render(<SyncScreen />);
+
+    expect(screen.getByTestId('sync-header-eyebrow').props.children).toBe('SINCRONIZACIÓN');
   });
 });
