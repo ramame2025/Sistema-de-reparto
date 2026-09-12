@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MyAssignedCustomersResponse, MyTruckStockResponse } from '@distribuidor/shared';
 import { Card } from '../components/Card';
+import { CardHeader } from '../components/CardHeader';
 import { DayStatusCard } from '../components/DayStatusCard';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { JornadaHeader } from '../components/JornadaHeader';
@@ -223,17 +224,18 @@ export function HomeScreen() {
       )}
 
       <Card style={styles.card}>
-        <View style={styles.cobradoRow}>
-          <View>
-            <SectionLabel>COBRADO HOY</SectionLabel>
+        <CardHeader
+          title="Cobrado hoy"
+          subtitle={`${daySummary.activeCount} ${
+            daySummary.activeCount === 1 ? 'venta' : 'ventas'
+          }`}
+          trailing={
             <Text style={styles.cobrado} testID="home-cobrado-hoy">
               {formatArs(daySummary.activeTotal)}
             </Text>
-          </View>
-          <Text style={styles.cobradoCount}>
-            {daySummary.activeCount} {daySummary.activeCount === 1 ? 'venta' : 'ventas'}
-          </Text>
-        </View>
+          }
+          testID="home-cobrado-header"
+        />
 
         <View style={styles.tiles}>
           <StatTile value={daySummary.activeCount} label="Activas" testID="home-tile-activas" />
@@ -278,12 +280,15 @@ export function HomeScreen() {
         </View>
       ) : (
         <Card style={styles.card}>
-          <View style={styles.cobradoRow}>
-            <Text style={styles.clientsTitle}>Clientes de hoy</Text>
-            <Text style={styles.clientsCount} testID="home-clients-progress">
-              {visitedCount} de {assignedCustomerIds.length} visitados
-            </Text>
-          </View>
+          <CardHeader
+            title="Clientes de hoy"
+            trailing={
+              <Text style={styles.clientsCount} testID="home-clients-progress">
+                {visitedCount} de {assignedCustomerIds.length} visitados
+              </Text>
+            }
+            testID="home-clients-header"
+          />
           <ProgressBar
             current={visitedCount}
             total={assignedCustomerIds.length}
@@ -319,28 +324,14 @@ const styles = StyleSheet.create({
   card: {
     gap: spacing.sm,
   },
-  cobradoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
   cobrado: {
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
     color: colors.textPrimary,
   },
-  cobradoCount: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-  },
   tiles: {
     flexDirection: 'row',
     gap: spacing.sm,
-  },
-  clientsTitle: {
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
   },
   clientsCount: {
     fontSize: typography.sizes.xs,

@@ -42,7 +42,7 @@ describe('TruckStockCard', () => {
         />,
       );
 
-      expect(screen.getByTestId('stock-empty-reason')).toHaveTextContent(
+      expect(screen.getByTestId('stock-header-subtitle')).toHaveTextContent(
         'Sin remito no sabemos qué te queda',
       );
       expect(screen.queryByTestId('stock-remaining-total')).toBeNull();
@@ -101,7 +101,7 @@ describe('TruckStockCard', () => {
 
       // La hora se formatea en la zona del telefono, asi que se afirma lo que
       // no depende de ella.
-      expect(screen.getByTestId('stock-manifest-line')).toHaveTextContent(/71 cargados$/);
+      expect(screen.getByTestId('stock-header-subtitle')).toHaveTextContent(/71 cargados$/);
     });
 
     it('shows remaining over loaded per product, not the other way round', async () => {

@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { ProductCode } from '@distribuidor/shared';
 import { Button } from './Button';
+import { CardHeader } from './CardHeader';
 import { ProgressBar, type ProgressBarTone } from './ProgressBar';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
@@ -132,23 +133,19 @@ export function TruckStockCard({
   if (!manifestAt) {
     return (
       <View style={[styles.card, styles.cardEmpty]} testID={testID}>
-        <View style={styles.header}>
-          <View style={styles.headerText}>
-            <Text style={styles.title}>En el camión</Text>
-            <Text
-              style={styles.subtitle}
-              testID={testID ? `${testID}-empty-reason` : undefined}
-            >
-              Sin remito no sabemos qué te queda
-            </Text>
-          </View>
-          <Button
-            label="Cargar remito"
-            variant="secondary"
-            onPress={onLoadManifest}
-            testID={testID ? `${testID}-load-cta` : undefined}
-          />
-        </View>
+        <CardHeader
+          title="En el camión"
+          subtitle="Sin remito no sabemos qué te queda"
+          trailing={
+            <Button
+              label="Cargar remito"
+              variant="secondary"
+              onPress={onLoadManifest}
+              testID={testID ? `${testID}-load-cta` : undefined}
+            />
+          }
+          testID={testID ? `${testID}-header` : undefined}
+        />
         {tiles}
       </View>
     );
@@ -161,17 +158,16 @@ export function TruckStockCard({
       style={styles.card}
       testID={testID}
     >
-      <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>En el camión</Text>
-          <Text style={styles.subtitle} testID={testID ? `${testID}-manifest-line` : undefined}>
-            Remito {formatTime(manifestAt)} · {sumOf(lines, 'loaded')} cargados
+      <CardHeader
+        title="En el camión"
+        subtitle={`Remito ${formatTime(manifestAt)} · ${sumOf(lines, 'loaded')} cargados`}
+        trailing={
+          <Text style={styles.total} testID={testID ? `${testID}-remaining-total` : undefined}>
+            quedan {sumOf(lines, 'remaining')}
           </Text>
-        </View>
-        <Text style={styles.total} testID={testID ? `${testID}-remaining-total` : undefined}>
-          quedan {sumOf(lines, 'remaining')}
-        </Text>
-      </View>
+        }
+        testID={testID ? `${testID}-header` : undefined}
+      />
       {tiles}
     </Pressable>
   );
@@ -191,24 +187,6 @@ const styles = StyleSheet.create({
   cardEmpty: {
     borderLeftColor: colors.warning,
     borderLeftWidth: 4,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  headerText: {
-    flex: 1,
-  },
-  title: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-    marginTop: 2,
   },
   total: {
     fontSize: typography.sizes.md,

@@ -402,7 +402,7 @@ describe('HomeScreen/en el camion', () => {
     await waitFor(() =>
       expect(screen.getByTestId('home-truck-stock-remaining-total')).toHaveTextContent('quedan 21'),
     );
-    expect(screen.getByTestId('home-truck-stock-manifest-line')).toHaveTextContent(/71 cargados$/);
+    expect(screen.getByTestId('home-truck-stock-header-subtitle')).toHaveTextContent(/71 cargados$/);
   });
 
   it('subtracts sales still queued on this phone, so the count survives a dead signal', async () => {
@@ -611,5 +611,54 @@ describe('HomeScreen/logout', () => {
     await fireEvent.press(screen.getByTestId('home-logout-button'));
 
     expect(String(alertSpy.mock.calls[0][1])).not.toContain('sin sincronizar');
+  });
+});
+
+describe('HomeScreen/encabezados', () => {
+  it('gives the three cards of the day one and the same header, so none outranks another', async () => {
+    mockedApiGet = jest.fn().mockImplementation((path: string) => {
+      if (path.startsWith('/load-manifests/my-stock')) {
+        return Promise.resolve({
+          date: today(),
+          stock: {
+            truckId: 'truck-1',
+            date: today(),
+            manifestAt: `${today()}T07:10:00.000Z`,
+            lines: [{ productCode: 'G10', loaded: 50, sold: 38, remaining: 12 }],
+          },
+        });
+      }
+      return Promise.resolve({ date: today(), customers: [] });
+    });
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated' as const,
+      token: 'tok',
+      username: 'chofer1',
+      loading: false,
+      api: { get: mockedApiGet },
+      login: jest.fn(),
+      logout: mockedLogout,
+      requireAuthToken: jest.fn(() => 'tok'),
+    });
+
+    await render(<HomeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-truck-stock-header-title')).toHaveTextContent('En el camión'),
+    );
+    expect(screen.getByTestId('home-cobrado-header-title')).toHaveTextContent('Cobrado hoy');
+    expect(screen.getByTestId('home-clients-header-title')).toHaveTextContent('Clientes de hoy');
+
+    const sizeOf = (testID: string) => {
+      const style = screen.getByTestId(testID).props.style;
+      return (Array.isArray(style) ? Object.assign({}, ...style.flat()) : style).fontSize;
+    };
+    const sizes = [
+      'home-cobrado-header-title',
+      'home-truck-stock-header-title',
+      'home-clients-header-title',
+    ].map(sizeOf);
+
+    expect(new Set(sizes).size).toBe(1);
   });
 });
