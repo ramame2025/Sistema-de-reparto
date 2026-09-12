@@ -3,20 +3,30 @@ import { StyleSheet, View } from 'react-native';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 
+export type ProgressBarTone = 'success' | 'primary' | 'warning' | 'error';
+
 export type ProgressBarProps = {
   current: number;
   total: number;
+  tone?: ProgressBarTone;
   testID?: string;
 };
 
+const TONE_COLORS: Record<ProgressBarTone, string> = {
+  success: colors.success,
+  primary: colors.primary,
+  warning: colors.warning,
+  error: colors.error,
+};
+
 /** Barra de avance. Un total en cero se dibuja vacia, no se divide por cero. */
-export function ProgressBar({ current, total, testID }: ProgressBarProps) {
+export function ProgressBar({ current, total, tone = 'success', testID }: ProgressBarProps) {
   const ratio = total <= 0 ? 0 : Math.min(1, Math.max(0, current / total));
 
   return (
     <View style={styles.track} testID={testID}>
       <View
-        style={[styles.fill, { width: `${Math.round(ratio * 100)}%` }]}
+        style={[styles.fill, { width: `${Math.round(ratio * 100)}%`, backgroundColor: TONE_COLORS[tone] }]}
         testID={testID ? `${testID}-fill` : undefined}
       />
     </View>
@@ -33,6 +43,5 @@ const styles = StyleSheet.create({
   fill: {
     height: '100%',
     borderRadius: 4,
-    backgroundColor: colors.success,
   },
 });
