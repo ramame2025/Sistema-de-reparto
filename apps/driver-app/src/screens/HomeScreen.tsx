@@ -325,6 +325,10 @@ export function HomeScreen() {
           setMenuOpen(false);
           navigation.navigate('LoadManifest');
         }}
+        onPressPriceList={() => {
+          setMenuOpen(false);
+          navigation.navigate('PriceList');
+        }}
         onPressLogout={handleLogout}
       />
     </ScreenContainer>

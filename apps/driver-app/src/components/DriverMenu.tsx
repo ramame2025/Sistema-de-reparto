@@ -16,6 +16,7 @@ export type DriverMenuProps = {
   truckCode?: string;
   truckPlate?: string;
   onPressManifest: () => void;
+  onPressPriceList: () => void;
   onPressLogout: () => void;
   /**
    * Hora ya formateada del catalogo que la app tiene en la mano, p. ej.
@@ -50,6 +51,7 @@ export function DriverMenu({
   truckCode,
   truckPlate,
   onPressManifest,
+  onPressPriceList,
   onPressLogout,
   priceListUpdatedAt,
   appVersion,
@@ -128,6 +130,7 @@ export function DriverMenu({
           <MenuRow
             title="Lista de precios"
             value={priceListUpdatedAt ? `Actualizada ${priceListUpdatedAt}` : 'Sin datos'}
+            onPress={onPressPriceList}
             testID="driver-menu-prices"
           />
           <MenuRow title="Ayuda" disabled testID="driver-menu-help" />

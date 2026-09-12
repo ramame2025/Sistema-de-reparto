@@ -38,6 +38,12 @@ jest.mock('../screens/HomeScreen', () => {
           >
             <Text>Ir a historial de remitos</Text>
           </Pressable>
+          <Pressable
+            testID="home-stack-go-to-price-list"
+            onPress={() => navigation.navigate('PriceList')}
+          >
+            <Text>Ir a lista de precios</Text>
+          </Pressable>
         </>
       );
     },
@@ -152,6 +158,27 @@ jest.mock('../screens/ManifestHistoryScreen', () => {
   };
 });
 
+jest.mock('../screens/PriceListScreen', () => {
+  const { useNavigation } = require('@react-navigation/native');
+  const { Text, Pressable } = require('react-native');
+  return {
+    PriceListScreen: () => {
+      const navigation = useNavigation();
+      return (
+        <>
+          <Text testID="home-stack-fake-price-list">Price list fake</Text>
+          <Pressable
+            testID="home-stack-go-back-from-price-list"
+            onPress={() => navigation.goBack()}
+          >
+            <Text>Volver</Text>
+          </Pressable>
+        </>
+      );
+    },
+  };
+});
+
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
@@ -238,6 +265,26 @@ describe('HomeStack', () => {
 
     await waitFor(() => expect(screen.getByTestId('home-stack-fake-home')).toBeTruthy());
     expect(screen.queryByTestId('home-stack-fake-manifest-history')).toBeNull();
+  });
+
+  it('registers PriceList as a route, reachable and navigable back to Home', async () => {
+    // La lista de precios se abre desde el menu del chofer, que vive en Home.
+    await render(
+      <NavigationContainer>
+        <HomeStack />
+      </NavigationContainer>,
+    );
+
+    expect(screen.queryByTestId('home-stack-fake-price-list')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('home-stack-go-to-price-list'));
+
+    await waitFor(() => expect(screen.getByTestId('home-stack-fake-price-list')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('home-stack-go-back-from-price-list'));
+
+    await waitFor(() => expect(screen.getByTestId('home-stack-fake-home')).toBeTruthy());
+    expect(screen.queryByTestId('home-stack-fake-price-list')).toBeNull();
   });
 
   it('navigates from SalesHistory into SaleDetail and back', async () => {
