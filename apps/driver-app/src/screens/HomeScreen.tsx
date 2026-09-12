@@ -199,16 +199,17 @@ export function HomeScreen() {
       scroll
       onRefresh={refreshAll}
       refreshing={summaryLoading}
+      header={
+        <JornadaHeader
+          testID="home-jornada-header"
+          jornada={formatJornada(new Date())}
+          driverName={username}
+          truckCode={truck?.code}
+          truckPlate={truck?.plate}
+          truckKind={truck?.kind}
+        />
+      }
     >
-      <JornadaHeader
-        testID="home-jornada-header"
-        jornada={formatJornada(new Date())}
-        driverName={username}
-        truckCode={truck?.code}
-        truckPlate={truck?.plate}
-        truckKind={truck?.kind}
-      />
-
       {summaryError ? (
         <FeedbackBanner message={summaryError} tone="error" />
       ) : summaryLoading ? (

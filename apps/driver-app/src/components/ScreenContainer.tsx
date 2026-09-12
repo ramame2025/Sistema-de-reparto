@@ -12,6 +12,7 @@ import {
 // resolves real insets on both platforms through the SafeAreaProvider mounted
 // in App.tsx.
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { ScreenScrollContext } from './KeyboardAwareField';
@@ -28,6 +29,16 @@ export type ScreenContainerProps = {
    * para que la pantalla maneje su propio espaciado.
    */
   gap?: number;
+  /**
+   * Barra oscura a sangre completa, fija arriba y FUERA del ScrollView.
+   *
+   * Va por prop y no como un hijo mas porque el padding de pantalla
+   * (`scroll`) y el inset del status bar la dejaban flotando en una isla
+   * clara: para llegar al borde del telefono tiene que vivir afuera del
+   * contenido, no adentro. Este slot pinta su propio inset superior, asi que
+   * el azul sube hasta el borde de arriba.
+   */
+  header?: React.ReactNode;
   /**
    * Barra fija al pie, fuera del ScrollView. Para la accion principal de una
    * pantalla larga: en Nueva Venta el chofer tiene que poder guardar sin
@@ -59,6 +70,7 @@ export function ScreenContainer({
   children,
   scroll = false,
   gap = spacing.md,
+  header,
   footer,
   onRefresh,
   refreshing = false,
@@ -68,7 +80,30 @@ export function ScreenContainer({
 
   return (
     <ScreenScrollContext.Provider value={scrollRef}>
-    <SafeAreaView testID={testID} style={styles.container}>
+    <SafeAreaView
+      testID={testID}
+      style={styles.container}
+      // Con header, el inset de arriba lo pinta el header y no el contenedor:
+      // si lo tomara el SafeAreaView, la franja del status bar quedaria del
+      // color claro del fondo y la barra oscura arrancaria mas abajo.
+      edges={header ? ['left', 'right', 'bottom'] : undefined}
+    >
+      {header ? (
+        <>
+          {/* Iconos claros: sobre el azul oscuro del header, los oscuros que
+              usa el resto de la app son invisibles. Al desmontarse la
+              pantalla, vuelve el `dark` global de App.tsx. */}
+          <StatusBar style="light" />
+          <SafeAreaView
+            testID={testID ? `${testID}-header` : undefined}
+            edges={['top']}
+            style={styles.header}
+          >
+            {header}
+          </SafeAreaView>
+        </>
+      ) : null}
+
       <KeyboardAvoidingView
         testID={testID ? `${testID}-keyboard-avoid` : undefined}
         style={styles.container}
@@ -113,6 +148,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  header: {
+    // El mismo azul que pintan las barras: el inset de arriba es una
+    // extension de la barra, no una franja aparte.
+    backgroundColor: colors.primary,
   },
   content: {
     flexGrow: 1,

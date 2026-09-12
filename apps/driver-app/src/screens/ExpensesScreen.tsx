@@ -221,15 +221,16 @@ export function ExpensesScreen() {
           disabled={!canSave}
         />
       }
+      header={
+        <ExpenseHeader
+          testID="expenses-header"
+          eyebrow={truck ? `NUEVO GASTO · ${truck.code}` : 'NUEVO GASTO'}
+          title={formatJornadaTitle(new Date())}
+          amount={spentToday}
+          amountLabel="gastado hoy"
+        />
+      }
     >
-      <ExpenseHeader
-        testID="expenses-header"
-        eyebrow={truck ? `NUEVO GASTO · ${truck.code}` : 'NUEVO GASTO'}
-        title={formatJornadaTitle(new Date())}
-        amount={spentToday}
-        amountLabel="gastado hoy"
-      />
-
       <View style={styles.field}>
         <SectionLabel>CATEGORÍA</SectionLabel>
         <SegmentedPills

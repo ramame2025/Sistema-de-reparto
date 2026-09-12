@@ -160,4 +160,40 @@ describe('ScreenContainer', () => {
     expect(received).not.toBe('not-provided');
     expect(received).not.toBeNull();
   });
+
+  describe('header slot', () => {
+    it('renders the header outside the scrollable content', async () => {
+      // La barra oscura no puede vivir adentro del ScrollView: ahi come el
+      // padding de pantalla y queda flotando en una isla clara.
+      await render(
+        <ScreenContainer testID="screen" scroll header={<Text>Barra</Text>}>
+          <Text>Contenido</Text>
+        </ScreenContainer>
+      );
+
+      expect(within(screen.getByTestId('screen-header')).getByText('Barra')).toBeTruthy();
+      expect(within(screen.getByTestId('screen-scroll')).queryByText('Barra')).toBeNull();
+    });
+
+    it('paints the header slot with the bar color so it reaches the top edge', async () => {
+      await render(
+        <ScreenContainer testID="screen" header={<Text>Barra</Text>}>
+          <Text>Contenido</Text>
+        </ScreenContainer>
+      );
+
+      const flatStyle = StyleSheet.flatten(screen.getByTestId('screen-header').props.style);
+      expect(flatStyle.backgroundColor).toBe(colors.primary);
+    });
+
+    it('renders no header slot at all when no header is given', async () => {
+      await render(
+        <ScreenContainer testID="screen">
+          <Text>Contenido</Text>
+        </ScreenContainer>
+      );
+
+      expect(screen.queryByTestId('screen-header')).toBeNull();
+    });
+  });
 });
