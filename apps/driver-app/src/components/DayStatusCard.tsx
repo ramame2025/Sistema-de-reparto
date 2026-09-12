@@ -169,7 +169,7 @@ const makeStyles = (colors: Colors) =>
     alignItems: 'center',
     gap: spacing.sm,
     minHeight: MIN_TOUCH_TARGET,
-    backgroundColor: '#FDF2F2',
+    backgroundColor: colors.errorSurface,
     borderRadius: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,

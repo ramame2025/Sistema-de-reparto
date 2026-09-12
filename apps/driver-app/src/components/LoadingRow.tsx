@@ -20,7 +20,7 @@ export function LoadingRow({ label, testID }: LoadingRowProps) {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.row} testID={testID}>
-      <ActivityIndicator color={colors.primary} />
+      <ActivityIndicator color={colors.accent} />
       <Text style={styles.text}>{label}</Text>
     </View>
   );

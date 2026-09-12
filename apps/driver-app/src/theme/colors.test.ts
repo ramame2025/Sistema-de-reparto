@@ -16,6 +16,9 @@ describe('theme/colors', () => {
     expect(colors.warning).toBe('#D89614');
     expect(colors.error).toBe('#D93B3B');
     expect(colors.onPrimary).toBe('#FFFFFF');
+    expect(colors.accent).toBe('#1E3A5F');
+    expect(colors.surfaceRaised).toBe('#FFFFFF');
+    expect(colors.errorSurface).toBe('#FDF2F2');
   });
 
   it('defaults to the light palette', () => {
@@ -37,6 +40,9 @@ describe('theme/colors', () => {
         'warning',
         'error',
         'onPrimary',
+        'accent',
+        'surfaceRaised',
+        'errorSurface',
       ].sort()
     );
   });
@@ -50,6 +56,21 @@ describe('theme/colors', () => {
   it('keeps the bars branded in both themes, so what goes on them stays white', () => {
     expect(darkColors.primary).toBe(lightColors.primary);
     expect(darkColors.onPrimary).toBe(lightColors.onPrimary);
+  });
+
+  it('keeps the light theme looking exactly as it did before the split', () => {
+    // Los tokens nuevos existen para el tema oscuro. En claro valen lo mismo
+    // que el token del que salieron, asi que nada cambia de aspecto.
+    expect(lightColors.accent).toBe(lightColors.primary);
+    expect(lightColors.surfaceRaised).toBe(lightColors.surface);
+  });
+
+  it('lifts the foreground tokens off the dark background', () => {
+    // Son justo los que en oscuro NO pueden seguir valiendo lo mismo: el azul
+    // de fondo delante de un fondo oscuro no se ve.
+    expect(darkColors.accent).not.toBe(darkColors.primary);
+    expect(darkColors.surfaceRaised).not.toBe(darkColors.surface);
+    expect(darkColors.errorSurface).not.toBe(lightColors.errorSurface);
   });
 
   it('actually darkens the surfaces it is named after', () => {

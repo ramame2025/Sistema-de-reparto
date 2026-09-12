@@ -43,6 +43,12 @@ export function MainTabs() {
         headerShown: false,
         tabBarActiveTintColor: colors.secondary,
         tabBarInactiveTintColor: colors.textSecondary,
+        // La barra no hereda ningun StyleSheet nuestro: si no se le dice, se
+        // queda blanca con la app en oscuro.
+        tabBarStyle: {
+          backgroundColor: colors.surface,
+          borderTopColor: colors.border,
+        },
         tabBarLabelStyle: { fontSize: typography.sizes.xs, fontWeight: typography.weights.medium },
       }}
     >
@@ -58,7 +64,7 @@ export function MainTabs() {
         component={NewSaleStack}
         options={{
           tabBarIcon: makeTabIcon('add-circle-outline', 'tab-icon-nueva-venta'),
-          tabBarActiveTintColor: colors.primary,
+          tabBarActiveTintColor: colors.accent,
           tabBarLabelStyle: {
             fontSize: typography.sizes.xs,
             fontWeight: typography.weights.bold,

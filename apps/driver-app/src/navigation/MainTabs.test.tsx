@@ -17,6 +17,13 @@ import { useSync } from '../context/SyncContext';
 
 const mockedUseSync = useSync as jest.Mock;
 
+const screenOptions = () => {
+  const element = MainTabs() as React.ReactElement<{
+    screenOptions?: { tabBarStyle?: { backgroundColor?: string; borderTopColor?: string } };
+  }>;
+  return element.props.screenOptions;
+};
+
 const optionsFor = (name: keyof MainTabParamList) => {
   const element = MainTabs() as React.ReactElement<{ children: React.ReactElement[] }>;
   const children = React.Children.toArray(element.props.children) as React.ReactElement<{
@@ -45,5 +52,29 @@ describe('MainTabs/badge de pendientes', () => {
     expect(optionsFor('Inicio')?.tabBarBadge).toBeUndefined();
     expect(optionsFor('Nueva Venta')?.tabBarBadge).toBeUndefined();
     expect(optionsFor('Gastos')?.tabBarBadge).toBeUndefined();
+  });
+});
+
+describe('MainTabs/colores de la barra', () => {
+  beforeEach(() => {
+    mockedUseSync.mockReturnValue({ pendingSales: [] });
+  });
+
+  it('paints the bar itself, which React Navigation would otherwise leave white', async () => {
+    // La barra de abajo no pasa por ningun StyleSheet nuestro: sin decirselo,
+    // se queda blanca con la app en oscuro.
+    const { lightColors } = require('../theme/colors');
+
+    expect(screenOptions()?.tabBarStyle).toEqual({
+      backgroundColor: lightColors.surface,
+      borderTopColor: lightColors.border,
+    });
+  });
+
+  it('tints the emphasised tab with the foreground blue, not the bar blue', async () => {
+    const { lightColors } = require('../theme/colors');
+    const options = optionsFor('Nueva Venta') as { tabBarActiveTintColor?: string };
+
+    expect(options.tabBarActiveTintColor).toBe(lightColors.accent);
   });
 });

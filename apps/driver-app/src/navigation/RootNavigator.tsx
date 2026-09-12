@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { useColors } from '../theme/ThemeContext';
+import { useColors, useTheme } from '../theme/ThemeContext';
 import type { Colors } from '../theme/colors';
 import { AuthStack } from './AuthStack';
 import { MainTabs } from './MainTabs';
@@ -18,19 +18,41 @@ import { MainTabs } from './MainTabs';
  */
 export function RootNavigator() {
   const colors = useColors();
+  const { scheme } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { status } = useAuth();
+
+  // Lo que pinta React Navigation por su cuenta -- la barra de pestanas de
+  // abajo y el encabezado de cada pantalla empujada -- no pasa por ningun
+  // StyleSheet nuestro. Sin este tema queda blanco con texto oscuro encima de
+  // una app en modo oscuro.
+  const navigationTheme = useMemo(() => {
+    const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
+
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+        primary: colors.accent,
+        background: colors.background,
+        card: colors.surface,
+        text: colors.textPrimary,
+        border: colors.border,
+        notification: colors.error,
+      },
+    };
+  }, [scheme, colors]);
 
   if (status === 'checking') {
     return (
       <View style={styles.loading} testID="root-navigator-loading">
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={navigationTheme}>
       {status === 'authenticated' ? <MainTabs /> : <AuthStack />}
     </NavigationContainer>
   );

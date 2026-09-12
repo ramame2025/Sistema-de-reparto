@@ -1,4 +1,5 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import { TruckStockCard, type TruckStockCardLine } from './TruckStockCard';
 import { colors } from '../theme/colors';
@@ -155,5 +156,28 @@ describe('TruckStockCard', () => {
       fireEvent.press(screen.getByTestId('stock'));
       expect(onPress).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('TruckStockCard/contraste', () => {
+  it('lifts each tile off the card it sits on', async () => {
+    // Mosaico y tarjeta compartian `surface`: en oscuro solo los separaba el
+    // borde, y el bloque se leia como una mancha sola.
+    const lines: TruckStockCardLine[] = [
+      { productCode: 'G10', label: 'G10', loaded: 33, remaining: 30 },
+    ];
+
+    await render(
+      <TruckStockCard
+        testID="stock"
+        lines={lines}
+        manifestAt="2026-09-11T07:10:00.000Z"
+        onLoadManifest={jest.fn()}
+      />
+    );
+
+    const tile = StyleSheet.flatten(screen.getByTestId('stock-tile-G10').props.style);
+
+    expect(tile.backgroundColor).toBe(colors.surfaceRaised);
   });
 });
