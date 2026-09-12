@@ -20,6 +20,9 @@ jest.mock('../context/SyncContext', () => ({
 // mockeado por la misma razon: mantener fuera la cadena de imports real.
 jest.mock('../context/TruckContext', () => ({
   useTruck: jest.fn(),
+  // HomeScreen resuelve el dia local para pedir su stock y sus clientes: el
+  // mock tiene que traerlo, no solo el hook.
+  localDay: () => new Date().toISOString().slice(0, 10),
 }));
 
 // HomeScreen valoriza las ventas encoladas con los precios del catalogo para
