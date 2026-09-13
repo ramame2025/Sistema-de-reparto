@@ -13,7 +13,7 @@ The base domain model already matches the business almost exactly:
 |---|---|
 | 4 products (G10, G15, G45, G15_AUTO) | Done — `ProductCode` enum |
 | 3 customer types (final, comercio, distribuidor) | Done — `CustomerType` enum |
-| 4 payment methods (efectivo, transferencia, QR, tarjeta) | Done — `PaymentMethod` enum |
+| 4 payment methods (efectivo, transferencia, QR, tarjeta) | Done — `PaymentMethod` enum; becoming an admin-managed table with proof rules → [`payment-methods-table.md`](./payment-methods-table.md) |
 | Edit/cancel a sale with mandatory reason + audit trail | Done — `SaleAudit` with before/after JSON snapshots |
 | Offline queue with retry/backoff | Done — implemented in `apps/driver-app` |
 | Categorized expenses + receipt photo | Done — `DriverExpense` + `/uploads/receipt` |
