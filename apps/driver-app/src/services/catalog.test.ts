@@ -5,6 +5,7 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
   CustomerCategoryRecord,
+  PaymentMethodRecord,
   PriceTable,
   ProductRecord,
 } from '@distribuidor/shared';
@@ -39,6 +40,20 @@ const categories: CustomerCategoryRecord[] = [
   },
 ];
 
+const paymentMethods: PaymentMethodRecord[] = [
+  {
+    id: 'pm1',
+    code: 'efectivo',
+    name: 'Efectivo',
+    isActive: true,
+    sortOrder: 0,
+    proofPolicy: 'none',
+    countsAsCash: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+];
+
 const prices: PriceTable = {
   final: { G10: 8500 },
   comercio: { G10: 8200 },
@@ -50,11 +65,12 @@ describe('catalog cache', () => {
     await AsyncStorage.clear();
   });
 
-  it('round-trips products, prices and categories through storage', async () => {
+  it('round-trips products, prices, categories and payment methods through storage', async () => {
     await saveCatalogToCache({
       products,
       prices,
       categories,
+      paymentMethods,
       fetchedAt: '2026-08-27T10:00:00.000Z',
     });
 
@@ -63,6 +79,7 @@ describe('catalog cache', () => {
     expect(cached?.products).toEqual(products);
     expect(cached?.prices).toEqual(prices);
     expect(cached?.categories).toEqual(categories);
+    expect(cached?.paymentMethods).toEqual(paymentMethods);
     expect(cached?.fetchedAt).toBe('2026-08-27T10:00:00.000Z');
   });
 
@@ -78,10 +95,27 @@ describe('catalog cache', () => {
     expect(await loadCachedCatalog()).toBeNull();
   });
 
+  // Mismo criterio para los medios de pago: sin ellos la pantalla de venta no
+  // sabe que ofrecer ni si pedir comprobante, asi que la cache no sirve a
+  // medias.
+  it('returns null for a cache saved before payment methods existed', async () => {
+    await AsyncStorage.setItem(
+      CATALOG_CACHE_KEY,
+      JSON.stringify({
+        products,
+        prices,
+        categories,
+        fetchedAt: '2026-08-26T10:00:00.000Z',
+      }),
+    );
+
+    expect(await loadCachedCatalog()).toBeNull();
+  });
+
   // La clave lleva version: el bundle cambio de forma, y una entrada vieja
   // guardada bajo la clave anterior no se puede leer como si fuera esta.
   it('is stored under a versioned key', () => {
-    expect(CATALOG_CACHE_KEY).toBe('driver_catalog_v2');
+    expect(CATALOG_CACHE_KEY).toBe('driver_catalog_v3');
   });
 
   // Sin cache no hay precio honesto que mostrar. Devolver null deja que la
@@ -107,12 +141,14 @@ describe('catalog cache', () => {
       products,
       prices,
       categories,
+      paymentMethods,
       fetchedAt: '2026-08-26T10:00:00.000Z',
     });
     const newer: CachedCatalog = {
       products: [],
       prices: { final: {}, comercio: {}, distribuidor: {} },
       categories: [],
+      paymentMethods: [],
       fetchedAt: '2026-08-27T10:00:00.000Z',
     };
     await saveCatalogToCache(newer);

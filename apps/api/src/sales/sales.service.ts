@@ -20,7 +20,6 @@ import {
   type UpdateSaleInput,
 } from '@distribuidor/shared';
 import {
-  PaymentMethod as PrismaPaymentMethod,
   SaleAuditAction as PrismaSaleAuditAction,
   SaleKind as PrismaSaleKind,
   type SaleAudit,
@@ -30,6 +29,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
 import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
+import { PaymentMethodsService } from '../payment-methods/payment-methods.service';
 import { ProductsService } from '../products/products.service';
 
 type ResolvedSaleLinks = {
@@ -58,6 +58,7 @@ export class SalesService {
     private readonly pricesService: PricesService,
     private readonly productsService: ProductsService,
     private readonly categoriesService: CustomerCategoriesService,
+    private readonly paymentMethodsService: PaymentMethodsService,
   ) {}
 
   private async resolveCustomerAndTruck(
@@ -189,6 +190,14 @@ export class SalesService {
       input.items.map((item) => item.productCode),
     );
 
+    // Mismo contrato que el producto y la categoria: la forma la valido
+    // `packages/shared`, la EXISTENCIA se verifica aca. Y existencia, no
+    // vigencia -- un medio dado de baja despues de que el telefono encolara
+    // la venta se acepta igual, porque esa plata ya se cobro.
+    await this.paymentMethodsService.assertPaymentMethodCodesExist([
+      input.paymentMethod,
+    ]);
+
     // Cuando paso la venta, no cuando llego: una venta sin senal se sincroniza
     // mas tarde, y tiene que tarifarse con los precios de su propio momento.
     const occurredAt = resolveOccurredAt(input.occurredAt, new Date());
@@ -216,7 +225,7 @@ export class SalesService {
         truckCode: resolvedTruckCode,
         customerName,
         customerType,
-        paymentMethod: input.paymentMethod as PrismaPaymentMethod,
+        paymentMethod: input.paymentMethod,
         note: input.note?.trim() || null,
         total,
         customerId,
@@ -338,6 +347,10 @@ export class SalesService {
       await this.productsService.assertProductCodesExist(
         input.items.map((item) => item.productCode),
       );
+      // Una fila de churn no tiene medio de pago que verificar: no hubo cobro.
+      await this.paymentMethodsService.assertPaymentMethodCodesExist([
+        input.paymentMethod,
+      ]);
     }
 
     // Con la fecha ORIGINAL de la venta, nunca con la de hoy: corregir una
@@ -354,7 +367,7 @@ export class SalesService {
     const { items: resolvedItems, total } = isChurn
       ? { items: [], total: 0 }
       : this.priceItemsOrReject(customerType, input.items, priceTable);
-    const resolvedPaymentMethod = isChurn ? null : (input.paymentMethod as PrismaPaymentMethod);
+    const resolvedPaymentMethod = isChurn ? null : input.paymentMethod;
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
     // A churn row never has a payment, so it never has a payment proof either

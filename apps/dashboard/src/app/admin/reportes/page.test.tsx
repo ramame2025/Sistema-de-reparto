@@ -79,10 +79,44 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
 const isoDate = (d: Date) =>
   `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
-const renderWithSales = (sales: unknown[]) => {
+/** Los cuatro medios semilla, con las banderas que carga la migracion. */
+const PAYMENT_METHODS_FIXTURE = [
+  {
+    id: "pm-efectivo",
+    code: "efectivo",
+    name: "Efectivo",
+    isActive: true,
+    sortOrder: 0,
+    proofPolicy: "none",
+    countsAsCash: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    id: "pm-transferencia",
+    code: "transferencia",
+    name: "Transferencia",
+    isActive: true,
+    sortOrder: 1,
+    proofPolicy: "optional",
+    countsAsCash: false,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+];
+
+const renderWithSales = (sales: unknown[], paymentMethods: unknown[] = PAYMENT_METHODS_FIXTURE) => {
   mockedUseSWR.mockImplementation((key: string | null) => {
     if (key === "/sales") {
       return { data: sales, isLoading: false, error: undefined, mutate: jest.fn() };
+    }
+    if (key === "/payment-methods?includeInactive=true") {
+      return {
+        data: paymentMethods,
+        isLoading: false,
+        error: undefined,
+        mutate: jest.fn(),
+      };
     }
     return { data: [], isLoading: false, error: undefined, mutate: jest.fn() };
   });
@@ -159,6 +193,47 @@ describe("ReportesPage · comprobante de pago de una venta", () => {
     openFirstSale();
 
     expect(screen.getByText(/no aplica/i)).toBeInTheDocument();
+  });
+
+  /**
+   * La regla dejo de ser "efectivo": la trae el medio de pago. Un medio nuevo
+   * con `proofPolicy: "none"` no reclama comprobante sin tocar codigo.
+   */
+  it("marks the proof as not applicable for any method whose policy is none", () => {
+    renderWithSales(
+      [{ ...baseSale, paymentMethod: "canje" }],
+      [
+        ...PAYMENT_METHODS_FIXTURE,
+        {
+          id: "pm-canje",
+          code: "canje",
+          name: "Canje",
+          isActive: true,
+          sortOrder: 2,
+          proofPolicy: "none",
+          countsAsCash: false,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    );
+
+    openFirstSale();
+
+    expect(screen.getByText(/no aplica/i)).toBeInTheDocument();
+  });
+
+  /**
+   * Sin la lista de medios no se sabe si el comprobante hacia falta. El modal
+   * dice lo unico cierto -- que no hay ninguno -- en vez de acusar al chofer.
+   */
+  it("says only that there is no proof while the payment methods have not loaded", () => {
+    renderWithSales([{ ...baseSale, paymentMethod: "efectivo" }], []);
+
+    openFirstSale();
+
+    expect(screen.getByText("Sin comprobante adjunto.")).toBeInTheDocument();
+    expect(screen.queryByText(/no adjunto comprobante/i)).not.toBeInTheDocument();
   });
 });
 

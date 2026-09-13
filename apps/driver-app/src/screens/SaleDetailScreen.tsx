@@ -5,7 +5,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
-  PAYMENT_METHODS,
   type PaymentMethod,
   type SaleRecord,
   type UpdateSaleInput,
@@ -21,6 +20,8 @@ import { SectionLabel } from '../components/SectionLabel';
 import { SegmentedPills } from '../components/SegmentedPills';
 import { TextField } from '../components/TextField';
 import { useAuth } from '../context/AuthContext';
+import { useCatalog } from '../context/CatalogContext';
+import { paymentMethodLabel, proofPolicyOf } from '../services/paymentMethods';
 import { useSync } from '../context/SyncContext';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { ApiError } from '../services/apiClient';
@@ -38,11 +39,6 @@ const CUSTOMER_TYPE_LABELS: Record<string, string> = {
   comercio: 'Comercio',
   distribuidor: 'Distribuidor',
 };
-
-const PAYMENT_OPTIONS = PAYMENT_METHODS.map((method) => ({
-  value: method,
-  label: method === 'transferencia' ? 'Transf.' : method === 'qr' ? 'QR' : method === 'tarjeta' ? 'Tarjeta' : 'Efectivo',
-}));
 
 const pad = (value: number): string => String(value).padStart(2, '0');
 
@@ -98,8 +94,12 @@ export function SaleDetailScreen() {
     });
     return initial;
   });
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
-    sale.paymentMethod ?? 'efectivo',
+  // Arranca en el medio con el que la venta se cobro. Si esa venta es de
+  // churn no hay medio que editar y la pantalla no muestra el selector, asi
+  // que el `undefined` no llega a verse.
+  const { paymentMethods } = useCatalog();
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | undefined>(
+    sale.paymentMethod ?? undefined,
   );
   const [editReason, setEditReason] = useState('');
   const [cancelReason, setCancelReason] = useState('');
@@ -141,6 +141,24 @@ export function SaleDetailScreen() {
     [editedItems, unitPrices],
   );
 
+  const paymentOptions = useMemo(
+    () =>
+      paymentMethods.map((method) => ({
+        value: method.code,
+        label: method.name,
+      })),
+    [paymentMethods],
+  );
+
+  // La regla del comprobante se lee del medio con el que la venta se COBRO, no
+  // del que este seleccionado en el editor: el aviso habla de lo que ya pasó.
+  const saleProofPolicy = proofPolicyOf(paymentMethods, sale.paymentMethod);
+  const saleMethodLabel = paymentMethodLabel(
+    paymentMethods,
+    sale.paymentMethod,
+    'Esta venta',
+  );
+
   const changeQty = (productCode: string, delta: number) => {
     setQuantities((previous) => ({
       ...previous,
@@ -158,6 +176,14 @@ export function SaleDetailScreen() {
 
     if (editedItems.length === 0) {
       showMessage('La venta tiene que quedar con al menos un producto.', 'error');
+      return;
+    }
+
+    // Una venta editable siempre se cobro con algo, asi que en la practica
+    // esto no se dispara; esta para que el payload no pueda salir sin medio de
+    // pago si esa premisa cambia.
+    if (!paymentMethod) {
+      showMessage('Elegi un medio de pago antes de guardar.', 'error');
       return;
     }
 
@@ -255,6 +281,11 @@ export function SaleDetailScreen() {
 
       const { url } = JSON.parse(uploaded.body) as { url: string };
 
+      if (!paymentMethod) {
+        showMessage('Elegi un medio de pago antes de adjuntar el comprobante.', 'error');
+        return;
+      }
+
       await api.patch<SaleRecord>(`/sales/${sale.id}`, {
         driverName: username,
         truckCode: sale.truckCode,
@@ -349,11 +380,12 @@ export function SaleDetailScreen() {
         </Card>
       )}
 
-      {isEditable && sale.paymentMethod !== 'efectivo' && !proofRef && (
+      {isEditable && saleProofPolicy !== 'none' && !proofRef && (
         <Card style={styles.card}>
           <SectionLabel variant="field">Falta el comprobante</SectionLabel>
           <Text style={styles.meta}>
-            Esta venta no se cobró en efectivo y no tiene comprobante adjunto.
+            {saleMethodLabel} lleva comprobante y esta venta no tiene ninguno
+            adjunto.
           </Text>
           <Button
             label={attachingProof ? 'Subiendo...' : 'Sacar foto del comprobante'}
@@ -368,8 +400,10 @@ export function SaleDetailScreen() {
         <Card style={styles.card}>
           <SectionLabel variant="field">Cobro</SectionLabel>
           <SegmentedPills
-            options={PAYMENT_OPTIONS}
-            value={paymentMethod}
+            options={paymentOptions}
+            // '' si la venta no tiene medio (churn) o el catalogo no llego:
+            // ninguna pastilla marcada, que es la verdad.
+            value={paymentMethod ?? ''}
             onChange={setPaymentMethod}
             testID="sale-detail-payment"
           />

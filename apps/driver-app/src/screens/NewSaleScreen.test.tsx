@@ -63,6 +63,10 @@ import { useAuth } from '../context/AuthContext';
 import { useTruck } from '../context/TruckContext';
 import { useCatalog } from '../context/CatalogContext';
 import { colors } from '../theme/colors';
+import {
+  SEED_PAYMENT_METHODS,
+  buildPaymentMethod,
+} from '../test-utils/paymentMethods';
 
 const mockedUseSync = useSync as jest.Mock;
 const mockedUseAuth = useAuth as jest.Mock;
@@ -99,6 +103,7 @@ const catalogProduct = (code: string, sortOrder: number) => ({
 });
 
 const baseCatalogValue = {
+  paymentMethods: SEED_PAYMENT_METHODS,
   products: [
     catalogProduct('G10', 0),
     catalogProduct('G15', 1),
@@ -637,6 +642,155 @@ describe('NewSaleScreen/ubicacion en el momento de confirmar (point-in-time-geol
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe('NewSaleScreen/medios de pago desde la tabla', () => {
+  it('offers the catalogue methods, labelled and ordered by the table', async () => {
+    await renderSaleScreen();
+
+    // Los cuatro semilla, con el `name` de la tabla y no una etiqueta
+    // compilada dentro de la app.
+    expect(screen.getByText('Efectivo')).toBeTruthy();
+    expect(screen.getByText('Transferencia')).toBeTruthy();
+    expect(screen.getByText('QR')).toBeTruthy();
+    expect(screen.getByText('Tarjeta')).toBeTruthy();
+  });
+
+  it('offers a method the app never knew about, with no code change', async () => {
+    mockedUseCatalog.mockReturnValue({
+      ...baseCatalogValue,
+      paymentMethods: [
+        ...SEED_PAYMENT_METHODS,
+        buildPaymentMethod({
+          id: 'pm-mp',
+          code: 'mercadopago',
+          name: 'Mercado Pago',
+          sortOrder: 4,
+          proofPolicy: 'optional',
+          countsAsCash: false,
+        }),
+      ],
+    });
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await renderSaleScreen();
+    await fireEvent.press(screen.getByTestId('new-sale-payment-mercadopago'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
+      paymentMethod: 'mercadopago',
+    });
+  });
+
+  /**
+   * El default dejo de ser el literal 'efectivo': es la primera fila activa
+   * segun el `sortOrder` que decide la tabla.
+   */
+  it('defaults to the first method in the table, not to a hardcoded efectivo', async () => {
+    mockedUseCatalog.mockReturnValue({
+      ...baseCatalogValue,
+      paymentMethods: [
+        buildPaymentMethod({
+          id: 'pm-transferencia',
+          code: 'transferencia',
+          name: 'Transferencia',
+          sortOrder: 0,
+          proofPolicy: 'optional',
+          countsAsCash: false,
+        }),
+      ],
+    });
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await renderSaleScreen();
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
+      paymentMethod: 'transferencia',
+    });
+  });
+
+  it('asks for no proof on a non-cash method whose policy is none', async () => {
+    mockedUseCatalog.mockReturnValue({
+      ...baseCatalogValue,
+      paymentMethods: [
+        buildPaymentMethod({
+          id: 'pm-canje',
+          code: 'canje',
+          name: 'Canje',
+          sortOrder: 0,
+          proofPolicy: 'none',
+          countsAsCash: false,
+        }),
+      ],
+    });
+
+    await renderSaleScreen();
+
+    expect(screen.queryByTestId('new-sale-payment-proof-pick-gallery')).toBeNull();
+  });
+});
+
+describe('NewSaleScreen/comprobante obligatorio (proofPolicy required)', () => {
+  const withRequiredProof = () => {
+    mockedUseCatalog.mockReturnValue({
+      ...baseCatalogValue,
+      paymentMethods: [
+        buildPaymentMethod({
+          id: 'pm-cheque',
+          code: 'cheque',
+          name: 'Cheque',
+          sortOrder: 0,
+          proofPolicy: 'required',
+          countsAsCash: false,
+        }),
+      ],
+    });
+  };
+
+  it('labels the proof section as obligatorio instead of opcional', async () => {
+    withRequiredProof();
+
+    await renderSaleScreen();
+
+    expect(screen.getByText('obligatorio')).toBeTruthy();
+    expect(screen.queryByText('opcional')).toBeNull();
+  });
+
+  it('refuses to save without the proof, naming the method', async () => {
+    withRequiredProof();
+
+    await renderSaleScreen();
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    expect(mockedTrySendSale).not.toHaveBeenCalled();
+    expect(mockedEnqueueSale).not.toHaveBeenCalled();
+    expect(screen.getByText(/Cheque lo exige/)).toBeTruthy();
+  });
+
+  it('saves once the proof is attached', async () => {
+    withRequiredProof();
+    mockUpload.mockResolvedValue(successUpload('https://cdn.test/proof-1.jpg'));
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await renderSaleScreen();
+    await fireEvent.press(screen.getByTestId('new-sale-payment-proof-pick-gallery'));
+    await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
+
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
+      paymentMethod: 'cheque',
+      paymentProofRef: 'https://cdn.test/proof-1.jpg',
+    });
   });
 });
 

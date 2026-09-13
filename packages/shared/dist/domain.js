@@ -51,12 +51,39 @@ export function isWellFormedCustomerType(value) {
     const trimmed = value.trim();
     return trimmed.length > 0 && trimmed.length <= CUSTOMER_TYPE_MAX_LENGTH;
 }
-export const PAYMENT_METHODS = [
-    "efectivo",
-    "transferencia",
-    "qr",
-    "tarjeta",
-];
+/** Misma cota que `CUSTOMER_TYPE_MAX_LENGTH`, y por el mismo motivo. */
+export const PAYMENT_METHOD_MAX_LENGTH = 20;
+/**
+ * Que exige un medio de pago en materia de comprobante.
+ *
+ * - `none`: no aplica. El efectivo no tiene nada que adjuntar.
+ * - `optional`: se puede adjuntar, y si no se adjunta la venta queda marcada
+ *   como pendiente en el resumen del dia (`missing-proof`).
+ * - `required`: el chofer no puede guardar la venta sin el comprobante.
+ *
+ * Son TRES estados y no un booleano porque `optional` ya existe hoy en el
+ * comportamiento real: la pantalla dice "opcional" y el resumen del dia igual
+ * reclama el comprobante faltante. Un booleano obligaria a elegir cual de las
+ * dos mitades conservar.
+ */
+export const PROOF_POLICIES = ['none', 'optional', 'required'];
+/**
+ * Valida la FORMA de un medio de pago, no su pertenencia a la tabla.
+ *
+ * Mismo criterio que `isWellFormedCustomerType`: `packages/shared` corre en el
+ * telefono, que valida el payload contra el catalogo que tenga cacheado --
+ * posiblemente de hace dias. Comprobar pertenencia aca rechazaria una venta
+ * encolada con un medio de pago creado despues de la ultima sincronizacion, es
+ * decir, perderia una venta ya cobrada. Que el medio EXISTA se verifica contra
+ * la tabla, del lado del servidor.
+ */
+export function isWellFormedPaymentMethod(value) {
+    if (typeof value !== 'string') {
+        return false;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 && trimmed.length <= PAYMENT_METHOD_MAX_LENGTH;
+}
 export const EXPENSE_CATEGORIES = [
     'combustible',
     'peaje',
@@ -152,7 +179,7 @@ export function validateCreateSaleInput(input) {
     if (!isWellFormedCustomerType(input.customerType)) {
         errors.push("customerType is invalid");
     }
-    if (!PAYMENT_METHODS.includes(input.paymentMethod)) {
+    if (!isWellFormedPaymentMethod(input.paymentMethod)) {
         errors.push("paymentMethod is invalid");
     }
     if (!Array.isArray(input.items) || input.items.length === 0) {

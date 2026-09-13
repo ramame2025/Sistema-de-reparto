@@ -45,6 +45,7 @@ import { useCatalog } from '../context/CatalogContext';
 import { useSync } from '../context/SyncContext';
 import { formatClock } from '../utils/jornada';
 import { useTruck } from '../context/TruckContext';
+import { SEED_PAYMENT_METHODS } from '../test-utils/paymentMethods';
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseSync = useSync as jest.Mock;
@@ -143,7 +144,13 @@ const apiReturning = (options: { stock?: unknown; customers?: unknown } = {}) =>
 
 beforeEach(() => {
   mockedUseTruck.mockReturnValue(baseTruckValue);
-  mockedUseCatalog.mockReturnValue({ products: [], prices, stale: false, canSell: true });
+  mockedUseCatalog.mockReturnValue({
+    products: [],
+    prices,
+    paymentMethods: SEED_PAYMENT_METHODS,
+    stale: false,
+    canSell: true,
+  });
   mockedNavigate.mockClear();
   mockedParentNavigate.mockClear();
   mockedApiGet = apiReturning();
@@ -273,7 +280,7 @@ describe('HomeScreen/estado de la jornada', () => {
       'No se pudo enviar · 3 intentos',
     );
     expect(screen.getByTestId('day-status-problem-s-transfer-reason')).toHaveTextContent(
-      'Falta el comprobante de la transferencia',
+      'Falta el comprobante de la Transferencia',
     );
   });
 

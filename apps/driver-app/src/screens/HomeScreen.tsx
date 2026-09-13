@@ -61,7 +61,7 @@ export function HomeScreen() {
     lastSyncAt,
   } = useSync();
   const { truck } = useTruck();
-  const { prices, products, fetchedAt } = useCatalog();
+  const { prices, products, paymentMethods, fetchedAt } = useCatalog();
   const { api, username, logout } = useAuth();
   const navigation = useNavigation<HomeScreenNavigationProp>();
 
@@ -146,8 +146,8 @@ export function HomeScreen() {
   }, []);
 
   const problems = useMemo(
-    () => buildDayProblems(pendingSales, todaySales ?? [], prices),
-    [pendingSales, todaySales, prices],
+    () => buildDayProblems(pendingSales, todaySales ?? [], prices, paymentMethods),
+    [pendingSales, todaySales, prices, paymentMethods],
   );
 
   /**

@@ -4,9 +4,15 @@ import { SalesService } from './sales.service';
 import { PricesModule } from '../prices/prices.module';
 import { ProductsModule } from '../products/products.module';
 import { CustomerCategoriesModule } from '../customer-categories/customer-categories.module';
+import { PaymentMethodsModule } from '../payment-methods/payment-methods.module';
 
 @Module({
-  imports: [PricesModule, ProductsModule, CustomerCategoriesModule],
+  imports: [
+    PricesModule,
+    ProductsModule,
+    CustomerCategoriesModule,
+    PaymentMethodsModule,
+  ],
   controllers: [SalesController],
   providers: [SalesService],
   exports: [SalesService],

@@ -27,6 +27,11 @@ jest.mock('../context/SyncContext', () => {
   return { ...actual, useSync: jest.fn() };
 });
 
+jest.mock('../context/CatalogContext', () => {
+  const actual = jest.requireActual('../context/CatalogContext');
+  return { ...actual, useCatalog: jest.fn() };
+});
+
 const mockedGoBack = jest.fn();
 let mockedRouteSale: SaleRecord;
 
@@ -40,7 +45,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react-nativ
 import type { SaleRecord } from '@distribuidor/shared';
 import { SaleDetailScreen } from './SaleDetailScreen';
 import { useAuth } from '../context/AuthContext';
+import { useCatalog } from '../context/CatalogContext';
 import { useSync } from '../context/SyncContext';
+import { SEED_PAYMENT_METHODS } from '../test-utils/paymentMethods';
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseSync = useSync as jest.Mock;
@@ -68,6 +75,10 @@ beforeEach(() => {
   mockedRouteSale = buildSale();
   mockedApiPatch = jest.fn().mockResolvedValue(buildSale());
   mockedRefreshDaySummary = jest.fn().mockResolvedValue(undefined);
+
+  (useCatalog as jest.Mock).mockReturnValue({
+    paymentMethods: SEED_PAYMENT_METHODS,
+  });
 
   mockedUseAuth.mockReturnValue({
     status: 'authenticated' as const,

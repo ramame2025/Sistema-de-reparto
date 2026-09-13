@@ -12,10 +12,10 @@ import { isoDateDaysAgo, todayIsoDate } from "../../../lib/dates";
 import { formatPaymentMethod } from "../../../lib/format";
 import {
   EXPENSE_CATEGORIES,
-  PAYMENT_METHODS,
   type ExpenseCategory,
   type ExpenseRecord,
   type PaymentMethod,
+  type PaymentMethodRecord,
   type ProductCode,
   type ProductRecord,
   type SaleAuditRecord,
@@ -60,6 +60,12 @@ export default function ReportesPage() {
   const { data: filterProducts = [] } = useSWR<ProductRecord[]>(
     "/products?includeInactive=true",
   );
+  // Mismo criterio que los productos: un medio de pago retirado sigue estando
+  // en las ventas viejas, y filtrar un mes pasado por el no puede depender de
+  // que siga vigente.
+  const { data: paymentMethods = [] } = useSWR<PaymentMethodRecord[]>(
+    "/payment-methods?includeInactive=true",
+  );
   const {
     data: expenses = [],
     isLoading: expensesLoading,
@@ -97,6 +103,31 @@ export default function ReportesPage() {
   const selectedSaleProofUrl = selectedSaleForAudit
     ? resolveReceiptUrl(selectedSaleForAudit.paymentProofRef)
     : null;
+
+  /**
+   * Si la venta seleccionada llevaba comprobante o no, segun el medio con el
+   * que se cobro. Antes esto era `paymentMethod === "efectivo"` escrito a
+   * mano; ahora la regla la trae el medio de pago.
+   *
+   * Tres resultados, no dos:
+   *
+   * - `none` para una fila de churn (`paymentMethod === null`, no hubo cobro)
+   *   y para todo medio cuya politica lo diga.
+   * - `unknown` mientras la lista de medios no llego. Sin ella no se puede
+   *   afirmar ni que faltaba ni que no aplicaba, y el modal no tiene por que
+   *   inventar una de las dos.
+   * - la politica del medio en cualquier otro caso; `optional` si el medio ya
+   *   no esta en la lista, que es lo que hacia el viejo `!== "efectivo"`:
+   *   asumir `none` esconderia un comprobante que de verdad falta.
+   */
+  const selectedSaleProofPolicy: PaymentMethodRecord["proofPolicy"] | "unknown" =
+    !selectedSaleForAudit?.paymentMethod
+      ? "none"
+      : paymentMethods.length === 0
+        ? "unknown"
+        : (paymentMethods.find(
+            (method) => method.code === selectedSaleForAudit.paymentMethod,
+          )?.proofPolicy ?? "optional");
 
   const loading = salesLoading || expensesLoading;
   const error =
@@ -313,7 +344,7 @@ export default function ReportesPage() {
         sale.truckCode ?? "",
         sale.customerName,
         sale.customerType,
-        formatPaymentMethod(sale.paymentMethod),
+        formatPaymentMethod(sale.paymentMethod, paymentMethods),
         sale.status,
         sale.total,
         sale.cancelReason ?? "",
@@ -426,9 +457,9 @@ export default function ReportesPage() {
               className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
             >
               <option value="all">Todos</option>
-              {PAYMENT_METHODS.map((method) => (
-                <option key={method} value={method}>
-                  {method}
+              {paymentMethods.map((method) => (
+                <option key={method.code} value={method.code}>
+                  {method.name}
                 </option>
               ))}
             </select>
@@ -528,7 +559,9 @@ export default function ReportesPage() {
                     <td className="py-2 pr-4">{sale.truckCode ?? "-"}</td>
                     <td className="py-2 pr-4">{sale.customerName}</td>
                     <td className="py-2 pr-4">{sale.customerType}</td>
-                    <td className="py-2 pr-4">{formatPaymentMethod(sale.paymentMethod)}</td>
+                    <td className="py-2 pr-4">
+                      {formatPaymentMethod(sale.paymentMethod, paymentMethods)}
+                    </td>
                     <td className="py-2 pr-4">
                       <span
                         className={
@@ -760,10 +793,11 @@ export default function ReportesPage() {
                 </a>
               ) : (
                 <p className="mt-1 text-sm text-slate-500">
-                  {selectedSaleForAudit.paymentMethod === null ||
-                  selectedSaleForAudit.paymentMethod === "efectivo"
-                    ? "Sin comprobante (pago en efectivo, no aplica)."
-                    : "El chofer no adjunto comprobante para esta venta."}
+                  {selectedSaleProofPolicy === "none"
+                    ? "Sin comprobante (este medio de pago no lleva, no aplica)."
+                    : selectedSaleProofPolicy === "unknown"
+                      ? "Sin comprobante adjunto."
+                      : "El chofer no adjunto comprobante para esta venta."}
                 </p>
               )}
             </section>

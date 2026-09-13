@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type {
   CustomerCategoryRecord,
+  PaymentMethodRecord,
   PriceTable,
   ProductRecord,
 } from '@distribuidor/shared';
@@ -27,12 +28,22 @@ export type CatalogContextValue = {
    * tienen que sobrevivir en la misma cache que los precios.
    */
   categories: CustomerCategoryRecord[];
+  /**
+   * Solo los activos, en el orden que definio el duenio. Traen las reglas de
+   * cobro (`proofPolicy`), no solo la etiqueta: la pantalla de venta decide
+   * con ellas si pide comprobante, y lo decide sin senal.
+   */
+  paymentMethods: PaymentMethodRecord[];
   status: CatalogStatus;
   /** Los precios salieron del cache: pueden estar desactualizados. */
   stale: boolean;
   /** Cuando se trajo el cache que se esta usando, si se esta usando uno. */
   fetchedAt: string | null;
-  /** Sin catalogo no hay precio honesto que mostrar, y no se puede vender. */
+  /**
+   * Sin catalogo no hay precio honesto que mostrar, y no se puede vender.
+   * Sin NINGUN medio de pago activo tampoco: la venta exige uno, asi que
+   * ofrecer la pantalla seria mandar al chofer a un callejon sin salida.
+   */
   canSell: boolean;
   error: string | null;
   reload(): Promise<void>;
@@ -54,6 +65,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [prices, setPrices] = useState<PriceTable | null>(null);
   const [categories, setCategories] = useState<CustomerCategoryRecord[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodRecord[]>([]);
   const [status, setStatus] = useState<CatalogStatus>('idle');
   const [stale, setStale] = useState(false);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
@@ -69,16 +81,19 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
 
     try {
       // En paralelo, pero se guardan juntos: un catalogo a medias no sirve.
-      const [fetchedProducts, fetchedPrices, fetchedCategories] = await Promise.all([
-        api.get<ProductRecord[]>('/products'),
-        api.get<PriceTable>('/prices/table'),
-        api.get<CustomerCategoryRecord[]>('/customer-categories'),
-      ]);
+      const [fetchedProducts, fetchedPrices, fetchedCategories, fetchedPaymentMethods] =
+        await Promise.all([
+          api.get<ProductRecord[]>('/products'),
+          api.get<PriceTable>('/prices/table'),
+          api.get<CustomerCategoryRecord[]>('/customer-categories'),
+          api.get<PaymentMethodRecord[]>('/payment-methods'),
+        ]);
 
       const now = new Date().toISOString();
       setProducts(fetchedProducts);
       setPrices(fetchedPrices);
       setCategories(fetchedCategories);
+      setPaymentMethods(fetchedPaymentMethods);
       setStale(false);
       setFetchedAt(now);
       setStatus('ready');
@@ -87,6 +102,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         products: fetchedProducts,
         prices: fetchedPrices,
         categories: fetchedCategories,
+        paymentMethods: fetchedPaymentMethods,
         fetchedAt: now,
       });
     } catch {
@@ -98,6 +114,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         setProducts(cached.products);
         setPrices(cached.prices);
         setCategories(cached.categories);
+        setPaymentMethods(cached.paymentMethods);
         setStale(true);
         setFetchedAt(cached.fetchedAt);
         setStatus('ready');
@@ -108,6 +125,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       setProducts([]);
       setPrices(null);
       setCategories([]);
+      setPaymentMethods([]);
       setStale(false);
       setFetchedAt(null);
       setStatus('error');
@@ -135,19 +153,41 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     [categories],
   );
 
+  const visiblePaymentMethods = useMemo(
+    () =>
+      paymentMethods
+        .filter((method) => method.isActive)
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
+    [paymentMethods],
+  );
+
   const value = useMemo<CatalogContextValue>(
     () => ({
       products: visibleProducts,
       prices,
       categories: visibleCategories,
+      paymentMethods: visiblePaymentMethods,
       status,
       stale,
       fetchedAt,
-      canSell: prices !== null && visibleProducts.length > 0,
+      canSell:
+        prices !== null &&
+        visibleProducts.length > 0 &&
+        visiblePaymentMethods.length > 0,
       error,
       reload: load,
     }),
-    [visibleProducts, prices, visibleCategories, status, stale, fetchedAt, error, load],
+    [
+      visibleProducts,
+      prices,
+      visibleCategories,
+      visiblePaymentMethods,
+      status,
+      stale,
+      fetchedAt,
+      error,
+      load,
+    ],
   );
 
   return <CatalogContext.Provider value={value}>{children}</CatalogContext.Provider>;

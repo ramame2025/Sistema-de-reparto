@@ -71,12 +71,57 @@ export function isWellFormedCustomerType(value: unknown): boolean {
   return trimmed.length > 0 && trimmed.length <= CUSTOMER_TYPE_MAX_LENGTH;
 }
 
-export const PAYMENT_METHODS = [
-  "efectivo",
-  "transferencia",
-  "qr",
-  "tarjeta",
-] as const;
+/**
+ * Medio de pago tal como viaja por la API. Es un string abierto, no una union
+ * cerrada, por la misma razon que `CustomerType`: los medios de pago los
+ * define el duenio en runtime, en la tabla `PaymentMethod`. El codigo es
+ * estable e inmutable una vez creado, porque ya viaja dentro de los payloads
+ * de venta encolados offline en los telefonos.
+ *
+ * La constante `PAYMENT_METHODS` que vivia aca se ELIMINO a proposito. Una
+ * lista compilada de medios de pago pasa a mentir en cuanto se inserta la
+ * primera fila nueva, y mentiria en silencio: la app seguiria ofreciendo
+ * cuatro opciones fijas contra una tabla que ya tiene cinco.
+ */
+export type PaymentMethod = string;
+
+/** Misma cota que `CUSTOMER_TYPE_MAX_LENGTH`, y por el mismo motivo. */
+export const PAYMENT_METHOD_MAX_LENGTH = 20;
+
+/**
+ * Que exige un medio de pago en materia de comprobante.
+ *
+ * - `none`: no aplica. El efectivo no tiene nada que adjuntar.
+ * - `optional`: se puede adjuntar, y si no se adjunta la venta queda marcada
+ *   como pendiente en el resumen del dia (`missing-proof`).
+ * - `required`: el chofer no puede guardar la venta sin el comprobante.
+ *
+ * Son TRES estados y no un booleano porque `optional` ya existe hoy en el
+ * comportamiento real: la pantalla dice "opcional" y el resumen del dia igual
+ * reclama el comprobante faltante. Un booleano obligaria a elegir cual de las
+ * dos mitades conservar.
+ */
+export const PROOF_POLICIES = ['none', 'optional', 'required'] as const;
+
+export type ProofPolicy = (typeof PROOF_POLICIES)[number];
+
+/**
+ * Valida la FORMA de un medio de pago, no su pertenencia a la tabla.
+ *
+ * Mismo criterio que `isWellFormedCustomerType`: `packages/shared` corre en el
+ * telefono, que valida el payload contra el catalogo que tenga cacheado --
+ * posiblemente de hace dias. Comprobar pertenencia aca rechazaria una venta
+ * encolada con un medio de pago creado despues de la ultima sincronizacion, es
+ * decir, perderia una venta ya cobrada. Que el medio EXISTA se verifica contra
+ * la tabla, del lado del servidor.
+ */
+export function isWellFormedPaymentMethod(value: unknown): boolean {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= PAYMENT_METHOD_MAX_LENGTH;
+}
 
 export const EXPENSE_CATEGORIES = [
   'combustible',
@@ -92,7 +137,6 @@ export const ASSIGNMENT_KINDS = ['titular', 'cobertura'] as const;
 
 export const SALE_KINDS = ['sale', 'churn'] as const;
 
-export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export type UserRole = (typeof USER_ROLES)[number];
 export type AssignmentKind = (typeof ASSIGNMENT_KINDS)[number];
@@ -521,6 +565,36 @@ export type UpdateCustomerCategoryInput = {
   sortOrder?: number;
 };
 
+
+/**
+ * Un medio de pago tal como lo devuelve `GET /payment-methods`.
+ *
+ * No hay `CreatePaymentMethodInput` ni `UpdatePaymentMethodInput`, y es
+ * deliberado: en esta fase la tabla no tiene endpoints de escritura. Una mala
+ * configuracion aca deja a los choferes sin poder cobrar, asi que las altas y
+ * los cambios de bandera se hacen por migracion. Ver `docs/plans/
+ * payment-methods-table.md`, decision D3.
+ */
+export type PaymentMethodRecord = {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  proofPolicy: ProofPolicy;
+  /**
+   * Si el cobro es plata fisica que el chofer tiene que rendir. Hoy NO lo lee
+   * nadie: no existe arqueo ni rendicion en el sistema. Viaja igual porque
+   * cambiar la FORMA de este record obliga a invalidar la cache del catalogo
+   * del telefono, y esa invalidacion tiene un costo operativo real (el chofer
+   * que actualiza a mitad de turno no puede vender hasta tener senal). Ver
+   * decision D6 del plan.
+   */
+  countsAsCash: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 /**
  * Cuantas unidades de UN producto entran en el camion. La capacidad dejo de
  * ser un numero unico: un total no dice que carga entra, y no se puede
@@ -782,7 +856,7 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
     errors.push("customerType is invalid");
   }
 
-  if (!PAYMENT_METHODS.includes(input.paymentMethod)) {
+  if (!isWellFormedPaymentMethod(input.paymentMethod)) {
     errors.push("paymentMethod is invalid");
   }
 

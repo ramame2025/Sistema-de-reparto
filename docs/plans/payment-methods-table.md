@@ -1,6 +1,19 @@
 # Change: Admin-Managed Payment Methods
 
-Status: **planned — not implemented**.
+Status: **phases 1–3 implemented, not committed to `main`. Migration NOT applied.**
+
+## ⚠️ PENDING — the migration is written but NOT applied
+
+```bash
+cd apps/api && set -a && . ../../.env && set +a && npx prisma migrate deploy
+```
+
+The `set -a && . ../../.env` prefix is **required**: the `.env` lives at the
+monorepo root and the Prisma CLI only auto-loads one from its own cwd or
+`prisma/`. Without it the command dies with `P1012 DATABASE_URL not found`.
+
+Deploy order and the mid-shift constraint are in "Rollout" below. Phase 4 (the
+admin screen) remains deferred, as planned.
 
 Follows the pattern established by
 [`dynamic-product-catalog.md`](./dynamic-product-catalog.md) and
@@ -170,7 +183,7 @@ plan for the UI. It is replaced by `type PaymentMethod = string`,
 
 Each phase is independently shippable and leaves the system working.
 
-### Phase 1 — Schema, shared contract, API
+### Phase 1 — Schema, shared contract, API — **DONE**
 
 **Migration `2026xxxxxxxxxx_payment_methods_table`:**
 1. `CREATE TABLE "PaymentMethod"` + unique index on `code` + index on
@@ -210,7 +223,7 @@ far.
   existence-not-currency semantics. Skipped when `paymentMethod` is `null`
   (churn rows).
 
-### Phase 2 — Driver app
+### Phase 2 — Driver app — **DONE**
 
 - `CatalogContext.tsx`: fetch `/payment-methods` alongside the existing three
   requests; add `paymentMethods` to `CachedCatalog`; bump
@@ -227,7 +240,7 @@ far.
   `'efectivo'`; raise `missing-proof` only when the policy is not `none`.
 - `DayStatusCard.tsx:35`: label from the record, deleting `PAYMENT_NAMES`.
 
-### Phase 3 — Dashboard
+### Phase 3 — Dashboard — **DONE**
 
 - `reportes/page.tsx:429`: build the filter options from `GET /payment-methods`
   with `includeInactive=true` — an admin filtering a past month must still be
@@ -257,6 +270,39 @@ far.
    `driver_catalog_v3`, so a driver who updates holds an unreadable cache and
    cannot sell until the phone reaches signal once. Same constraint that
    applied to the `v1 → v2` bump.
+
+## What the implementation added beyond the plan
+
+Three decisions were forced by the code and are worth recording:
+
+**The "catalogue not loaded" state is explicit, not guessed.** `proofPolicyOf`
+falls back to `optional` for a code missing from a **non-empty** catalogue
+(preserving the old `!== 'efectivo'` behaviour), but an **empty** catalogue
+means the rules are unknown, not permissive. `buildDayProblems` therefore
+reports no missing-proof problems at all when it has no payment methods —
+otherwise every cash sale of the day would demand a proof that does not exist.
+The dashboard has the same hole and answers it the same way, with a third
+`unknown` state whose copy says only "Sin comprobante adjunto." instead of
+accusing the driver.
+
+**The selected method is derived, not synced.** `NewSaleScreen` first defaulted
+the selection with a `useEffect`. That extra post-mount state update deadlocked
+the geolocation test's `advanceTimersByTimeAsync`: React kept rescheduling work
+while the fake clock advanced. Deriving the selection during render has no such
+interaction — and the effect was never needed.
+
+**`canSell` now requires at least one active payment method.** A sale needs
+one, so offering the screen without any would send the driver into a dead end.
+This also covers the "all methods deactivated" risk below from the driver's
+side; the phase-4 guard is still needed on the writing side.
+
+### Known unrelated failure
+
+`apps/driver-app/src/screens/NewSaleScreen.test.tsx` contains one test —
+*"omits latitude/longitude ... when the location read never resolves"* — that
+hangs indefinitely under fake timers. **It hangs on a clean checkout of `main`
+too**, with none of this change applied, so it is not this work's doing. The
+other 61 tests in that file pass. It is worth its own look.
 
 ## Risks
 

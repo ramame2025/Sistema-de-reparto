@@ -12,11 +12,14 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-enum PaymentMethod {
-  efectivo
-  transferencia
-  qr
-  tarjeta
+/// Que exige un medio de pago en materia de comprobante. A diferencia de los
+/// medios de pago, esto SI es un enum: los tres estados los entiende el
+/// codigo, y agregar un cuarto no es configuracion sino una funcionalidad
+/// nueva que hay que programar.
+enum ProofPolicy {
+  none
+  optional
+  required
 }
 
 enum SaleStatus {
@@ -78,7 +81,11 @@ model Sale {
   /// una FK un `ON UPDATE CASCADE` reescribiria el historial de ventas ya
   /// cobradas, que es exactamente lo que no puede pasar.
   customerType      String
-  paymentMethod     PaymentMethod?
+  /// Texto congelado, SIN foreign key a `PaymentMethod`, por la misma razon
+  /// que `customerType` justo arriba: la venta registra con que se pago en
+  /// ese momento. `null` solo en las filas `kind = churn`, donde no hubo
+  /// cobro -- es un hecho de negocio, no un dato faltante.
+  paymentMethod     String?
   note              String?
   customerId        String?
   truckId           String?
@@ -332,6 +339,38 @@ model Zone {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   customers Customer[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// Medios de pago (antes el enum `PaymentMethod`). Mismo contrato que
+/// `CustomerCategory`: `code` es la clave estable e inmutable que ya viaja
+/// dentro de los payloads de venta encolados en los telefonos, asi que se
+/// renombra el `name` y nunca el `code`; una fila se retira con `isActive` y
+/// no se borra nunca.
+///
+/// Lo que esta tabla agrega sobre las otras taxonomias son REGLAS, no
+/// etiquetas: `proofPolicy` es la que decide si una venta lleva comprobante,
+/// y hasta esta migracion vivia como tres comparaciones contra el string
+/// 'efectivo' repartidas en tres apps distintas.
+///
+/// No tiene endpoints de escritura a proposito (ver D3 del plan): una mala
+/// configuracion deja a los choferes sin poder cobrar.
+model PaymentMethod {
+  id           String      @id @default(cuid())
+  code         String      @unique
+  name         String
+  isActive     Boolean     @default(true)
+  sortOrder    Int         @default(0)
+  proofPolicy  ProofPolicy @default(optional)
+  /// Si el cobro es plata fisica que el chofer tiene que rendir. Todavia no
+  /// lo lee nadie: no hay arqueo en el sistema. Ver D6 del plan.
+  countsAsCash Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  /// Sin relacion inversa a `Sale`: la columna de la venta no tiene FK, a
+  /// proposito. Ver el comentario en `Sale.paymentMethod`.
 
   @@index([isActive, sortOrder])
 }

@@ -29,6 +29,7 @@ import {
   validateUpdateCustomerCategoryInput,
   validateCreateDriverCustomerAssignmentInput,
   validateCreateLoadManifestInput,
+  PAYMENT_METHOD_MAX_LENGTH,
   validateCreateSaleInput,
   validateCreateTruckInput,
   validateRecordEmptyVisitInput,
@@ -514,6 +515,44 @@ describe('validateCreateSaleInput (widened with optional FKs)', () => {
 
   it('accepts a payload with no paymentProofRef (unchanged behavior)', () => {
     expect(validateCreateSaleInput(base)).toEqual([]);
+  });
+
+  /**
+   * Desde que los medios de pago viven en una tabla, este validador comprueba
+   * la FORMA y no la pertenencia. Es deliberado y es la mitad del contrato:
+   * corre en el telefono, contra el catalogo que tenga cacheado. Si exigiera
+   * pertenencia, una venta encolada con un medio creado despues de la ultima
+   * sincronizacion se perderia -- con la plata ya cobrada en la calle.
+   */
+  it('accepts a well-formed paymentMethod that is not one of the four seeded ones', () => {
+    const errors = validateCreateSaleInput({ ...base, paymentMethod: 'mercadopago' });
+    expect(errors).toEqual([]);
+  });
+
+  it('rejects an empty paymentMethod', () => {
+    const errors = validateCreateSaleInput({ ...base, paymentMethod: '' });
+    expect(errors).toContain('paymentMethod is invalid');
+  });
+
+  it('rejects a whitespace-only paymentMethod', () => {
+    const errors = validateCreateSaleInput({ ...base, paymentMethod: '   ' });
+    expect(errors).toContain('paymentMethod is invalid');
+  });
+
+  it('rejects a paymentMethod longer than the max length', () => {
+    const errors = validateCreateSaleInput({
+      ...base,
+      paymentMethod: 'x'.repeat(PAYMENT_METHOD_MAX_LENGTH + 1),
+    });
+    expect(errors).toContain('paymentMethod is invalid');
+  });
+
+  it('rejects a non-string paymentMethod', () => {
+    const errors = validateCreateSaleInput({
+      ...base,
+      paymentMethod: 42 as unknown as string,
+    });
+    expect(errors).toContain('paymentMethod is invalid');
   });
 
   it('accepts a non-empty paymentProofRef regardless of paymentMethod, incluso efectivo', () => {
