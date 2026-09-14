@@ -8,11 +8,26 @@
 --
 -- Es la mas chica de las tres migraciones enum -> tabla del proyecto: `Sale`
 -- es la UNICA tabla que referencia el enum, y no gana ninguna foreign key.
+--
+-- ORDEN DE LOS PASOS: el enum se suelta ANTES de crear la tabla. En Postgres
+-- toda tabla crea un tipo compuesto homonimo, asi que un `CREATE TABLE
+-- "PaymentMethod"` mientras el enum del mismo nombre sigue vivo falla con
+-- 42710 (`type "PaymentMethod" already exists`). Primero se convierte la
+-- columna a texto, luego se dropea el enum, y recien ahi nace la tabla.
 
 -- CreateEnum: a diferencia del medio de pago, la politica de comprobante SI
 -- sigue siendo un enum. Sus tres valores los entiende el codigo; un cuarto
 -- seria una funcionalidad nueva, no configuracion del duenio.
 CREATE TYPE "ProofPolicy" AS ENUM ('none', 'optional', 'required');
+
+-- AlterTable: enum -> texto. El USING preserva cada valor tal cual, asi que
+-- toda venta existente queda apuntando al medio de pago semilla homonimo. La
+-- columna sigue siendo NULLABLE: una fila `kind = churn` no tuvo cobro.
+ALTER TABLE "Sale" ALTER COLUMN "paymentMethod" TYPE TEXT USING "paymentMethod"::TEXT;
+
+-- DropEnum: ya no lo referencia ninguna columna, y hay que soltar el nombre
+-- antes de que lo reclame la tabla.
+DROP TYPE "PaymentMethod";
 
 -- CreateTable
 CREATE TABLE "PaymentMethod" (
@@ -58,14 +73,6 @@ INSERT INTO "PaymentMethod" ("id", "code", "name", "isActive", "sortOrder", "pro
   ('seed_payment_method_transferencia', 'transferencia', 'Transferencia', true, 1, 'optional', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
   ('seed_payment_method_qr',            'qr',            'QR',            true, 2, 'optional', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
   ('seed_payment_method_tarjeta',       'tarjeta',       'Tarjeta',       true, 3, 'optional', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
-
--- AlterTable: enum -> texto. El USING preserva cada valor tal cual, asi que
--- toda venta existente queda apuntando al medio de pago semilla homonimo. La
--- columna sigue siendo NULLABLE: una fila `kind = churn` no tuvo cobro.
-ALTER TABLE "Sale" ALTER COLUMN "paymentMethod" TYPE TEXT USING "paymentMethod"::TEXT;
-
--- DropEnum: ya no lo referencia ninguna columna.
-DROP TYPE "PaymentMethod";
 
 -- `Sale."paymentMethod"` queda como TEXTO LIBRE, SIN foreign key, por las
 -- mismas razones que `Sale."customerType"` en `20260909150000_customer_categories`:
