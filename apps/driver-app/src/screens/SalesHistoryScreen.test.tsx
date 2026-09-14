@@ -100,7 +100,7 @@ describe('SalesHistoryScreen/fetch', () => {
     await render(<SalesHistoryScreen />);
 
     await waitFor(() => expect(screen.getByTestId('sales-history-row-s1')).toBeTruthy());
-    expect(screen.getByText('Cuenta Corriente')).toBeTruthy();
+    expect(screen.getByText('Cuenta corriente')).toBeTruthy();
   });
 
   // Un medio que el catalogo no conoce muestra su codigo crudo. Feo a

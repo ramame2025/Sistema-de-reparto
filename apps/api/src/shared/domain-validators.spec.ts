@@ -643,7 +643,7 @@ describe('validateCreateSaleInput (customer required by a debt-creating method)'
   const cuentaCorriente = buildPaymentMethod({
     id: 'pm-cuenta-corriente',
     code: 'cuenta_corriente',
-    name: 'Cuenta Corriente',
+    name: 'Cuenta corriente',
     sortOrder: 4,
     countsAsCash: false,
     createsDebt: true,
@@ -691,7 +691,7 @@ describe('validateCreateSaleInput (customer required by a debt-creating method)'
       buildPaymentMethod({
         id: 'pm-cuenta-corriente',
         code: 'cuenta_corriente',
-        name: 'Cuenta Corriente',
+        name: 'Cuenta corriente',
         createsDebt: false,
       }),
     ]);
@@ -1023,7 +1023,7 @@ describe('validateUpdateSaleInput', () => {
     const cuentaCorriente: PaymentMethodRecord = {
       id: 'pm-cuenta-corriente',
       code: 'cuenta_corriente',
-      name: 'Cuenta Corriente',
+      name: 'Cuenta corriente',
       isActive: true,
       sortOrder: 4,
       proofPolicy: 'none',

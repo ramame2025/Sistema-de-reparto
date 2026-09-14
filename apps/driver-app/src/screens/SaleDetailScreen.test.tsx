@@ -441,7 +441,7 @@ describe('SaleDetailScreen/medios de pago que generan deuda', () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          'Cuenta Corriente queda como deuda del cliente: esta venta no tiene un cliente del padrón.',
+          'Cuenta corriente queda como deuda del cliente: esta venta no tiene un cliente del padrón.',
         ),
       ).toBeTruthy(),
     );

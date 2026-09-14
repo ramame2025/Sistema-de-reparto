@@ -56,7 +56,7 @@ export const SEED_PAYMENT_METHODS: PaymentMethodRecord[] = [
   buildPaymentMethod({
     id: 'pm-cuenta-corriente',
     code: 'cuenta_corriente',
-    name: 'Cuenta Corriente',
+    name: 'Cuenta corriente',
     sortOrder: 4,
     proofPolicy: 'none',
     countsAsCash: false,
