@@ -8,16 +8,21 @@ import type {
 
 /**
  * La clave lleva version porque el bundle cambio de forma: la v2 agrego las
- * categorias de cliente y la v3 los medios de pago. Cambiarla -- en vez de
- * tolerar la forma vieja -- hace que una cache anterior se ignore entera en
- * lugar de leerse a medias.
+ * categorias de cliente, la v3 los medios de pago y la v4 la bandera
+ * `createsDebt` de cada medio. Cambiarla -- en vez de tolerar la forma vieja
+ * -- hace que una cache anterior se ignore entera en lugar de leerse a
+ * medias.
+ *
+ * La v4 importa aunque la bandera sea un solo booleano: una entrada v3 trae
+ * los medios sin ella, y leerla dejaria a la pantalla creyendo que ninguno
+ * genera deuda. La entrada vieja se abandona, no se migra.
  *
  * El costo de este bump es operativo y hay que tenerlo presente: un chofer que
  * actualiza la app a mitad de turno queda con una cache ilegible y no puede
  * vender hasta que el telefono agarre senal una vez. Por eso la app no se
  * publica a mitad de turno.
  */
-export const CATALOG_CACHE_KEY = 'driver_catalog_v3';
+export const CATALOG_CACHE_KEY = 'driver_catalog_v4';
 
 /**
  * El catalogo y los precios tal como los devolvio la API la ultima vez, mas

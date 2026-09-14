@@ -21,7 +21,11 @@ import { SegmentedPills } from '../components/SegmentedPills';
 import { TextField } from '../components/TextField';
 import { useAuth } from '../context/AuthContext';
 import { useCatalog } from '../context/CatalogContext';
-import { paymentMethodLabel, proofPolicyOf } from '../services/paymentMethods';
+import {
+  driverErrorMessage,
+  paymentMethodLabel,
+  proofPolicyOf,
+} from '../services/paymentMethods';
 import { useSync } from '../context/SyncContext';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { ApiError } from '../services/apiClient';
@@ -214,9 +218,22 @@ export function SaleDetailScreen() {
       ...(sale.note ? { note: sale.note } : {}),
     };
 
-    const validationErrors = validateUpdateSaleInput(payload);
+    // El catalogo va como segundo argumento por el mismo motivo que en la
+    // carga de una venta: pasar una venta ya grabada a un medio que genera
+    // deuda vale lo mismo que cargarla asi, y la regla del deudor no se puede
+    // contestar sin la tabla de medios de pago.
+    const validationErrors = validateUpdateSaleInput(payload, paymentMethods);
     if (validationErrors.length > 0) {
-      showMessage(validationErrors[0], 'error');
+      // Esta pantalla no puede elegir cliente -- la venta ya esta grabada --
+      // asi que el mensaje nombra el problema y no una accion que no existe.
+      showMessage(
+        driverErrorMessage(
+          validationErrors[0],
+          paymentMethodLabel(paymentMethods, paymentMethod, 'Este medio de pago'),
+          'esta venta no tiene un cliente del padrón.',
+        ),
+        'error',
+      );
       return;
     }
 
