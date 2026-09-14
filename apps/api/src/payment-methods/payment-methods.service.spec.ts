@@ -12,6 +12,7 @@ type PaymentMethodRow = {
   sortOrder: number;
   proofPolicy: ProofPolicy;
   countsAsCash: boolean;
+  createsDebt: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -27,6 +28,7 @@ function buildPaymentMethodRow(
     sortOrder: 0,
     proofPolicy: 'none',
     countsAsCash: true,
+    createsDebt: false,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -104,9 +106,30 @@ describe('PaymentMethodsService', () => {
         sortOrder: 1,
         proofPolicy: 'optional',
         countsAsCash: false,
+        createsDebt: false,
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
       });
+    });
+
+    // La bandera viaja por la API entera, no solo por la base: el tablero y la
+    // app del chofer deciden con ella, y nunca comparando el `code` contra
+    // 'cuenta_corriente'. Ver decision D2 del plan.
+    it('serializes createsDebt for a method that leaves the customer owing', async () => {
+      prisma.paymentMethod.findMany.mockResolvedValue([
+        buildPaymentMethodRow({
+          code: 'cuenta_corriente',
+          name: 'Cuenta Corriente',
+          proofPolicy: 'none',
+          countsAsCash: false,
+          createsDebt: true,
+          sortOrder: 4,
+        }),
+      ]);
+
+      const [record] = await service.listPaymentMethods();
+
+      expect(record.createsDebt).toBe(true);
     });
   });
 

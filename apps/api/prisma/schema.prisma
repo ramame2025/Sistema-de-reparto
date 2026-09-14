@@ -366,6 +366,12 @@ model PaymentMethod {
   /// Si el cobro es plata fisica que el chofer tiene que rendir. Todavia no
   /// lo lee nadie: no hay arqueo en el sistema. Ver D6 del plan.
   countsAsCash Boolean     @default(false)
+  /// Si el cliente queda debiendo la venta. Tercera pregunta independiente de
+  /// las otras dos banderas: una transferencia no es plata en mano y tampoco
+  /// deja deuda. Quien decide, lee esta bandera y nunca compara el `code`
+  /// contra 'cuenta_corriente'. Ver D1 y D2 de
+  /// `docs/plans/current-account-sales.md`.
+  createsDebt  Boolean     @default(false)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 

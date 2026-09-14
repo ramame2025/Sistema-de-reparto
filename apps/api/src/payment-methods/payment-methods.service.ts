@@ -17,6 +17,7 @@ type PaymentMethodRow = {
   sortOrder: number;
   proofPolicy: ProofPolicy;
   countsAsCash: boolean;
+  createsDebt: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -87,6 +88,7 @@ export class PaymentMethodsService {
       sortOrder: method.sortOrder,
       proofPolicy: method.proofPolicy,
       countsAsCash: method.countsAsCash,
+      createsDebt: method.createsDebt,
       createdAt: method.createdAt.toISOString(),
       updatedAt: method.updatedAt.toISOString(),
     };
