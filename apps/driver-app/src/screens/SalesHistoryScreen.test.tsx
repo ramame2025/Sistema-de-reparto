@@ -16,13 +16,20 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: mockedNavigate }),
 }));
 
+jest.mock('../context/CatalogContext', () => ({
+  useCatalog: jest.fn(),
+}));
+
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import type { SaleRecord } from '@distribuidor/shared';
 import { SalesHistoryScreen } from './SalesHistoryScreen';
 import { useAuth } from '../context/AuthContext';
+import { useCatalog } from '../context/CatalogContext';
+import { SEED_PAYMENT_METHODS } from '../test-utils/paymentMethods';
 
 const mockedUseAuth = useAuth as jest.Mock;
+const mockedUseCatalog = useCatalog as jest.Mock;
 let mockedApiGet: jest.Mock;
 
 const buildSale = (overrides: Partial<SaleRecord> = {}): SaleRecord => ({
@@ -42,6 +49,7 @@ const buildSale = (overrides: Partial<SaleRecord> = {}): SaleRecord => ({
 
 beforeEach(() => {
   mockedNavigate.mockClear();
+  mockedUseCatalog.mockReturnValue({ paymentMethods: SEED_PAYMENT_METHODS });
   mockedApiGet = jest.fn().mockResolvedValue([]);
   mockedUseAuth.mockReturnValue({
     status: 'authenticated' as const,
@@ -78,6 +86,52 @@ describe('SalesHistoryScreen/fetch', () => {
     expect(screen.getByText('$8.000')).toBeTruthy();
     expect(screen.getByText('Transferencia')).toBeTruthy();
     expect(screen.getByText('Efectivo')).toBeTruthy();
+  });
+
+  // El label sale SIEMPRE del catalogo. Antes vivia en un mapa compilado en
+  // esta pantalla, con las cuatro claves del enum viejo: un medio nacido por
+  // migracion caia en `undefined` y la fila se quedaba sin tipo de pago, sin
+  // error y sin que el typecheck dijera nada.
+  it('labels a payment method born from a migration, not from a compiled map', async () => {
+    mockedApiGet.mockResolvedValue([
+      buildSale({ id: 's1', paymentMethod: 'cuenta_corriente' }),
+    ]);
+
+    await render(<SalesHistoryScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('sales-history-row-s1')).toBeTruthy());
+    expect(screen.getByText('Cuenta Corriente')).toBeTruthy();
+  });
+
+  // Un medio que el catalogo no conoce muestra su codigo crudo. Feo a
+  // proposito: un dato feo se ve y se corrige, uno ausente no.
+  it('falls back to the raw code instead of rendering nothing', async () => {
+    mockedUseCatalog.mockReturnValue({ paymentMethods: [] });
+    mockedApiGet.mockResolvedValue([buildSale({ id: 's1', paymentMethod: 'fiado_30' })]);
+
+    await render(<SalesHistoryScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('sales-history-row-s1')).toBeTruthy());
+    expect(screen.getByText('fiado_30')).toBeTruthy();
+  });
+
+  it('gives the payment method its own filled badge so it reads apart from the date', async () => {
+    mockedApiGet.mockResolvedValue([buildSale({ id: 's1', paymentMethod: 'efectivo' })]);
+
+    await render(<SalesHistoryScreen />);
+
+    const badge = await screen.findByTestId('sales-history-payment-s1');
+    expect(badge).toHaveTextContent('Efectivo');
+    expect(badge).toHaveStyle({ backgroundColor: expect.any(String) });
+  });
+
+  it('shows no payment badge on a churn row, which had no payment at all', async () => {
+    mockedApiGet.mockResolvedValue([buildSale({ id: 's1', kind: 'churn', paymentMethod: null })]);
+
+    await render(<SalesHistoryScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('sales-history-row-s1')).toBeTruthy());
+    expect(screen.queryByTestId('sales-history-payment-s1')).toBeNull();
   });
 
   it('shows the sale date on each row', async () => {
