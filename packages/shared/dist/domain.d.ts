@@ -96,11 +96,18 @@ export declare function isWellFormedPaymentMethod(value: unknown): boolean;
 export declare const EXPENSE_CATEGORIES: readonly ["combustible", "peaje", "comida", "mantenimiento", "varios"];
 export declare const USER_ROLES: readonly ["admin", "chofer"];
 export declare const ASSIGNMENT_KINDS: readonly ["titular", "cobertura"];
-export declare const SALE_KINDS: readonly ["sale", "churn"];
+export declare const SALE_KINDS: readonly ["sale", "churn", "swap"];
+/**
+ * Por que vuelve una unidad. Es un enum y no una tabla por el mismo criterio
+ * que `SaleKind`: sus valores los entiende el codigo, asi que un tercer motivo
+ * es funcionalidad nueva que hay que programar, no configuracion del duenio.
+ */
+export declare const RETURN_REASONS: readonly ["empty", "faulty"];
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export type UserRole = (typeof USER_ROLES)[number];
 export type AssignmentKind = (typeof ASSIGNMENT_KINDS)[number];
 export type SaleKind = (typeof SALE_KINDS)[number];
+export type ReturnReason = (typeof RETURN_REASONS)[number];
 /**
  * La tabla de precios es RALA a proposito, en sus dos niveles: puede faltar un
  * tipo de cliente entero, y puede faltar un producto dentro de un tipo que si
@@ -118,6 +125,17 @@ export type SaleItemInput = {
     productCode: ProductCode;
     quantity: number;
 };
+/**
+ * Una linea de lo que VUELVE de la calle. Misma forma que `SaleItemInput` y a
+ * proposito sin precio: lo que entra no se cotiza. El motivo no viaja en la
+ * linea sino en la lista que la contiene (`returnedItems` son vacios,
+ * `swappedItems` son falladas), asi que un mismo producto puede aparecer en
+ * las dos a la vez sin ambiguedad.
+ */
+export type SaleReturnItemInput = {
+    productCode: ProductCode;
+    quantity: number;
+};
 export type CreateSaleInput = {
     clientGeneratedId?: string;
     /**
@@ -132,6 +150,19 @@ export type CreateSaleInput = {
     customerType: CustomerType;
     paymentMethod: PaymentMethod;
     items: SaleItemInput[];
+    /**
+     * Envases vacios que el cliente devuelve. No descargan mercaderia del
+     * camion: se graban como `SaleReturnItem` con motivo `empty`.
+     */
+    returnedItems?: SaleReturnItemInput[];
+    /**
+     * Cambios por falla. El numero dice DOS cosas al mismo tiempo: la unidad
+     * fallada que entra y la de reemplazo que sale del camion. Es un solo campo
+     * justamente para que el 1 a 1 no se pueda romper -- no hay dos numeros que
+     * puedan discrepar. El servidor deriva de aca la linea de `SaleItem` con
+     * `unitPrice: 0` y la de `SaleReturnItem` con motivo `faulty`.
+     */
+    swappedItems?: SaleReturnItemInput[];
     note?: string;
     customerId?: string;
     truckId?: string;
@@ -157,6 +188,12 @@ export type RecordEmptyVisitInput = {
     customerType: CustomerType;
     customerId?: string;
     note?: string;
+    /**
+     * Cuantos envases vacios volvieron y de que producto. El atajo de devolucion
+     * tambien puede decirlo ahora; su ausencia deja la fila como estaba, que es
+     * lo que traen las visitas ya encoladas.
+     */
+    returnedItems?: SaleReturnItemInput[];
 };
 export type UpdateSaleInput = CreateSaleInput & {
     reason: string;
@@ -174,6 +211,12 @@ export type UpdateSaleInput = CreateSaleInput & {
  */
 export type SaleItemRecord = SaleItemInput & {
     unitPrice: number;
+};
+/**
+ * Una linea que volvio, tal como quedo grabada, con su motivo.
+ */
+export type SaleReturnItemRecord = SaleReturnItemInput & {
+    reason: ReturnReason;
 };
 export type SaleRecord = {
     id: string;
@@ -201,12 +244,19 @@ export type SaleRecord = {
      */
     customerId?: string;
     /**
-     * `null` para una fila de churn (`kind === 'churn'`): no hubo pago, es el
-     * hecho de negocio real, no un dato faltante. Toda fila `kind === 'sale'`
-     * sigue teniendo un `PaymentMethod` valido.
+     * `null` para toda fila que no cobro (`kind === 'churn'` o
+     * `kind === 'swap'`): no hubo pago, es el hecho de negocio real, no un dato
+     * faltante. Toda fila `kind === 'sale'` sigue teniendo un `PaymentMethod`
+     * valido.
      */
     paymentMethod: PaymentMethod | null;
     items: SaleItemRecord[];
+    /**
+     * Lo que volvio en la visita, por producto y por motivo. La API siempre lo
+     * manda; es opcional en el tipo porque una venta cacheada en el telefono
+     * antes de este cambio no lo trae, y leerla no puede romperse por eso.
+     */
+    returnItems?: SaleReturnItemRecord[];
     note?: string;
     kind: SaleKind;
     containerReturned?: boolean;
@@ -687,13 +737,45 @@ export type PricedSaleResult = {
  */
 export declare function priceSaleItems(customerType: CustomerType, items: SaleItemInput[], prices: PriceTable): PricedSaleResult;
 /**
+ * De que clase es la visita, segun lo que paso en ella.
+ *
+ * El `kind` no se elige: se deriva. Una misma visita puede vender, recibir un
+ * vacio y cambiar una fallada, y eso es UN hecho comercial y UNA fila. La
+ * tabla de decision es esta, y no tiene mas ramas:
+ *
+ * | Que paso                                     | kind    | cobra |
+ * |----------------------------------------------|---------|-------|
+ * | Se vendio algo (con o sin cambios ni vacios) | `sale`  | si    |
+ * | Solo se cambiaron falladas                   | `swap`  | no    |
+ * | Solo volvieron envases vacios                | `churn` | no    |
+ *
+ * Pura y sin dependencias a proposito: la usan el servidor para decidir que
+ * graba y la pantalla del chofer para saber que rotulo poner en el pie, y las
+ * dos tienen que llegar siempre a la misma respuesta.
+ *
+ * Una visita vacia en los tres lados cae en `churn`, que es la rama que no
+ * cobra; el error de "no hay nada que registrar" lo pone el validador, porque
+ * derivar no es validar.
+ */
+export declare function deriveSaleKind(input: {
+    items?: SaleItemInput[];
+    returnedItems?: SaleReturnItemInput[];
+    swappedItems?: SaleReturnItemInput[];
+}): SaleKind;
+/**
  * El segundo parametro es el catalogo de medios de pago disponible. Es
  * opcional a proposito: sin catalogo el validador se comporta exactamente
  * como antes, asi que los llamadores que todavia no lo pasan no cambian de
  * comportamiento. Es tambien la unica forma de enterarse de `createsDebt`,
  * que vive en otra tabla.
+ *
+ * El tercero es el `kind` que hay que dar por bueno en lugar de derivarlo del
+ * payload. Solo lo usa la edicion: una fila de swap guarda sus reemplazos en
+ * `items`, asi que derivar sobre un payload de edicion daria `sale` y exigiria
+ * un cobro que esa fila nunca tuvo. Para la creacion no se pasa nunca -- ahi
+ * el contenido es la unica fuente de verdad.
  */
-export declare function validateCreateSaleInput(input: CreateSaleInput, paymentMethods?: PaymentMethodRecord[]): string[];
+export declare function validateCreateSaleInput(input: CreateSaleInput, paymentMethods?: PaymentMethodRecord[], kindOverride?: SaleKind): string[];
 export declare function validateRecordEmptyVisitInput(input: RecordEmptyVisitInput): string[];
 export declare function validateUpdateSaleInput(input: UpdateSaleInput, paymentMethods?: PaymentMethodRecord[]): string[];
 export declare function validateCancelSaleInput(input: CancelSaleInput): string[];
