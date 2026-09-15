@@ -519,3 +519,121 @@ describe('SaleDetailScreen/medios de pago que generan deuda', () => {
     expect(mockedApiPatch).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Un cambio por falla no es una venta de cero: se muestra como lo que fue, sin
+ * selector de cobro, y con las cantidades de los dos lados -- lo que salio del
+ * camion y lo que volvio fallado -- que son el MISMO numero (D6b).
+ */
+describe('SaleDetailScreen/un cambio por falla (container-swap)', () => {
+  const buildSwap = (overrides: Partial<SaleRecord> = {}): SaleRecord =>
+    buildSale({
+      id: 'swap-1',
+      kind: 'swap',
+      paymentMethod: null,
+      total: 0,
+      items: [{ productCode: 'G10', quantity: 2, unitPrice: 0 }],
+      returnItems: [{ productCode: 'G10', quantity: 2, reason: 'faulty' }],
+      ...overrides,
+    });
+
+  it('says it is a swap and never offers a charge to edit', async () => {
+    mockedRouteSale = buildSwap();
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('sale-detail-swap')).toBeTruthy();
+    // No hubo cobro: un selector de medio de pago aca solo puede inventar uno.
+    expect(screen.queryByTestId('sale-detail-payment-row')).toBeNull();
+  });
+
+  it('shows both sides of the swap: what left the truck and what came back', async () => {
+    mockedRouteSale = buildSwap();
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('product-row-G10-quantity')).toHaveTextContent('2');
+    expect(screen.getByTestId('faulty-row-G10-quantity')).toHaveTextContent('2');
+  });
+
+  // El 1 a 1 no se revalida: se vuelve imposible de romper. Los dos lados son
+  // el mismo numero, asi que tocar cualquiera de los dos mueve los dos.
+  it('moves both sides together, whichever one the driver taps', async () => {
+    mockedRouteSale = buildSwap();
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+
+    expect(screen.getByTestId('product-row-G10-quantity')).toHaveTextContent('3');
+    expect(screen.getByTestId('faulty-row-G10-quantity')).toHaveTextContent('3');
+
+    await fireEvent.press(screen.getByTestId('faulty-row-G10-decrement'));
+
+    expect(screen.getByTestId('product-row-G10-quantity')).toHaveTextContent('2');
+    expect(screen.getByTestId('faulty-row-G10-quantity')).toHaveTextContent('2');
+  });
+
+  it('sends the swap as one list, so the API can keep the 1:1 on its side too', async () => {
+    mockedRouteSale = buildSwap();
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.changeText(
+      screen.getByTestId('sale-detail-edit-reason'),
+      'Eran tres falladas, no dos',
+    );
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [, payload] = mockedApiPatch.mock.calls[0];
+    // `kind` viaja para que el servidor pueda rechazar una edicion que le
+    // cambie la clase a la fila; el numero viaja UNA sola vez.
+    expect(payload.kind).toBe('swap');
+    expect(payload.swappedItems).toEqual([{ productCode: 'G10', quantity: 3 }]);
+    expect(payload.items).toEqual([]);
+  });
+
+  it('never lets a swap be emptied into a row that means nothing', async () => {
+    mockedRouteSale = buildSwap({
+      items: [{ productCode: 'G10', quantity: 1, unitPrice: 0 }],
+      returnItems: [{ productCode: 'G10', quantity: 1, reason: 'faulty' }],
+    });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.press(screen.getByTestId('faulty-row-G10-decrement'));
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Sin motivo real');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    expect(mockedApiPatch).not.toHaveBeenCalled();
+    expect(screen.getByText('El cambio tiene que quedar con al menos una unidad.')).toBeTruthy();
+  });
+
+  // Los envases vacios de la visita se muestran, pero no se editan desde aca:
+  // lo que la pantalla no manda, la API no lo toca, y asi una edicion del
+  // cambio no puede borrarlos sin querer.
+  it('shows the empties that came back without putting them at risk', async () => {
+    mockedRouteSale = buildSwap({
+      returnItems: [
+        { productCode: 'G10', quantity: 2, reason: 'faulty' },
+        { productCode: 'G15', quantity: 1, reason: 'empty' },
+      ],
+    });
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('sale-detail-empties')).toBeTruthy();
+    expect(screen.getByText('G15 · 1')).toBeTruthy();
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Otro motivo');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [, payload] = mockedApiPatch.mock.calls[0];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'returnedItems')).toBe(false);
+  });
+
+  it('leaves a normal sale exactly as it was', async () => {
+    mockedRouteSale = buildSale();
+    await render(<SaleDetailScreen />);
+
+    expect(screen.queryByTestId('sale-detail-swap')).toBeNull();
+    expect(screen.getByTestId('sale-detail-payment-row')).toBeTruthy();
+  });
+});

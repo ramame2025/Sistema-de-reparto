@@ -7,7 +7,12 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { CreateSaleInput, RecordEmptyVisitInput, SaleRecord } from '@distribuidor/shared';
+import {
+  deriveSaleKind,
+  type CreateSaleInput,
+  type RecordEmptyVisitInput,
+  type SaleRecord,
+} from '@distribuidor/shared';
 import { useAuth } from './AuthContext';
 import { useTruck } from './TruckContext';
 import {
@@ -197,7 +202,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     async (payload: CreateSaleInput, cause: string): Promise<number> => {
       const entry: PendingSale = {
         queueId: buildQueueId(),
-        kind: 'sale',
+        // El rotulo sale del contenido, con la misma funcion pura que usa el
+        // servidor al grabar: una visita que solo cambio falladas se encola
+        // como 'swap' y no como venta. Fijarlo en 'sale' hacia que la cola y
+        // la fila grabada dijeran cosas distintas de la misma visita.
+        kind: deriveSaleKind(payload),
         payload,
         createdAt: new Date().toISOString(),
         retries: 0,

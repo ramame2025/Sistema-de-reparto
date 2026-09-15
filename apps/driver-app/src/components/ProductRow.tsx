@@ -16,6 +16,13 @@ export type ProductRowProps = {
    */
   unitPrice?: number;
   quantity: number;
+  /**
+   * Prefijo de los testIDs de la fila. La misma fila aparece ahora en tres
+   * listas de la pantalla de venta -- lo vendido, los envases que vuelven y
+   * los cambios por falla -- y sin prefijo las tres publicarian el mismo
+   * identificador para el mismo producto.
+   */
+  testIDPrefix?: string;
   onIncrement: () => void;
   onDecrement: () => void;
 };
@@ -30,16 +37,18 @@ export function ProductRow({
   name,
   unitPrice,
   quantity,
+  testIDPrefix = 'product-row',
   onIncrement,
   onDecrement,
 }: ProductRowProps) {
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const canDecrement = quantity > 0;
+  const testID = `${testIDPrefix}-${code}`;
   const subtitle = unitPrice === undefined ? name : `${name} · ${formatArs(unitPrice)}`;
 
   return (
-    <View style={styles.row} testID={`product-row-${code}`}>
+    <View style={styles.row} testID={testID}>
       <View style={styles.text}>
         <Text style={styles.code}>{code}</Text>
         <Text style={styles.subtitle}>{subtitle}</Text>
@@ -52,7 +61,7 @@ export function ProductRow({
           accessibilityState={{ disabled: !canDecrement }}
           disabled={!canDecrement}
           onPress={onDecrement}
-          testID={`product-row-${code}-decrement`}
+          testID={`${testID}-decrement`}
           style={styles.decrement}
         >
           <Text style={[styles.decrementLabel, !canDecrement && styles.mutedLabel]}>−</Text>
@@ -60,7 +69,7 @@ export function ProductRow({
 
         <Text
           style={[styles.quantity, quantity === 0 && styles.mutedLabel]}
-          testID={`product-row-${code}-quantity`}
+          testID={`${testID}-quantity`}
         >
           {quantity}
         </Text>
@@ -69,7 +78,7 @@ export function ProductRow({
           accessibilityRole="button"
           accessibilityLabel={`Agregar una unidad de ${code}`}
           onPress={onIncrement}
-          testID={`product-row-${code}-increment`}
+          testID={`${testID}-increment`}
           style={styles.increment}
         >
           <Text style={styles.incrementLabel}>+</Text>
