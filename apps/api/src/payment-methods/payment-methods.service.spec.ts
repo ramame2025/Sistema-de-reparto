@@ -119,7 +119,7 @@ describe('PaymentMethodsService', () => {
       prisma.paymentMethod.findMany.mockResolvedValue([
         buildPaymentMethodRow({
           code: 'cuenta_corriente',
-          name: 'Cuenta Corriente',
+          name: 'Cuenta corriente',
           proofPolicy: 'none',
           countsAsCash: false,
           createsDebt: true,

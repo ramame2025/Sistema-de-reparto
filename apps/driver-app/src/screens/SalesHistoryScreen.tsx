@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { PaymentMethod, SaleRecord } from '@distribuidor/shared';
+import type { SaleRecord } from '@distribuidor/shared';
 import { EmptyState } from '../components/EmptyState';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { LoadingRow } from '../components/LoadingRow';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { ScreenHeading } from '../components/ScreenHeading';
 import { useAuth } from '../context/AuthContext';
+import { useCatalog } from '../context/CatalogContext';
+import { paymentMethodLabel } from '../services/paymentMethods';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { useColors } from '../theme/ThemeContext';
 import type { Colors } from '../theme/colors';
@@ -35,13 +37,6 @@ const formatDateTime = (iso: string): string => {
   )}`;
 };
 
-const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
-  efectivo: 'Efectivo',
-  transferencia: 'Transferencia',
-  qr: 'QR',
-  tarjeta: 'Tarjeta',
-};
-
 type SalesHistoryNavigationProp = NativeStackNavigationProp<HomeStackParamList, 'SalesHistory'>;
 
 export function SalesHistoryScreen() {
@@ -49,6 +44,9 @@ export function SalesHistoryScreen() {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { api } = useAuth();
   const navigation = useNavigation<SalesHistoryNavigationProp>();
+  // Los nombres salen del catalogo, no de un mapa compilado: un medio nacido
+  // por migracion tiene que aparecer aca sin tocar esta pantalla.
+  const { paymentMethods } = useCatalog();
 
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,7 +123,12 @@ export function SalesHistoryScreen() {
                   {item.kind === 'churn' ? (
                     <Text style={styles.badgeChurn}>Devolución de envase</Text>
                   ) : item.paymentMethod ? (
-                    <Text style={styles.meta}>{PAYMENT_METHOD_LABELS[item.paymentMethod]}</Text>
+                    <Text
+                      style={styles.badgePayment}
+                      testID={`sales-history-payment-${item.id}`}
+                    >
+                      {paymentMethodLabel(paymentMethods, item.paymentMethod)}
+                    </Text>
                   ) : null}
                   {item.status === 'canceled' ? (
                     <Text style={styles.badgeCanceled}>Anulada</Text>
@@ -183,6 +186,21 @@ const makeStyles = (colors: Colors) =>
   meta: {
     fontSize: typography.sizes.sm,
     color: colors.textSecondary,
+  },
+  // Chip con fondo propio: la fila se apoya sobre `background`, asi que
+  // `surface` mas el borde lo despegan del resto del renglon en los dos temas.
+  // Sin fondo, el medio de pago se confundia con la fecha de al lado.
+  badgePayment: {
+    fontSize: typography.sizes.xs,
+    fontWeight: typography.weights.bold,
+    color: colors.textSecondary,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    overflow: 'hidden',
   },
   badgeCanceled: {
     fontSize: typography.sizes.xs,

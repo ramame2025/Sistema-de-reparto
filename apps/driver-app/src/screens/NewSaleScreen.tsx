@@ -34,6 +34,7 @@ import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { ApiError } from '../services/apiClient';
 import { API_URL } from '../services/config';
 import { captureDeviceLocation } from '../services/location';
+import { createsDebtOf, driverErrorMessage } from '../services/paymentMethods';
 import { useColors } from '../theme/ThemeContext';
 import type { Colors } from '../theme/colors';
 import { radii } from '../theme/radii';
@@ -185,6 +186,19 @@ export function NewSaleScreen() {
   // contra el string 'efectivo' como se hacia hasta ahora.
   const proofPolicy = selectedPaymentMethod?.proofPolicy ?? 'none';
   const proofRequired = proofPolicy === 'required';
+
+  // Si el medio elegido deja al cliente debiendo. Se pregunta por la bandera
+  // del catalogo, nunca comparando el codigo contra 'cuenta_corriente': el dia
+  // que el duenio agregue otro medio a cuenta, esta pantalla ya lo entiende.
+  const paymentCreatesDebt = createsDebtOf(paymentMethods, paymentMethod);
+
+  // Una deuda tiene que tener un deudor, y el deudor tiene que ser una ficha
+  // del padron. Un nombre suelto -- el que queda cuando un alta rapida no
+  // llego a grabarse -- alcanza para una venta al contado, pero no para una a
+  // cuenta: despues no hay a quien cobrarle.
+  const debtNeedsDirectoryCustomer = paymentCreatesDebt && !customerId;
+
+  const paymentMethodName = selectedPaymentMethod?.name ?? 'Este medio de pago';
 
   const currentItems = useMemo(
     () =>
@@ -433,9 +447,24 @@ export function NewSaleScreen() {
     // check: catches a blank/whitespace-only name client-side, before it
     // either hits the API (400) or, worse, gets stuck forever in the
     // offline sync queue with no remediation UI.
-    const validationErrors = validateCreateSaleInput(payload);
+    //
+    // El catalogo va como segundo argumento porque la regla del deudor no se
+    // puede contestar sin el: `createsDebt` vive en la tabla de medios de
+    // pago, no en el payload. Sin pasarlo, una venta a cuenta sin cliente se
+    // encolaria sin senal y recien el servidor la rechazaria -- horas o dias
+    // despues, con el chofer lejos del cliente.
+    const validationErrors = validateCreateSaleInput(payload, paymentMethods);
     if (validationErrors.length > 0) {
-      showMessage(validationErrors[0], 'error');
+      // El motivo, en el idioma del chofer: el string crudo del validador
+      // habla en ingles y nombra un campo que esta pantalla no muestra.
+      showMessage(
+        driverErrorMessage(
+          validationErrors[0],
+          paymentMethodName,
+          'elegí un cliente del padrón antes de guardar.',
+        ),
+        'error',
+      );
       submittingRef.current = false;
       setSaving(false);
       return;
@@ -648,6 +677,21 @@ export function NewSaleScreen() {
         />
       )}
 
+      {/*
+        El aviso aparece en cuanto el chofer elige el medio, no recien al
+        apretar Guardar: un nombre suelto con un medio a cuenta es un estado
+        ambiguo, y dejarlo sin nombrar hasta el final le hace cargar la venta
+        entera para enterarse despues. Va pegado a la tarjeta del cliente, que
+        es la salida: un toque y elige del padron.
+      */}
+      {debtNeedsDirectoryCustomer && (
+        <FeedbackBanner
+          testID="new-sale-debt-needs-customer"
+          message={`${paymentMethodName} queda como deuda del cliente. Elegí un cliente del padrón para poder guardar esta venta.`}
+          tone="warning"
+        />
+      )}
+
       <CustomerCard
         testID="new-sale-customer-card"
         name={customerName || undefined}
@@ -678,6 +722,9 @@ export function NewSaleScreen() {
           // medios, y `canSell` ya bloquea la venta hasta entonces.
           value={paymentMethod ?? ''}
           onChange={setChosenPaymentMethod}
+          // Tres por fila: estirados en un solo renglon, "Cuenta corriente" y
+          // "Transferencia" quedan ilegibles, y el catalogo puede crecer.
+          maxPerRow={3}
           testID="new-sale-payment"
         />
       </View>

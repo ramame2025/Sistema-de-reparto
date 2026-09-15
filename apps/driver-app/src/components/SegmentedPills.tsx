@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import type { ViewStyle } from 'react-native';
 import { useColors } from '../theme/ThemeContext';
 import type { Colors } from '../theme/colors';
 import { MIN_TOUCH_TARGET, spacing } from '../theme/spacing';
@@ -20,9 +21,31 @@ export type SegmentedPillsProps<T extends string> = {
    * "Mantenimiento" ilegible al lado de "Peaje".
    */
   wrap?: boolean;
-  /** Each pill gets `${testID}-${option.value}`. */
+  /**
+   * Cuantas pastillas como maximo comparten un renglon. Las que sobran bajan
+   * de fila formando una grilla pareja.
+   *
+   * Es el punto medio entre los otros dos modos. Estiradas, cinco medios de
+   * pago dejan "Cuenta corriente" ilegible; con `wrap`, cada pastilla mide lo
+   * que dice y el borde derecho queda dentado. Acotando el renglon las filas
+   * quedan parejas y el ancho no depende de cuanto mida el texto.
+   *
+   * Tiene prioridad sobre `wrap`, porque ya envuelve por definicion.
+   */
+  maxPerRow?: number;
+  /** Each pill gets `${testID}-${option.value}`; the row gets `${testID}-row`. */
   testID?: string;
 };
+
+/**
+ * Base en porcentaje que garantiza `columns` por renglon y ni una mas.
+ *
+ * Se divide por `columns + 1` y no por `columns`: con el divisor exacto, N
+ * pastillas suman el 100% y los huecos entre ellas ya no entran, asi que la
+ * ultima baja de fila. Con una columna imaginaria de mas sobra lugar para los
+ * huecos, y `flexGrow` estira las N hasta llenar el renglon.
+ */
+const basisFor = (columns: number): `${number}%` => `${100 / (columns + 1)}%`;
 
 /**
  * Single-choice row of pills. The unselected state is an outline, not a
@@ -35,13 +58,22 @@ export function SegmentedPills<T extends string>({
   value,
   onChange,
   wrap = false,
+  maxPerRow,
   testID,
 }: SegmentedPillsProps<T>) {
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
+  const grid = typeof maxPerRow === 'number' && maxPerRow > 0;
+  const gridPill: ViewStyle | null = grid
+    ? { flexBasis: basisFor(maxPerRow), flexGrow: 1 }
+    : null;
+
   return (
-    <View style={[styles.row, wrap && styles.rowWrap]}>
+    <View
+      style={[styles.row, (wrap || grid) && styles.rowWrap]}
+      testID={testID ? `${testID}-row` : undefined}
+    >
       {options.map((option) => {
         const selected = option.value === value;
 
@@ -54,7 +86,8 @@ export function SegmentedPills<T extends string>({
             testID={testID ? `${testID}-${option.value}` : undefined}
             style={[
               styles.pill,
-              wrap ? styles.pillAuto : styles.pillStretch,
+              grid || wrap ? styles.pillAuto : styles.pillStretch,
+              gridPill,
               selected ? styles.pillSelected : styles.pillIdle,
             ]}
           >

@@ -1159,3 +1159,150 @@ describe('NewSaleScreen/last sale line', () => {
     );
   });
 });
+
+/**
+ * Fase 2 de docs/plans/current-account-sales.md: un medio de pago que genera
+ * deuda exige un cliente del padron, porque una deuda sin deudor no se puede
+ * cobrar despues.
+ *
+ * Ningun test de este bloque compara contra el codigo 'cuenta_corriente' para
+ * decidir el comportamiento esperado (D2): la pantalla lee `createsDebt`, y el
+ * ultimo test lo prueba con un medio de otro nombre.
+ */
+describe('NewSaleScreen/medios de pago que generan deuda', () => {
+  // Un cliente elegido del padron trae su id. Un nombre suelto -- el que el
+  // chofer arrastra de un alta que no llego a grabarse -- no lo trae, y es
+  // exactamente el estado que la cuenta corriente no puede aceptar.
+  const renderWithLooseName = (customerName = 'Almacén sin ficha') => {
+    mockedRouteParams = {
+      pickedCustomer: { id: '', name: customerName, customerType: 'final' },
+    };
+    return render(<NewSaleScreen />);
+  };
+
+  it('saves a sale on account when the customer comes from the directory', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-cc-1');
+
+    await renderSaleScreen('Kiosco La Esquina');
+    await fireEvent.press(screen.getByTestId('new-sale-payment-cuenta_corriente'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0]).toMatchObject({
+      paymentMethod: 'cuenta_corriente',
+      customerId: 'cus-1',
+    });
+    expect(screen.queryByTestId('new-sale-debt-needs-customer')).toBeNull();
+  });
+
+  it('refuses to send or queue a sale on account without a directory customer, and says why in Spanish', async () => {
+    await renderWithLooseName();
+    await fireEvent.press(screen.getByTestId('new-sale-payment-cuenta_corriente'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    // Ni a la API ni a la cola offline: la regla se aplica antes de encolar,
+    // que es donde una venta invalida se quedaria trabada para siempre.
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'Cuenta corriente queda como deuda del cliente: elegí un cliente del padrón antes de guardar.',
+        ),
+      ).toBeTruthy(),
+    );
+    expect(mockedTrySendSale).not.toHaveBeenCalled();
+    expect(mockedEnqueueSale).not.toHaveBeenCalled();
+    // Nada del string crudo del validador compartido.
+    expect(
+      screen.queryByText('customerId is required when the payment method creates debt'),
+    ).toBeNull();
+  });
+
+  it('warns as soon as the driver switches a loose name over to a method that creates debt', async () => {
+    await renderWithLooseName('Almacén sin ficha');
+
+    // Con efectivo el nombre suelto es legitimo: una venta al paso no tiene
+    // ficha de cliente, y eso no es un error.
+    expect(screen.queryByTestId('new-sale-debt-needs-customer')).toBeNull();
+
+    await fireEvent.press(screen.getByTestId('new-sale-payment-cuenta_corriente'));
+
+    // El aviso aparece con el cambio de medio, no recien al apretar Guardar:
+    // el estado ambiguo se resuelve de forma explicita y con la salida a mano.
+    expect(screen.getByTestId('new-sale-debt-needs-customer')).toBeTruthy();
+  });
+
+  it('drops the warning again when the driver goes back to a method that creates no debt', async () => {
+    await renderWithLooseName();
+
+    await fireEvent.press(screen.getByTestId('new-sale-payment-cuenta_corriente'));
+    expect(screen.getByTestId('new-sale-debt-needs-customer')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('new-sale-payment-transferencia'));
+    expect(screen.queryByTestId('new-sale-debt-needs-customer')).toBeNull();
+  });
+
+  it('never warns for a method that creates no debt, even without a directory customer', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-1');
+
+    await renderWithLooseName();
+    await fireEvent.press(screen.getByTestId('new-sale-payment-transferencia'));
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('new-sale-debt-needs-customer')).toBeNull();
+  });
+
+  /**
+   * D2 en un solo test: una fila con OTRO codigo y la misma bandera se
+   * comporta igual. Si alguien escribiera `code === 'cuenta_corriente'` en
+   * cualquier lado, este test se pone rojo y los demas siguen verdes.
+   */
+  it('applies the same rule to any other method flagged as creating debt', async () => {
+    mockedUseCatalog.mockReturnValue({
+      ...baseCatalogValue,
+      paymentMethods: [
+        buildPaymentMethod(),
+        buildPaymentMethod({
+          id: 'pm-fiado-30',
+          code: 'fiado_30',
+          name: 'Fiado 30 días',
+          sortOrder: 1,
+          proofPolicy: 'none',
+          countsAsCash: false,
+          createsDebt: true,
+        }),
+      ],
+    });
+
+    await renderWithLooseName();
+    await fireEvent.press(screen.getByTestId('new-sale-payment-fiado_30'));
+
+    expect(screen.getByTestId('new-sale-debt-needs-customer')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'Fiado 30 días queda como deuda del cliente: elegí un cliente del padrón antes de guardar.',
+        ),
+      ).toBeTruthy(),
+    );
+    expect(mockedTrySendSale).not.toHaveBeenCalled();
+    expect(mockedEnqueueSale).not.toHaveBeenCalled();
+  });
+
+  // D3: la fila nace con `proofPolicy: 'none'`, asi que la seccion de
+  // comprobante no aparece sola. Esta fase no agrega logica para eso.
+  it('shows no payment-proof section for a sale on account', async () => {
+    await renderSaleScreen();
+    await fireEvent.press(screen.getByTestId('new-sale-payment-cuenta_corriente'));
+
+    expect(screen.queryByTestId('new-sale-payment-proof-capture-camera')).toBeNull();
+    expect(screen.queryByTestId('new-sale-payment-proof-pick-gallery')).toBeNull();
+  });
+});

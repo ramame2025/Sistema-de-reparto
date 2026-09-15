@@ -116,7 +116,26 @@ describe('catalog cache', () => {
   // La clave lleva version: el bundle cambio de forma, y una entrada vieja
   // guardada bajo la clave anterior no se puede leer como si fuera esta.
   it('is stored under a versioned key', () => {
-    expect(CATALOG_CACHE_KEY).toBe('driver_catalog_v3');
+    expect(CATALOG_CACHE_KEY).toBe('driver_catalog_v4');
+  });
+
+  // `createsDebt` cambio la forma de `PaymentMethodRecord`. Una entrada v3
+  // trae medios de pago sin la bandera, y leerla dejaria a la pantalla
+  // creyendo que ningun medio genera deuda -- justo la decision que la
+  // bandera existe para tomar. La entrada vieja se abandona, no se migra.
+  it('ignores an entry left under the previous version of the key', async () => {
+    await AsyncStorage.setItem(
+      'driver_catalog_v3',
+      JSON.stringify({
+        products,
+        prices,
+        categories,
+        paymentMethods,
+        fetchedAt: '2026-09-13T10:00:00.000Z',
+      }),
+    );
+
+    expect(await loadCachedCatalog()).toBeNull();
   });
 
   // Sin cache no hay precio honesto que mostrar. Devolver null deja que la

@@ -1,6 +1,17 @@
 # Change: Cuenta Corriente as a Payment Method
 
-Status: **planned, nothing implemented.**
+Status: **phases 1-3 implemented, not merged. Migration NOT applied.**
+
+## PENDING - the migration is written but NOT applied
+
+```bash
+pnpm --filter api exec prisma migrate deploy
+```
+
+Apply it only once phase 2 has shipped. Before that, the catalogue would serve
+`cuenta_corriente` to a driver app that does not yet enforce the customer rule:
+the driver could pick it, and the server would reject the sale with an error
+the screen cannot explain.
 
 Depends on [`payment-methods-table.md`](./payment-methods-table.md), whose
 migration is applied. That change deliberately deferred cuenta corriente; this
