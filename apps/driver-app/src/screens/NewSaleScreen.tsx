@@ -875,6 +875,31 @@ export function NewSaleScreen() {
         devuelven nada, y una seccion siempre abierta es ruido en la pantalla
         que mas se usa del dia.
       */}
+      
+      <View style={styles.field}>
+        <SectionLabel>COBRO</SectionLabel>
+        {chargeBlocked && (
+          <Text style={styles.hint} testID="new-sale-charge-blocked">
+            Esta visita no cobra: no hay nada vendido.
+          </Text>
+        )}
+        <SegmentedPills
+          options={paymentOptions}
+          // D10: sin nada que cobrar, la fila se bloquea en vez de esconderse.
+          // Un control que desaparece deja al chofer sin saber que habia ahi.
+          disabled={chargeBlocked}
+          // '' mientras el catalogo no llego: ninguna pastilla queda marcada,
+          // que es la verdad. El efecto de arriba elige la primera apenas hay
+          // medios, y `canSell` ya bloquea la venta hasta entonces.
+          value={paymentMethod ?? ''}
+          onChange={setChosenPaymentMethod}
+          // Tres por fila: estirados en un solo renglon, "Cuenta corriente" y
+          // "Transferencia" quedan ilegibles, y el catalogo puede crecer.
+          maxPerRow={3}
+          testID="new-sale-payment"
+        />
+      </View>
+
       <View style={styles.field}>
         <View style={styles.sectionRow}>
           <SectionLabel>DEVOLUCIONES Y CAMBIOS</SectionLabel>
@@ -930,30 +955,6 @@ export function NewSaleScreen() {
         )}
       </View>
 
-      <View style={styles.field}>
-        <SectionLabel>COBRO</SectionLabel>
-        {chargeBlocked && (
-          <Text style={styles.hint} testID="new-sale-charge-blocked">
-            Esta visita no cobra: no hay nada vendido.
-          </Text>
-        )}
-        <SegmentedPills
-          options={paymentOptions}
-          // D10: sin nada que cobrar, la fila se bloquea en vez de esconderse.
-          // Un control que desaparece deja al chofer sin saber que habia ahi.
-          disabled={chargeBlocked}
-          // '' mientras el catalogo no llego: ninguna pastilla queda marcada,
-          // que es la verdad. El efecto de arriba elige la primera apenas hay
-          // medios, y `canSell` ya bloquea la venta hasta entonces.
-          value={paymentMethod ?? ''}
-          onChange={setChosenPaymentMethod}
-          // Tres por fila: estirados en un solo renglon, "Cuenta corriente" y
-          // "Transferencia" quedan ilegibles, y el catalogo puede crecer.
-          maxPerRow={3}
-          testID="new-sale-payment"
-        />
-      </View>
-
       {proofPolicy !== 'none' && (
         <View style={styles.proof}>
           <View style={styles.sectionRow}>
@@ -1000,14 +1001,7 @@ export function NewSaleScreen() {
         muestra prendido si esa lista tiene algo: dos estados paralelos sobre
         el mismo hecho garantizan que algun dia digan cosas distintas.
       */}
-      <ToggleRow
-        label="Envase devuelto"
-        subtitle={containerSubtitle}
-        value={containerReturnedOn}
-        onValueChange={toggleContainerReturned}
-        testID="new-sale-container-returned"
-      />
-
+      
       {lastSale && (
         <Text style={styles.lastSale} testID="new-sale-last-sale">
           Última: {lastSale.customerName} · {formatArs(lastSale.total)}
