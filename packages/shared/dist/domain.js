@@ -100,6 +100,32 @@ export const SALE_KINDS = ['sale', 'churn', 'swap'];
  * es funcionalidad nueva que hay que programar, no configuracion del duenio.
  */
 export const RETURN_REASONS = ['empty', 'faulty'];
+/**
+ * Parte las lineas de una venta en las dos cosas que `SaleRecord.items` trae
+ * mezcladas: lo que se VENDIO y la unidad de REEMPLAZO que salio del camion
+ * sin cargo en un cambio por falla.
+ *
+ * Pura y compartida a proposito, igual que `deriveSaleKind`: el servidor y la
+ * pantalla del chofer tienen que leer la misma fila de la misma manera. Vive
+ * aca y no dentro de la pantalla porque la regla es del dominio, no de la UI.
+ *
+ * Una linea sin la bandera cuenta como vendida. No es un default de
+ * conveniencia: ninguna fila anterior a esta columna tiene reemplazos, porque
+ * los cambios no existian.
+ */
+export function splitSaleItems(items) {
+    const soldItems = [];
+    const replacementItems = [];
+    for (const item of items) {
+        if (item.isReplacement === true) {
+            replacementItems.push(item);
+        }
+        else {
+            soldItems.push(item);
+        }
+    }
+    return { soldItems, replacementItems };
+}
 /** Tamano de pagina fijo del historial de asignaciones (vista admin). */
 export const DRIVER_CUSTOMER_ASSIGNMENT_HISTORY_PAGE_SIZE = 15;
 export const DEFAULT_PRICE_TABLE = {

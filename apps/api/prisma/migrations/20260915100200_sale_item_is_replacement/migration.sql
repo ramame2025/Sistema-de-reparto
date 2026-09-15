@@ -1,0 +1,27 @@
+-- Marca cual linea de `SaleItem` es la unidad de REEMPLAZO de un cambio por
+-- falla: la que sale del camion sin cargo y tiene su espejo en
+-- `SaleReturnItem` con motivo `faulty`.
+--
+-- POR QUE HACE FALTA: una visita mixta -- vendio dos garrafas Y ademas cambio
+-- una fallada -- es UNA fila, y sus `SaleItem` traen las dos cosas mezcladas.
+-- Sin una forma de distinguirlas, quien lee la fila no puede volver a
+-- partirlas, y el telefono no puede armar el payload de edicion: no sabe que
+-- linea va en `items` y cual se reconstruye desde `swappedItems`. El servidor
+-- ya sabe editar una mixta; el que no podia pedirlo era el cliente.
+--
+-- ESTO NO REABRE EL PELIGRO DE `SaleReturnItem`. Lo que esa tabla previene es
+-- anotar en `SaleItem` algo que ENTRA al camion, porque el stock suma toda
+-- linea sin filtrar y una entrada se contaria como una salida. Un reemplazo
+-- SALE, asi que tiene que descontar igual que cualquier otra linea: esta
+-- bandera no excluye nada de ninguna consulta de stock, y `getTruckStockForDay`
+-- sigue sumando TODAS las lineas, marcadas o no. Hay un test que lo fija.
+--
+-- EL BACKFILL ES TRIVIAL Y CORRECTO, al reves que el de `containerReturned`.
+-- Ahi no habia backfill posible: filas historicas que dicen "si, devolvio
+-- envase" y nunca se guardo cuantos ni de que producto -- un dato que jamas se
+-- recolecto. Aca `DEFAULT false` no es una suposicion sobre el pasado, es la
+-- verdad de cada fila vieja: ninguna tiene reemplazos, porque hasta este
+-- trabajo los cambios por falla no existian en el sistema.
+
+-- AlterTable
+ALTER TABLE "SaleItem" ADD COLUMN "isReplacement" BOOLEAN NOT NULL DEFAULT false;
