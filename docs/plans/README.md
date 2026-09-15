@@ -17,7 +17,7 @@ The base domain model already matches the business almost exactly:
 | Edit/cancel a sale with mandatory reason + audit trail | Done — `SaleAudit` with before/after JSON snapshots |
 | Offline queue with retry/backoff | Done — implemented in `apps/driver-app` |
 | Categorized expenses + receipt photo | Done — `DriverExpense` + `/uploads/receipt` |
-| No running tab / always charge | Done — every sale requires a payment method (except the no-money row kinds: `churn`, and `swap` once [`container-swap.md`](./container-swap.md) lands) |
+| No running tab / always charge | Done — every sale requires a payment method (except the no-money row kinds: `churn`, and `swap` once [`container-swap.md`](./container-swap.md) lands). A running tab is being added as a payment method that creates debt → [`current-account-sales.md`](./current-account-sales.md) |
 
 What's missing, grouped by theme:
 

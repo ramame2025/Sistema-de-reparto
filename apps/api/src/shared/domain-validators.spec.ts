@@ -10,6 +10,7 @@ import {
   type CreateLoadManifestInput,
   type CreateSaleInput,
   type CreateTruckInput,
+  type PaymentMethodRecord,
   type PriceTable,
   type RecordEmptyVisitInput,
   type SaleItemInput,
@@ -604,6 +605,132 @@ describe('validateCreateSaleInput (widened with optional FKs)', () => {
   });
 });
 
+/**
+ * Una deuda tiene que tener un deudor: si el medio de pago deja al cliente
+ * debiendo, la venta tiene que decir QUIEN debe, y con un id de cliente real,
+ * no con un nombre tipeado a mano.
+ *
+ * La regla vive aca y no en la base porque es condicional: depende de una
+ * bandera de OTRA tabla, que un CHECK no alcanza. `Sale.customerId` sigue
+ * siendo nullable a proposito -- una venta de mostrador en efectivo no tiene
+ * ficha de cliente y eso es legitimo. Ver decision D5 del plan.
+ */
+describe('validateCreateSaleInput (customer required by a debt-creating method)', () => {
+  const base: CreateSaleInput = {
+    driverName: 'Juan',
+    customerName: 'Kiosco Sur',
+    customerType: 'final',
+    paymentMethod: 'cuenta_corriente',
+    items: [{ productCode: 'G10', quantity: 1 }],
+  };
+
+  const buildPaymentMethod = (
+    overrides: Partial<PaymentMethodRecord> = {},
+  ): PaymentMethodRecord => ({
+    id: 'pm-efectivo',
+    code: 'efectivo',
+    name: 'Efectivo',
+    isActive: true,
+    sortOrder: 0,
+    proofPolicy: 'none',
+    countsAsCash: true,
+    createsDebt: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  });
+
+  const cuentaCorriente = buildPaymentMethod({
+    id: 'pm-cuenta-corriente',
+    code: 'cuenta_corriente',
+    name: 'Cuenta corriente',
+    sortOrder: 4,
+    countsAsCash: false,
+    createsDebt: true,
+  });
+
+  const catalog: PaymentMethodRecord[] = [
+    buildPaymentMethod(),
+    cuentaCorriente,
+  ];
+
+  it('accepts a sale on account that identifies the customer', () => {
+    const input: CreateSaleInput = { ...base, customerId: 'customer-1' };
+    expect(validateCreateSaleInput(input, catalog)).toEqual([]);
+  });
+
+  it('rejects a sale on account with no customerId, and says why', () => {
+    const errors = validateCreateSaleInput(base, catalog);
+    expect(errors).toContain(
+      'customerId is required when the payment method creates debt',
+    );
+  });
+
+  it('rejects a sale on account whose customerId is blank', () => {
+    const errors = validateCreateSaleInput({ ...base, customerId: '   ' }, catalog);
+    expect(errors).toContain(
+      'customerId is required when the payment method creates debt',
+    );
+  });
+
+  it('leaves a method that creates no debt alone, with no customerId', () => {
+    const errors = validateCreateSaleInput(
+      { ...base, paymentMethod: 'efectivo' },
+      catalog,
+    );
+    expect(errors).toEqual([]);
+  });
+
+  /**
+   * D2: la decision se toma leyendo la bandera, NUNCA comparando el code. Un
+   * 'cuenta_corriente' configurado sin deuda no exige cliente, y un codigo
+   * cualquiera con la bandera prendida si lo exige.
+   */
+  it('reads the flag and not the code: cuenta_corriente without the flag requires nothing', () => {
+    const errors = validateCreateSaleInput(base, [
+      buildPaymentMethod({
+        id: 'pm-cuenta-corriente',
+        code: 'cuenta_corriente',
+        name: 'Cuenta corriente',
+        createsDebt: false,
+      }),
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it('reads the flag and not the code: any other code with the flag requires the customer', () => {
+    const errors = validateCreateSaleInput({ ...base, paymentMethod: 'fiado_30' }, [
+      buildPaymentMethod({
+        id: 'pm-fiado-30',
+        code: 'fiado_30',
+        name: 'Fiado a 30 dias',
+        createsDebt: true,
+      }),
+    ]);
+    expect(errors).toContain(
+      'customerId is required when the payment method creates debt',
+    );
+  });
+
+  /**
+   * Sin catalogo no hay bandera que leer, y el validador no inventa una. Es la
+   * misma postura que `proofPolicyOf` frente a un catalogo vacio: las reglas
+   * son desconocidas, no permisivas ni restrictivas. Rechazar aca perderia una
+   * venta ya cobrada; la existencia del medio la verifica el servidor.
+   */
+  it('enforces nothing when no payment-method catalogue is supplied', () => {
+    expect(validateCreateSaleInput(base)).toEqual([]);
+  });
+
+  it('enforces nothing for a code missing from the supplied catalogue', () => {
+    const errors = validateCreateSaleInput(
+      { ...base, paymentMethod: 'mercadopago' },
+      catalog,
+    );
+    expect(errors).toEqual([]);
+  });
+});
+
 describe('validateCreateLoadManifestInput', () => {
   const base: CreateLoadManifestInput = {
     driverName: 'Juan',
@@ -890,6 +1017,55 @@ describe('validateUpdateSaleInput', () => {
   it('still requires reason regardless of kind', () => {
     const errors = validateUpdateSaleInput({ ...base, kind: 'churn', items: [], reason: '' });
     expect(errors).toContain('reason must have at least 3 characters');
+  });
+
+  describe('customer required by a debt-creating method', () => {
+    const cuentaCorriente: PaymentMethodRecord = {
+      id: 'pm-cuenta-corriente',
+      code: 'cuenta_corriente',
+      name: 'Cuenta corriente',
+      isActive: true,
+      sortOrder: 4,
+      proofPolicy: 'none',
+      countsAsCash: false,
+      createsDebt: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const onAccount: UpdateSaleInput = {
+      ...base,
+      paymentMethod: 'cuenta_corriente',
+    };
+
+    it('rejects editing a sale onto a debt-creating method with no customerId', () => {
+      const errors = validateUpdateSaleInput(onAccount, [cuentaCorriente]);
+      expect(errors).toContain(
+        'customerId is required when the payment method creates debt',
+      );
+    });
+
+    it('accepts the same edit when the customer is identified', () => {
+      const errors = validateUpdateSaleInput(
+        { ...onAccount, customerId: 'customer-1' },
+        [cuentaCorriente],
+      );
+      expect(errors).toEqual([]);
+    });
+
+    // Una fila churn no tuvo cobro, asi que no tiene medio de pago del que
+    // leer la bandera. La rama de identidad no cambia.
+    it('does not apply the rule to a churn-row update', () => {
+      const { paymentMethod, items, ...rest } = base;
+      void paymentMethod;
+      void items;
+      const input = {
+        ...rest,
+        items: [],
+        kind: 'churn',
+      } as unknown as UpdateSaleInput;
+      expect(validateUpdateSaleInput(input, [cuentaCorriente])).toEqual([]);
+    });
   });
 });
 

@@ -591,6 +591,19 @@ export type PaymentMethodRecord = {
    * decision D6 del plan.
    */
   countsAsCash: boolean;
+  /**
+   * Si el cliente queda debiendo la venta. Es una TERCERA pregunta, distinta
+   * de las otras dos banderas: una transferencia no es plata en mano y
+   * tampoco deja deuda, asi que ningun booleano existente la puede responder.
+   *
+   * Todo consumidor pregunta por esta bandera y NUNCA compara el `code`
+   * contra 'cuenta_corriente'. Esa comparacion funcionaria hoy y seria una
+   * regresion: la tabla de medios de pago nacio justamente para borrar las
+   * comparaciones contra el string 'efectivo' que estaban repartidas en tres
+   * apps. Con la bandera, un futuro "fiado a 30 dias" es un INSERT y ningun
+   * cambio de codigo. Ver decision D2 del plan.
+   */
+  createsDebt: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -822,7 +835,39 @@ export function priceSaleItems(
   return { ok: true, items: priced, total };
 }
 
-export function validateCreateSaleInput(input: CreateSaleInput): string[] {
+/**
+ * Si el medio de pago de este codigo deja al cliente debiendo, segun el
+ * catalogo que se haya pasado. Resuelve por `code` igual que `proofPolicyOf`
+ * en la app del chofer.
+ *
+ * Un codigo que no esta en el catalogo -- o un catalogo vacio, que es lo que
+ * recibe quien todavia no lo sincronizo -- devuelve `false`: la bandera es
+ * DESCONOCIDA, y suponer deuda rechazaria una venta ya cobrada en la calle
+ * por una regla que este lado no puede verificar. La existencia del medio la
+ * comprueba el servidor contra la tabla.
+ */
+function createsDebtFor(
+  methods: PaymentMethodRecord[],
+  code: PaymentMethod | null | undefined,
+): boolean {
+  if (!code) {
+    return false;
+  }
+
+  return methods.find((method) => method.code === code)?.createsDebt ?? false;
+}
+
+/**
+ * El segundo parametro es el catalogo de medios de pago disponible. Es
+ * opcional a proposito: sin catalogo el validador se comporta exactamente
+ * como antes, asi que los llamadores que todavia no lo pasan no cambian de
+ * comportamiento. Es tambien la unica forma de enterarse de `createsDebt`,
+ * que vive en otra tabla.
+ */
+export function validateCreateSaleInput(
+  input: CreateSaleInput,
+  paymentMethods: PaymentMethodRecord[] = [],
+): string[] {
   const errors: string[] = [];
 
   if (
@@ -858,6 +903,16 @@ export function validateCreateSaleInput(input: CreateSaleInput): string[] {
 
   if (!isWellFormedPaymentMethod(input.paymentMethod)) {
     errors.push("paymentMethod is invalid");
+  }
+
+  // Una deuda tiene que tener un deudor, y el deudor tiene que ser una ficha
+  // de cliente y no un nombre tipeado. El mensaje dice el MOTIVO: quien lo
+  // lee no tiene por que saber que medio de pago genera deuda.
+  if (
+    createsDebtFor(paymentMethods, input.paymentMethod) &&
+    (input.customerId === undefined || input.customerId.trim().length === 0)
+  ) {
+    errors.push('customerId is required when the payment method creates debt');
   }
 
   if (!Array.isArray(input.items) || input.items.length === 0) {
@@ -975,14 +1030,20 @@ function validateSaleIdentityFields(input: UpdateSaleInput): string[] {
   return errors;
 }
 
-export function validateUpdateSaleInput(input: UpdateSaleInput): string[] {
+export function validateUpdateSaleInput(
+  input: UpdateSaleInput,
+  paymentMethods: PaymentMethodRecord[] = [],
+): string[] {
   // input.kind is a validation hint only: it tells the pure validator whether
   // to skip paymentMethod/items checks. The service re-verifies it against
   // the stored row's kind before applying any change (never trusted alone).
+  //
+  // Una fila churn no tuvo cobro y por lo tanto no tiene medio de pago del
+  // que leer `createsDebt`: la rama de identidad ni ve el catalogo.
   const errors =
     input.kind === 'churn'
       ? validateSaleIdentityFields(input)
-      : validateCreateSaleInput(input);
+      : validateCreateSaleInput(input, paymentMethods);
 
   if (!input.reason || input.reason.trim().length < 3) {
     errors.push('reason must have at least 3 characters');

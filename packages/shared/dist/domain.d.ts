@@ -509,6 +509,19 @@ export type PaymentMethodRecord = {
      * decision D6 del plan.
      */
     countsAsCash: boolean;
+    /**
+     * Si el cliente queda debiendo la venta. Es una TERCERA pregunta, distinta
+     * de las otras dos banderas: una transferencia no es plata en mano y
+     * tampoco deja deuda, asi que ningun booleano existente la puede responder.
+     *
+     * Todo consumidor pregunta por esta bandera y NUNCA compara el `code`
+     * contra 'cuenta_corriente'. Esa comparacion funcionaria hoy y seria una
+     * regresion: la tabla de medios de pago nacio justamente para borrar las
+     * comparaciones contra el string 'efectivo' que estaban repartidas en tres
+     * apps. Con la bandera, un futuro "fiado a 30 dias" es un INSERT y ningun
+     * cambio de codigo. Ver decision D2 del plan.
+     */
+    createsDebt: boolean;
     createdAt: string;
     updatedAt: string;
 };
@@ -673,9 +686,16 @@ export type PricedSaleResult = {
  * intento de venta.
  */
 export declare function priceSaleItems(customerType: CustomerType, items: SaleItemInput[], prices: PriceTable): PricedSaleResult;
-export declare function validateCreateSaleInput(input: CreateSaleInput): string[];
+/**
+ * El segundo parametro es el catalogo de medios de pago disponible. Es
+ * opcional a proposito: sin catalogo el validador se comporta exactamente
+ * como antes, asi que los llamadores que todavia no lo pasan no cambian de
+ * comportamiento. Es tambien la unica forma de enterarse de `createsDebt`,
+ * que vive en otra tabla.
+ */
+export declare function validateCreateSaleInput(input: CreateSaleInput, paymentMethods?: PaymentMethodRecord[]): string[];
 export declare function validateRecordEmptyVisitInput(input: RecordEmptyVisitInput): string[];
-export declare function validateUpdateSaleInput(input: UpdateSaleInput): string[];
+export declare function validateUpdateSaleInput(input: UpdateSaleInput, paymentMethods?: PaymentMethodRecord[]): string[];
 export declare function validateCancelSaleInput(input: CancelSaleInput): string[];
 export declare function validateCreateExpenseInput(input: CreateExpenseInput): string[];
 export declare function validateCreateLoadManifestInput(input: CreateLoadManifestInput): string[];
