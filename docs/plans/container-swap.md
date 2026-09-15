@@ -87,8 +87,9 @@ venta de $0 y bajaría el ticket promedio de cualquier lectura futura. Mi
 recomendación: contarlo aparte, como visita atendida y no como venta. Es la
 misma decisión que ya se tomó con `churn`.
 
-**B. ¿Hay que verificar que sea 1:1?** — **RESPONDIDA: sí, obligatorio.** Ver
-D7 y D8. El costo aceptado está anotado en Risks: si la fallada es de un
+**B. ¿Hay que verificar que sea 1:1?** — **RESPONDIDA: sí, obligatorio**, y
+resuelto por construcción en D6b: no hace falta verificarlo porque no se puede
+romper. Ver D6b y la nota de D8. El costo aceptado está anotado en Risks: si la fallada es de un
 producto que el camión ya no tiene, el chofer no puede registrar la operación.
 
 ## Design Decisions
@@ -282,7 +283,24 @@ La unidad de reemplazo **sí** es un `SaleItem`: salió del camión y tiene que
 descontar. La fallada que vuelve es un `SaleReturnItem`: queda registrada y no
 toca el stock.
 
-**D8 — El 1:1 se valida por producto, no por total.**
+**D8 — MUERTA. La reemplazó D6b, y no se puede tener las dos.**
+
+Lo que decía esta decisión queda abajo tachado, porque entender por qué no se
+puede implementar vale más que borrarla.
+
+Con D6b el reemplazo se **deriva** de `swappedItems`: no existe una segunda
+lista que pueda discrepar, ni en el servidor ni en el teléfono. No hay nada
+que comparar.
+
+Y peor: un payload armado a mano con `items: [X]` y `swappedItems: [Y]` **no
+es un swap roto**. Bajo D1 es una visita mixta perfectamente legítima — vendió
+X y cambió Y — y su `kind` es `'sale'`. Un validador de espejo rechazaría
+operaciones válidas.
+
+Las dos decisiones no pueden convivir. Ganó D6b porque es la garantía más
+fuerte: D8 detectaba un error, D6b lo vuelve imposible.
+
+~~**D8 (original) — El 1:1 se valida por producto, no por total.**~~
 
 Para un `swap`, cada línea de `SaleItem` tiene que tener su espejo en
 `SaleReturnItem` con `reason: 'faulty'`: mismo `productCode` y misma
