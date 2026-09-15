@@ -51,6 +51,7 @@ function buildSaleRow(overrides: Record<string, unknown> = {}) {
     longitude: null,
     customerId: null,
     items: [{ productCode: 'G10', quantity: 2 }],
+    returnItems: [],
     ...overrides,
   };
 }
@@ -100,6 +101,7 @@ describe('SalesService', () => {
   let prisma: {
     sale: { findUnique: jest.Mock; create: jest.Mock; update: jest.Mock; findMany: jest.Mock };
     saleItem: { deleteMany: jest.Mock };
+    saleReturnItem: { deleteMany: jest.Mock };
     saleAudit: { create: jest.Mock };
     customer: { findUnique: jest.Mock };
     truck: { findUnique: jest.Mock };
@@ -114,6 +116,7 @@ describe('SalesService', () => {
     prisma = {
       sale: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
       saleItem: { deleteMany: jest.fn() },
+      saleReturnItem: { deleteMany: jest.fn() },
       saleAudit: { create: jest.fn() },
       customer: { findUnique: jest.fn() },
       truck: { findUnique: jest.fn() },
@@ -564,6 +567,177 @@ describe('SalesService', () => {
           data: expect.objectContaining({ latitude: null, longitude: null }),
         }),
       );
+    });
+  });
+
+  /**
+   * El corazon de la fase: una visita es UNA fila, el `kind` se deriva de lo
+   * que paso, y lo que vuelve nunca es un `SaleItem`.
+   */
+  describe('createSale con devoluciones y cambios', () => {
+    function dataOf(): Record<string, any> {
+      return prisma.sale.create.mock.calls[0][0].data;
+    }
+
+    it('records a mixed visit as one sale row that still charges', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow({ total: 200 }));
+
+      await service.createSale(
+        buildCreateInput({
+          items: [{ productCode: 'G10', quantity: 2 }],
+          returnedItems: [{ productCode: 'G10', quantity: 1 }],
+          swappedItems: [{ productCode: 'G15', quantity: 1 }],
+        }),
+      );
+
+      const data = dataOf();
+      expect(data.kind).toBe('sale');
+      expect(data.paymentMethod).toBe('efectivo');
+      // 2 x G10 a 100. El reemplazo de G15 entra en 0 y no suma.
+      expect(data.total).toBe(200);
+      expect(data.items.create).toEqual([
+        { productCode: 'G10', quantity: 2, unitPrice: 100 },
+        { productCode: 'G15', quantity: 1, unitPrice: 0 },
+      ]);
+      expect(data.returnItems.create).toEqual([
+        { productCode: 'G10', quantity: 1, reason: 'empty' },
+        { productCode: 'G15', quantity: 1, reason: 'faulty' },
+      ]);
+    });
+
+    it('forces kind swap, no payment and total 0 even when the payload smuggles a paymentMethod', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow({ kind: 'swap', total: 0 }));
+
+      await service.createSale(
+        buildCreateInput({
+          items: [],
+          paymentMethod: 'efectivo',
+          paymentProofRef: 'uploads/ticket.jpg',
+          swappedItems: [{ productCode: 'G10', quantity: 1 }],
+        }),
+      );
+
+      const data = dataOf();
+      expect(data.kind).toBe('swap');
+      expect(data.paymentMethod).toBeNull();
+      expect(data.total).toBe(0);
+      expect(data.paymentProofRef).toBeNull();
+      // La de reemplazo SI sale del camion: es un SaleItem, con precio 0.
+      expect(data.items.create).toEqual([
+        { productCode: 'G10', quantity: 1, unitPrice: 0 },
+      ]);
+      expect(data.returnItems.create).toEqual([
+        { productCode: 'G10', quantity: 1, reason: 'faulty' },
+      ]);
+    });
+
+    it('forces kind churn when only empties came back', async () => {
+      prisma.sale.create.mockResolvedValue(buildChurnRow());
+
+      await service.createSale(
+        buildCreateInput({
+          items: [],
+          returnedItems: [{ productCode: 'G10', quantity: 2 }],
+        }),
+      );
+
+      const data = dataOf();
+      expect(data.kind).toBe('churn');
+      expect(data.paymentMethod).toBeNull();
+      expect(data.total).toBe(0);
+      expect(data.items.create).toEqual([]);
+      expect(data.returnItems.create).toEqual([
+        { productCode: 'G10', quantity: 2, reason: 'empty' },
+      ]);
+    });
+
+    it('verifies product codes across the three lists, not only the sold one', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow({ total: 200 }));
+
+      await service.createSale(
+        buildCreateInput({
+          items: [{ productCode: 'G10', quantity: 2 }],
+          returnedItems: [{ productCode: 'G15', quantity: 1 }],
+          swappedItems: [{ productCode: 'G45', quantity: 1 }],
+        }),
+      );
+
+      expect(productsService.assertProductCodesExist).toHaveBeenCalledWith([
+        'G10',
+        'G15',
+        'G45',
+      ]);
+    });
+
+    // D4: el chofer ya hizo el cambio en la calle. Volver sin registrarlo es
+    // peor que registrarlo sin precio, y un cambio no cobra nada.
+    it('does not let a missing price block a swap', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue(SPARSE_PRICE_TABLE);
+      prisma.sale.create.mockResolvedValue(buildSaleRow({ kind: 'swap', total: 0 }));
+
+      await service.createSale(
+        buildCreateInput({
+          items: [],
+          swappedItems: [{ productCode: 'G45', quantity: 1 }],
+        }),
+      );
+
+      expect(prisma.sale.create).toHaveBeenCalled();
+    });
+
+    it('still lets a missing price block a sale', async () => {
+      pricesService.getPriceTableAt.mockResolvedValue(SPARSE_PRICE_TABLE);
+
+      await expect(
+        service.createSale(buildCreateInput({ items: [{ productCode: 'G45', quantity: 1 }] })),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    // D9: el dato historico no existe, pero para las filas nuevas el booleano
+    // se deriva de lo que efectivamente volvio.
+    it('derives containerReturned from what actually came back', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow({ total: 200 }));
+
+      await service.createSale(
+        buildCreateInput({ returnedItems: [{ productCode: 'G10', quantity: 1 }] }),
+      );
+
+      expect(dataOf().containerReturned).toBe(true);
+    });
+
+    // La compatibilidad que no se puede romper: hay telefonos con ventas
+    // encoladas desde antes de que estas dos listas existieran.
+    it('behaves exactly as before for a legacy payload with neither list', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow({ total: 200 }));
+
+      await service.createSale(buildCreateInput());
+
+      const data = dataOf();
+      expect(data.kind).toBe('sale');
+      expect(data.paymentMethod).toBe('efectivo');
+      expect(data.total).toBe(200);
+      expect(data.items.create).toEqual([
+        { productCode: 'G10', quantity: 2, unitPrice: 100 },
+      ]);
+      expect(data.returnItems.create).toEqual([]);
+      expect(data.containerReturned).toBeNull();
+    });
+
+    it('exposes returnItems on the returned record', async () => {
+      prisma.sale.create.mockResolvedValue(
+        buildSaleRow({
+          total: 200,
+          items: [{ productCode: 'G10', quantity: 2, unitPrice: 100 }],
+          returnItems: [{ productCode: 'G15', quantity: 1, reason: 'faulty' }],
+        }),
+      );
+
+      const result = await service.createSale(buildCreateInput());
+
+      expect(result.returnItems).toEqual([
+        { productCode: 'G15', quantity: 1, reason: 'faulty' },
+      ]);
     });
   });
 
@@ -1105,7 +1279,7 @@ describe('SalesService', () => {
 
       expect(prisma.sale.findUnique).toHaveBeenCalledWith({
         where: { clientGeneratedId: 'queue-item-1' },
-        include: { items: true },
+        include: { items: true, returnItems: true },
       });
       expect(prisma.sale.create).not.toHaveBeenCalled();
       expect(result.kind).toBe('churn');
@@ -1124,6 +1298,79 @@ describe('SalesService', () => {
           data: expect.objectContaining({ clientGeneratedId: 'queue-item-2' }),
         }),
       );
+    });
+  });
+
+  describe('recordEmptyVisit con returnedItems', () => {
+    it('records how many empties came back, without touching the truck stock', async () => {
+      prisma.sale.create.mockResolvedValue(buildChurnRow());
+
+      await service.recordEmptyVisit(
+        buildRecordEmptyVisitInput({
+          returnedItems: [{ productCode: 'G10', quantity: 2 }],
+        }),
+      );
+
+      const data = prisma.sale.create.mock.calls[0][0].data as Record<string, any>;
+      expect(data.kind).toBe('churn');
+      expect(data.items.create).toEqual([]);
+      expect(data.returnItems.create).toEqual([
+        { productCode: 'G10', quantity: 2, reason: 'empty' },
+      ]);
+    });
+
+    it('keeps working for a queued visit that carries no returnedItems', async () => {
+      prisma.sale.create.mockResolvedValue(buildChurnRow());
+
+      await service.recordEmptyVisit(buildRecordEmptyVisitInput());
+
+      const data = prisma.sale.create.mock.calls[0][0].data as Record<string, any>;
+      expect(data.returnItems.create).toEqual([]);
+      expect(data.containerReturned).toBe(true);
+    });
+  });
+
+  describe('updateSale de una fila de swap', () => {
+    it('never prices a swap nor lets it receive a payment', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({ kind: 'swap', paymentMethod: null, total: 0 }),
+      );
+      prisma.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) =>
+        cb(prisma),
+      );
+      prisma.sale.update.mockResolvedValue(
+        buildSaleRow({ kind: 'swap', paymentMethod: null, total: 0 }),
+      );
+
+      await service.updateSale(
+        'sale-1',
+        buildUpdateInput({
+          kind: 'swap',
+          paymentMethod: 'efectivo',
+          paymentProofRef: 'uploads/ticket.jpg',
+          items: [{ productCode: 'G10', quantity: 3 }],
+        }),
+      );
+
+      expect(paymentMethodsService.assertPaymentMethodCodesExist).not.toHaveBeenCalled();
+      const data = prisma.sale.update.mock.calls[0][0].data as Record<string, any>;
+      expect(data.paymentMethod).toBeNull();
+      expect(data.paymentProofRef).toBeNull();
+      expect(data.total).toBe(0);
+      // Un swap SI puede editar cantidades: es su diferencia con el churn.
+      expect(data.items.create).toEqual([
+        { productCode: 'G10', quantity: 3, unitPrice: 0 },
+      ]);
+    });
+
+    it('rejects turning a stored swap into a sale', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({ kind: 'swap', paymentMethod: null, total: 0 }),
+      );
+
+      await expect(
+        service.updateSale('sale-1', buildUpdateInput({ kind: 'sale' })),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 
@@ -1176,7 +1423,7 @@ describe('SalesService', () => {
       expect(prisma.sale.findMany).toHaveBeenCalledTimes(1);
       expect(prisma.sale.findMany).toHaveBeenCalledWith({
         where: { driverName: 'juan.perez' },
-        include: { items: true },
+        include: { items: true, returnItems: true },
         orderBy: { createdAt: 'desc' },
       });
     });
@@ -1218,6 +1465,7 @@ describe('SalesService', () => {
           paymentMethod: 'efectivo',
           note: null,
           items: [{ productCode: 'G10', quantity: 2, unitPrice: 50 }],
+          returnItems: [],
         },
       ]);
 
@@ -1239,6 +1487,7 @@ describe('SalesService', () => {
           paymentMethod: 'efectivo',
           note: undefined,
           items: [{ productCode: 'G10', quantity: 2, unitPrice: 50 }],
+          returnItems: [],
         },
       ]);
     });

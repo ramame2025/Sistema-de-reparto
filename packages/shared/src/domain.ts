@@ -135,12 +135,20 @@ export const USER_ROLES = ['admin', 'chofer'] as const;
 
 export const ASSIGNMENT_KINDS = ['titular', 'cobertura'] as const;
 
-export const SALE_KINDS = ['sale', 'churn'] as const;
+export const SALE_KINDS = ['sale', 'churn', 'swap'] as const;
+
+/**
+ * Por que vuelve una unidad. Es un enum y no una tabla por el mismo criterio
+ * que `SaleKind`: sus valores los entiende el codigo, asi que un tercer motivo
+ * es funcionalidad nueva que hay que programar, no configuracion del duenio.
+ */
+export const RETURN_REASONS = ['empty', 'faulty'] as const;
 
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export type UserRole = (typeof USER_ROLES)[number];
 export type AssignmentKind = (typeof ASSIGNMENT_KINDS)[number];
 export type SaleKind = (typeof SALE_KINDS)[number];
+export type ReturnReason = (typeof RETURN_REASONS)[number];
 
 /**
  * La tabla de precios es RALA a proposito, en sus dos niveles: puede faltar un
@@ -163,6 +171,18 @@ export type SaleItemInput = {
   quantity: number;
 };
 
+/**
+ * Una linea de lo que VUELVE de la calle. Misma forma que `SaleItemInput` y a
+ * proposito sin precio: lo que entra no se cotiza. El motivo no viaja en la
+ * linea sino en la lista que la contiene (`returnedItems` son vacios,
+ * `swappedItems` son falladas), asi que un mismo producto puede aparecer en
+ * las dos a la vez sin ambiguedad.
+ */
+export type SaleReturnItemInput = {
+  productCode: ProductCode;
+  quantity: number;
+};
+
 export type CreateSaleInput = {
   clientGeneratedId?: string;
   /**
@@ -177,6 +197,19 @@ export type CreateSaleInput = {
   customerType: CustomerType;
   paymentMethod: PaymentMethod;
   items: SaleItemInput[];
+  /**
+   * Envases vacios que el cliente devuelve. No descargan mercaderia del
+   * camion: se graban como `SaleReturnItem` con motivo `empty`.
+   */
+  returnedItems?: SaleReturnItemInput[];
+  /**
+   * Cambios por falla. El numero dice DOS cosas al mismo tiempo: la unidad
+   * fallada que entra y la de reemplazo que sale del camion. Es un solo campo
+   * justamente para que el 1 a 1 no se pueda romper -- no hay dos numeros que
+   * puedan discrepar. El servidor deriva de aca la linea de `SaleItem` con
+   * `unitPrice: 0` y la de `SaleReturnItem` con motivo `faulty`.
+   */
+  swappedItems?: SaleReturnItemInput[];
   note?: string;
   customerId?: string;
   truckId?: string;
@@ -203,6 +236,12 @@ export type RecordEmptyVisitInput = {
   customerType: CustomerType;
   customerId?: string;
   note?: string;
+  /**
+   * Cuantos envases vacios volvieron y de que producto. El atajo de devolucion
+   * tambien puede decirlo ahora; su ausencia deja la fila como estaba, que es
+   * lo que traen las visitas ya encoladas.
+   */
+  returnedItems?: SaleReturnItemInput[];
 };
 
 export type UpdateSaleInput = CreateSaleInput & {
@@ -222,6 +261,13 @@ export type UpdateSaleInput = CreateSaleInput & {
  */
 export type SaleItemRecord = SaleItemInput & {
   unitPrice: number;
+};
+
+/**
+ * Una linea que volvio, tal como quedo grabada, con su motivo.
+ */
+export type SaleReturnItemRecord = SaleReturnItemInput & {
+  reason: ReturnReason;
 };
 
 export type SaleRecord = {
@@ -250,12 +296,19 @@ export type SaleRecord = {
    */
   customerId?: string;
   /**
-   * `null` para una fila de churn (`kind === 'churn'`): no hubo pago, es el
-   * hecho de negocio real, no un dato faltante. Toda fila `kind === 'sale'`
-   * sigue teniendo un `PaymentMethod` valido.
+   * `null` para toda fila que no cobro (`kind === 'churn'` o
+   * `kind === 'swap'`): no hubo pago, es el hecho de negocio real, no un dato
+   * faltante. Toda fila `kind === 'sale'` sigue teniendo un `PaymentMethod`
+   * valido.
    */
   paymentMethod: PaymentMethod | null;
   items: SaleItemRecord[];
+  /**
+   * Lo que volvio en la visita, por producto y por motivo. La API siempre lo
+   * manda; es opcional en el tipo porque una venta cacheada en el telefono
+   * antes de este cambio no lo trae, y leerla no puede romperse por eso.
+   */
+  returnItems?: SaleReturnItemRecord[];
   note?: string;
   kind: SaleKind;
   containerReturned?: boolean;
@@ -858,17 +911,117 @@ function createsDebtFor(
 }
 
 /**
+ * Cuantas unidades suma una lista, ignorando las lineas que no aportan
+ * ninguna. La pantalla mantiene una fila por producto con el contador en
+ * cero, asi que contar FILAS derivaria mal el `kind` de una visita en la que
+ * el chofer abrio la seccion y no cargo nada.
+ */
+function countUnits(
+  lines: readonly { quantity?: unknown }[] | undefined,
+): number {
+  if (!Array.isArray(lines)) {
+    return 0;
+  }
+
+  return lines.reduce<number>((sum, line) => {
+    const quantity = line?.quantity;
+
+    return typeof quantity === 'number' && Number.isFinite(quantity) && quantity > 0
+      ? sum + quantity
+      : sum;
+  }, 0);
+}
+
+/**
+ * De que clase es la visita, segun lo que paso en ella.
+ *
+ * El `kind` no se elige: se deriva. Una misma visita puede vender, recibir un
+ * vacio y cambiar una fallada, y eso es UN hecho comercial y UNA fila. La
+ * tabla de decision es esta, y no tiene mas ramas:
+ *
+ * | Que paso                                     | kind    | cobra |
+ * |----------------------------------------------|---------|-------|
+ * | Se vendio algo (con o sin cambios ni vacios) | `sale`  | si    |
+ * | Solo se cambiaron falladas                   | `swap`  | no    |
+ * | Solo volvieron envases vacios                | `churn` | no    |
+ *
+ * Pura y sin dependencias a proposito: la usan el servidor para decidir que
+ * graba y la pantalla del chofer para saber que rotulo poner en el pie, y las
+ * dos tienen que llegar siempre a la misma respuesta.
+ *
+ * Una visita vacia en los tres lados cae en `churn`, que es la rama que no
+ * cobra; el error de "no hay nada que registrar" lo pone el validador, porque
+ * derivar no es validar.
+ */
+export function deriveSaleKind(input: {
+  items?: SaleItemInput[];
+  returnedItems?: SaleReturnItemInput[];
+  swappedItems?: SaleReturnItemInput[];
+}): SaleKind {
+  if (countUnits(input.items) > 0) {
+    return 'sale';
+  }
+
+  if (countUnits(input.swappedItems) > 0) {
+    return 'swap';
+  }
+
+  return 'churn';
+}
+
+/**
+ * Valida la forma de una lista de lo que vuelve. Mismo contrato que las
+ * lineas vendidas -- codigo bien formado y cantidad entera mayor que cero --
+ * con el nombre del campo en el mensaje para que quien lo lee sepa cual de
+ * las dos listas esta mal.
+ */
+function validateReturnLines(
+  lines: SaleReturnItemInput[] | undefined,
+  field: 'returnedItems' | 'swappedItems',
+): string[] {
+  if (lines === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(lines)) {
+    return [`${field} must be an array when provided`];
+  }
+
+  const errors: string[] = [];
+
+  lines.forEach((line, index) => {
+    if (!isWellFormedProductCode(line?.productCode)) {
+      errors.push(`${field}[${index}].productCode is invalid`);
+    }
+
+    if (!Number.isInteger(line?.quantity) || line.quantity <= 0) {
+      errors.push(`${field}[${index}].quantity must be an integer greater than 0`);
+    }
+  });
+
+  return errors;
+}
+
+/**
  * El segundo parametro es el catalogo de medios de pago disponible. Es
  * opcional a proposito: sin catalogo el validador se comporta exactamente
  * como antes, asi que los llamadores que todavia no lo pasan no cambian de
  * comportamiento. Es tambien la unica forma de enterarse de `createsDebt`,
  * que vive en otra tabla.
+ *
+ * El tercero es el `kind` que hay que dar por bueno en lugar de derivarlo del
+ * payload. Solo lo usa la edicion: una fila de swap guarda sus reemplazos en
+ * `items`, asi que derivar sobre un payload de edicion daria `sale` y exigiria
+ * un cobro que esa fila nunca tuvo. Para la creacion no se pasa nunca -- ahi
+ * el contenido es la unica fuente de verdad.
  */
 export function validateCreateSaleInput(
   input: CreateSaleInput,
   paymentMethods: PaymentMethodRecord[] = [],
+  kindOverride?: SaleKind,
 ): string[] {
   const errors: string[] = [];
+  const kind = kindOverride ?? deriveSaleKind(input);
 
   if (
     input.clientGeneratedId !== undefined &&
@@ -901,21 +1054,36 @@ export function validateCreateSaleInput(
     errors.push("customerType is invalid");
   }
 
-  if (!isWellFormedPaymentMethod(input.paymentMethod)) {
-    errors.push("paymentMethod is invalid");
+  // El cobro se exige SOLO cuando la visita vendio algo. Es la garantia que
+  // sobrevive a derivar el `kind`: una fila que vendio no se puede grabar sin
+  // medio de pago. Un cambio o una devolucion no tienen nada que cobrar, y un
+  // `paymentMethod` que igual venga en el payload lo ignora el servidor.
+  if (kind === 'sale') {
+    if (!isWellFormedPaymentMethod(input.paymentMethod)) {
+      errors.push("paymentMethod is invalid");
+    }
+
+    // Una deuda tiene que tener un deudor, y el deudor tiene que ser una ficha
+    // de cliente y no un nombre tipeado. El mensaje dice el MOTIVO: quien lo
+    // lee no tiene por que saber que medio de pago genera deuda.
+    if (
+      createsDebtFor(paymentMethods, input.paymentMethod) &&
+      (input.customerId === undefined || input.customerId.trim().length === 0)
+    ) {
+      errors.push('customerId is required when the payment method creates debt');
+    }
   }
 
-  // Una deuda tiene que tener un deudor, y el deudor tiene que ser una ficha
-  // de cliente y no un nombre tipeado. El mensaje dice el MOTIVO: quien lo
-  // lee no tiene por que saber que medio de pago genera deuda.
-  if (
-    createsDebtFor(paymentMethods, input.paymentMethod) &&
-    (input.customerId === undefined || input.customerId.trim().length === 0)
-  ) {
-    errors.push('customerId is required when the payment method creates debt');
-  }
+  // Una visita tiene que haber sido ALGO. El mensaje se conserva tal cual
+  // aunque ahora tres listas puedan satisfacerlo: es el que ya devuelve la
+  // API a los telefonos que mandan una venta vacia.
+  const hasSoldLines = Array.isArray(input.items) && input.items.length > 0;
+  const hasReturnedLines =
+    Array.isArray(input.returnedItems) && input.returnedItems.length > 0;
+  const hasSwappedLines =
+    Array.isArray(input.swappedItems) && input.swappedItems.length > 0;
 
-  if (!Array.isArray(input.items) || input.items.length === 0) {
+  if (!hasSoldLines && !hasReturnedLines && !hasSwappedLines) {
     errors.push("items must include at least one product");
   }
 
@@ -930,6 +1098,9 @@ export function validateCreateSaleInput(
       }
     });
   }
+
+  errors.push(...validateReturnLines(input.returnedItems, 'returnedItems'));
+  errors.push(...validateReturnLines(input.swappedItems, 'swappedItems'));
 
   if (input.paymentProofRef !== undefined && input.paymentProofRef.trim().length === 0) {
     errors.push('paymentProofRef must not be empty when provided');
@@ -990,6 +1161,8 @@ export function validateRecordEmptyVisitInput(input: RecordEmptyVisitInput): str
     errors.push("customerType is invalid");
   }
 
+  errors.push(...validateReturnLines(input.returnedItems, 'returnedItems'));
+
   return errors;
 }
 
@@ -1040,10 +1213,15 @@ export function validateUpdateSaleInput(
   //
   // Una fila churn no tuvo cobro y por lo tanto no tiene medio de pago del
   // que leer `createsDebt`: la rama de identidad ni ve el catalogo.
+  //
+  // Un swap SI tiene items -- la unidad de reemplazo que salio del camion --
+  // asi que no puede ir por la rama de identidad del churn; va por la
+  // completa, pero con el `kind` pasado a mano para que no se le exija un
+  // cobro que esa fila nunca tuvo.
   const errors =
     input.kind === 'churn'
       ? validateSaleIdentityFields(input)
-      : validateCreateSaleInput(input, paymentMethods);
+      : validateCreateSaleInput(input, paymentMethods, input.kind);
 
   if (!input.reason || input.reason.trim().length < 3) {
     errors.push('reason must have at least 3 characters');

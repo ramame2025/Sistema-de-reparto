@@ -19,6 +19,7 @@ import {
   type UpdateProductInput,
   type UpdateSaleInput,
   type UpdateTruckInput,
+  deriveSaleKind,
   findUnitPrice,
   priceSaleItems,
   resolveOccurredAt,
@@ -1573,5 +1574,223 @@ describe('priceSaleItems', () => {
       ok: false,
       missing: [{ customerType: 'distribuidor', productCode: 'G10' }],
     });
+  });
+});
+
+/**
+ * El `kind` no se elige: se deriva de lo que pasó en la visita (D1 del plan
+ * `container-swap`). Estas tres ramas son la tabla de decisión completa, y la
+ * misma función la usan el servidor para grabar y la pantalla para rotular el
+ * pie.
+ */
+describe('deriveSaleKind', () => {
+  it('derives sale when something was sold, even mixed with returns and swaps', () => {
+    expect(
+      deriveSaleKind({
+        items: [{ productCode: 'G10', quantity: 2 }],
+        returnedItems: [{ productCode: 'G10', quantity: 1 }],
+        swappedItems: [{ productCode: 'G15', quantity: 1 }],
+      }),
+    ).toBe('sale');
+  });
+
+  it('derives swap when only faulty units were exchanged', () => {
+    expect(
+      deriveSaleKind({
+        items: [],
+        swappedItems: [{ productCode: 'G10', quantity: 1 }],
+      }),
+    ).toBe('swap');
+  });
+
+  it('derives churn when only empty containers came back', () => {
+    expect(
+      deriveSaleKind({
+        items: [],
+        returnedItems: [{ productCode: 'G10', quantity: 1 }],
+      }),
+    ).toBe('churn');
+  });
+
+  // Un payload viejo, encolado antes de que existieran las dos listas nuevas,
+  // se sigue derivando exactamente como siempre.
+  it('derives sale for a legacy payload that carries only items', () => {
+    expect(deriveSaleKind({ items: [{ productCode: 'G10', quantity: 2 }] })).toBe('sale');
+  });
+
+  // La pantalla mantiene una fila por producto con el contador en cero, asi
+  // que la derivacion cuenta unidades y no filas: una lista de ceros no es
+  // una venta ni un cambio.
+  it('ignores zero-quantity lines when deriving the kind', () => {
+    expect(
+      deriveSaleKind({
+        items: [{ productCode: 'G10', quantity: 0 }],
+        swappedItems: [{ productCode: 'G15', quantity: 0 }],
+        returnedItems: [{ productCode: 'G10', quantity: 1 }],
+      }),
+    ).toBe('churn');
+  });
+});
+
+describe('validateCreateSaleInput con devoluciones y cambios', () => {
+  const base: CreateSaleInput = {
+    driverName: 'Juan',
+    customerName: 'Kiosco Sur',
+    customerType: 'final',
+    paymentMethod: 'efectivo',
+    items: [{ productCode: 'G10', quantity: 2 }],
+  };
+
+  it('accepts a mixed visit: sold, returned and swapped at once', () => {
+    const input: CreateSaleInput = {
+      ...base,
+      returnedItems: [{ productCode: 'G10', quantity: 1 }],
+      swappedItems: [{ productCode: 'G15', quantity: 1 }],
+    };
+    expect(validateCreateSaleInput(input)).toEqual([]);
+  });
+
+  // La garantia que sobrevive a D1: una fila que vendio algo no se puede
+  // grabar sin cobro.
+  it('still requires paymentMethod when something was sold', () => {
+    const { paymentMethod, ...rest } = base;
+    void paymentMethod;
+    const errors = validateCreateSaleInput({
+      ...(rest as CreateSaleInput),
+      returnedItems: [{ productCode: 'G10', quantity: 1 }],
+    });
+    expect(errors).toContain('paymentMethod is invalid');
+  });
+
+  it('does not require paymentMethod for a pure swap', () => {
+    const { paymentMethod, ...rest } = base;
+    void paymentMethod;
+    const input = {
+      ...(rest as CreateSaleInput),
+      items: [],
+      swappedItems: [{ productCode: 'G10', quantity: 1 }],
+    };
+    expect(validateCreateSaleInput(input)).toEqual([]);
+  });
+
+  it('does not require paymentMethod for a visit where only empties came back', () => {
+    const { paymentMethod, ...rest } = base;
+    void paymentMethod;
+    const input = {
+      ...(rest as CreateSaleInput),
+      items: [],
+      returnedItems: [{ productCode: 'G10', quantity: 1 }],
+    };
+    expect(validateCreateSaleInput(input)).toEqual([]);
+  });
+
+  // Sin cobro no hay deuda que respaldar: la regla de `createsDebt` es de la
+  // rama que vende.
+  it('does not demand a customerId for a swap even when a debt-creating method is smuggled in', () => {
+    const errors = validateCreateSaleInput(
+      {
+        ...base,
+        items: [],
+        paymentMethod: 'cuenta_corriente',
+        swappedItems: [{ productCode: 'G10', quantity: 1 }],
+      },
+      [
+        {
+          id: 'pm-cc',
+          code: 'cuenta_corriente',
+          name: 'Cuenta corriente',
+          isActive: true,
+          sortOrder: 0,
+          proofPolicy: 'none',
+          countsAsCash: false,
+          createsDebt: true,
+        } as PaymentMethodRecord,
+      ],
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it('rejects a visit with nothing sold, nothing returned and nothing swapped', () => {
+    const errors = validateCreateSaleInput({ ...base, items: [] });
+    expect(errors).toContain('items must include at least one product');
+  });
+
+  it('rejects a returnedItems line with a zero quantity', () => {
+    const errors = validateCreateSaleInput({
+      ...base,
+      returnedItems: [{ productCode: 'G10', quantity: 0 }],
+    });
+    expect(errors).toContain('returnedItems[0].quantity must be an integer greater than 0');
+  });
+
+  it('rejects a swappedItems line with a non-integer quantity', () => {
+    const errors = validateCreateSaleInput({
+      ...base,
+      swappedItems: [{ productCode: 'G10', quantity: 1.5 }],
+    });
+    expect(errors).toContain('swappedItems[0].quantity must be an integer greater than 0');
+  });
+
+  it('rejects a swappedItems line with an invalid productCode', () => {
+    const errors = validateCreateSaleInput({
+      ...base,
+      swappedItems: [{ productCode: '  ', quantity: 1 }],
+    });
+    expect(errors).toContain('swappedItems[0].productCode is invalid');
+  });
+});
+
+describe('validateRecordEmptyVisitInput con returnedItems', () => {
+  const base: RecordEmptyVisitInput = {
+    driverName: 'Juan',
+    customerName: 'Kiosco Sur',
+    customerType: 'final',
+  };
+
+  it('accepts a visit that says how many empties came back', () => {
+    const input: RecordEmptyVisitInput = {
+      ...base,
+      returnedItems: [{ productCode: 'G10', quantity: 2 }],
+    };
+    expect(validateRecordEmptyVisitInput(input)).toEqual([]);
+  });
+
+  it('rejects a returnedItems line with a zero quantity', () => {
+    const errors = validateRecordEmptyVisitInput({
+      ...base,
+      returnedItems: [{ productCode: 'G10', quantity: 0 }],
+    });
+    expect(errors).toContain('returnedItems[0].quantity must be an integer greater than 0');
+  });
+});
+
+describe('validateUpdateSaleInput para una fila de swap', () => {
+  // Un swap almacenado lleva sus reemplazos en `items`, asi que derivar el
+  // kind del payload de edicion daria 'sale' y exigiria un cobro que esa fila
+  // nunca tuvo. En la edicion manda el hint, y el service lo revalida contra
+  // el kind guardado.
+  it('does not require paymentMethod when the stored row is a swap', () => {
+    const input = {
+      driverName: 'Juan',
+      customerName: 'Kiosco Sur',
+      customerType: 'final',
+      items: [{ productCode: 'G10', quantity: 1 }],
+      swappedItems: [{ productCode: 'G10', quantity: 1 }],
+      kind: 'swap',
+      reason: 'Corrección de cantidad',
+    } as UpdateSaleInput;
+    expect(validateUpdateSaleInput(input)).toEqual([]);
+  });
+
+  it('still requires paymentMethod when the stored row is a sale', () => {
+    const input = {
+      driverName: 'Juan',
+      customerName: 'Kiosco Sur',
+      customerType: 'final',
+      items: [{ productCode: 'G10', quantity: 1 }],
+      kind: 'sale',
+      reason: 'Corrección de cantidad',
+    } as UpdateSaleInput;
+    expect(validateUpdateSaleInput(input)).toContain('paymentMethod is invalid');
   });
 });
