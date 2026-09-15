@@ -722,6 +722,9 @@ export function NewSaleScreen() {
           // medios, y `canSell` ya bloquea la venta hasta entonces.
           value={paymentMethod ?? ''}
           onChange={setChosenPaymentMethod}
+          // Tres por fila: estirados en un solo renglon, "Cuenta corriente" y
+          // "Transferencia" quedan ilegibles, y el catalogo puede crecer.
+          maxPerRow={3}
           testID="new-sale-payment"
         />
       </View>

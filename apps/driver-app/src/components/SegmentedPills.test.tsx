@@ -67,6 +67,47 @@ describe('SegmentedPills/varias filas', () => {
     expect(style.flex).toBeUndefined();
   });
 
+  // `maxPerRow` es para grupos que no entran estirados en un renglon pero
+  // tampoco quieren el borde irregular de `wrap`: las pastillas forman una
+  // grilla pareja que baja de fila sola.
+  it('caps how many pills share a row and lets the rest wrap', async () => {
+    await render(
+      <SegmentedPills
+        options={CATEGORIES}
+        value="combustible"
+        onChange={() => {}}
+        maxPerRow={3}
+        testID="categoria"
+      />,
+    );
+
+    const row = StyleSheet.flatten(screen.getByTestId('categoria-row').props.style);
+    expect(row.flexWrap).toBe('wrap');
+
+    // Base del 25% con tres por fila: tres entran (75% mas los dos huecos) y
+    // una cuarta ya no, asi que baja sola. `flexGrow` las estira para llenar
+    // el renglon, sin que el ancho dependa de cuanto mida el texto.
+    const style = StyleSheet.flatten(screen.getByTestId('categoria-peaje').props.style);
+    expect(style.flexBasis).toBe('25%');
+    expect(style.flexGrow).toBe(1);
+    expect(style.flex).toBeUndefined();
+  });
+
+  it('keeps two per row readable on a narrow screen', async () => {
+    await render(
+      <SegmentedPills
+        options={CATEGORIES}
+        value="combustible"
+        onChange={() => {}}
+        maxPerRow={2}
+        testID="categoria"
+      />,
+    );
+
+    const style = StyleSheet.flatten(screen.getByTestId('categoria-peaje').props.style);
+    expect(style.flexBasis).toBe('33.333333333333336%');
+  });
+
   it('still stretches its pills to fill a single row by default', async () => {
     await render(
       <SegmentedPills options={OPTIONS} value="efectivo" onChange={() => {}} testID="cobro" />,
