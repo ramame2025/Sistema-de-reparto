@@ -223,6 +223,21 @@ const renderSaleScreen = async (
   return render(<NewSaleScreen />);
 };
 
+/**
+ * La seccion es el UNICO camino para cargar un envase vacio: el toggle
+ * "Envase devuelto" se elimino a proposito, porque con la seccion arriba eran
+ * dos controles para el mismo dato y dos controles del mismo dato terminan
+ * contradiciendose.
+ */
+const returnEmpty = async (code: string, times = 1) => {
+  if (!screen.queryByTestId(`returned-row-${code}-increment`)) {
+    await fireEvent.press(screen.getByTestId('new-sale-returns-toggle'));
+  }
+  for (let i = 0; i < times; i += 1) {
+    await fireEvent.press(screen.getByTestId(`returned-row-${code}-increment`));
+  }
+};
+
 const saveOneSale = async (saleId: string) => {
   mockedTrySendSale.mockResolvedValueOnce(saleId);
   await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
@@ -383,33 +398,21 @@ describe('NewSaleScreen/camion asignado', () => {
   });
 });
 
-describe('NewSaleScreen/envase devuelto toggle (visit-container-model Unit 4)', () => {
-  // El subtitulo dejo de leer un booleano y pasa a contar la lista: el atajo
-  // y la seccion son el mismo dato, y lo que se muestra es CUANTOS vuelven,
-  // que es lo que ahora se graba (D9).
+describe('NewSaleScreen/envases que vuelven (visit-container-model Unit 4)', () => {
+  // El booleano de siempre paso a ser una lista con cantidades por producto:
+  // lo que se graba es CUANTOS vuelven y de cual, no un si/no (D9).
   it('counts the empties on the way back instead of reading a yes/no', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
     await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await returnEmpty('G10', 2);
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
-    expect(screen.getByText('Ninguno')).toBeTruthy();
-
-    await fireEvent(
-      screen.getByTestId('new-sale-container-returned-switch'),
-      'valueChange',
-      true,
-    );
-    expect(screen.getByText('1 envase vuelve')).toBeTruthy();
-
-    await fireEvent.press(screen.getByTestId('new-sale-returns-toggle'));
-    await fireEvent.press(screen.getByTestId('returned-row-G10-increment'));
-    expect(screen.getByText('2 envases vuelven')).toBeTruthy();
-
-    await fireEvent(
-      screen.getByTestId('new-sale-container-returned-switch'),
-      'valueChange',
-      false,
-    );
-    expect(screen.getByText('Ninguno')).toBeTruthy();
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0].returnedItems).toEqual([
+      { productCode: 'G10', quantity: 2 },
+    ]);
   });
 
   it('omits containerReturned from the Guardar venta payload when never touched', async () => {
@@ -432,11 +435,7 @@ describe('NewSaleScreen/envase devuelto toggle (visit-container-model Unit 4)', 
 
     await renderSaleScreen();
     await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
-    await fireEvent(
-      screen.getByTestId('new-sale-container-returned-switch'),
-      'valueChange',
-      true,
-    );
+    await returnEmpty('G10');
     await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
@@ -451,7 +450,7 @@ describe('NewSaleScreen/registrar visita sin venta (churn, visit-container-model
   // del pie cuando no hay productos y el envase quedo marcado. Sigue siendo el
   // endpoint distinto de siempre, con su payload sin items ni forma de pago.
   const markContainerReturned = async () =>
-    fireEvent(screen.getByTestId('new-sale-container-returned-switch'), 'valueChange', true);
+    returnEmpty('G10');
 
   it('takes over the footer action when the container is returned and nothing was sold', async () => {
     await renderSaleScreen();
@@ -1040,11 +1039,7 @@ describe('NewSaleScreen/cliente sin precios', () => {
     mockedTrySendEmptyVisit.mockResolvedValue('visit-1');
 
     await renderSaleScreen('Kiosco La Esquina', 'final');
-    await fireEvent(
-      screen.getByTestId('new-sale-container-returned-switch'),
-      'valueChange',
-      true,
-    );
+    await returnEmpty('G10');
     await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendEmptyVisit).toHaveBeenCalledTimes(1));
@@ -1072,11 +1067,7 @@ describe('NewSaleScreen — occurredAt', () => {
     mockedTrySendEmptyVisit.mockResolvedValue('visit-occurred');
 
     await renderSaleScreen();
-    await fireEvent(
-      screen.getByTestId('new-sale-container-returned-switch'),
-      'valueChange',
-      true,
-    );
+    await returnEmpty('G10');
     await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
     await waitFor(() => expect(mockedTrySendEmptyVisit).toHaveBeenCalled());
@@ -1446,73 +1437,72 @@ describe('NewSaleScreen/devoluciones y cambios (container-swap D6)', () => {
 });
 
 /**
- * El riesgo anotado en el plan: el atajo y la seccion son DOS controles sobre
- * el MISMO hecho. Se sostienen con una sola fuente de verdad -- la lista de
- * envases vacios -- y estos tests son los que impiden que vuelvan a ser dos
- * estados paralelos que algun dia digan cosas distintas.
+ * El toggle "Envase devuelto" se ELIMINO. Con la seccion de devoluciones
+ * arriba, eran dos controles para el mismo dato, y dos controles del mismo
+ * dato terminan diciendo cosas distintas.
+ *
+ * Estos tests fijan lo que queda: una sola fuente de verdad, la lista de
+ * envases vacios, y ningun camino alternativo que pueda desincronizarse.
  */
-describe('NewSaleScreen/el atajo y la seccion no se contradicen (container-swap)', () => {
-  const switchOn = () =>
-    screen.getByTestId('new-sale-container-returned-switch').props.value;
-
-  it('loads one empty of the product just sold when the shortcut is flipped on', async () => {
+describe('NewSaleScreen/los vacios tienen un solo camino (container-swap)', () => {
+  it('offers no shortcut switch: the section is the only way in', async () => {
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('product-row-G15-increment'));
-    await fireEvent(
-      screen.getByTestId('new-sale-container-returned-switch'),
-      'valueChange',
-      true,
+
+    expect(screen.queryByTestId('new-sale-container-returned-switch')).toBeNull();
+    expect(screen.getByTestId('new-sale-returns-toggle')).toBeTruthy();
+  });
+
+  it('sends exactly what the section holds, product by product', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
+    await renderSaleScreen();
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await returnEmpty('G45', 2);
+    await returnEmpty('G10');
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
+
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    expect(mockedTrySendSale.mock.calls[0][0].returnedItems).toEqual(
+      expect.arrayContaining([
+        { productCode: 'G45', quantity: 2 },
+        { productCode: 'G10', quantity: 1 },
+      ]),
     );
-
-    await fireEvent.press(screen.getByTestId('new-sale-returns-toggle'));
-    expect(screen.getByTestId('returned-row-G15-quantity')).toHaveTextContent('1');
-    expect(screen.getByTestId('returned-row-G10-quantity')).toHaveTextContent('0');
   });
 
-  it('shows itself on as soon as the section has an empty in it', async () => {
+  it('drops the empties back to nothing when they are taken out again', async () => {
+    mockedTrySendSale.mockResolvedValue('sale-123');
+
     await renderSaleScreen();
-    expect(switchOn()).toBe(false);
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await returnEmpty('G10');
+    await fireEvent.press(screen.getByTestId('returned-row-G10-decrement'));
+    await fireEvent.press(screen.getByTestId('sale-footer-action'));
 
-    await fireEvent.press(screen.getByTestId('new-sale-returns-toggle'));
-    await fireEvent.press(screen.getByTestId('returned-row-G45-increment'));
+    await waitFor(() => expect(mockedTrySendSale).toHaveBeenCalledTimes(1));
+    const payload = mockedTrySendSale.mock.calls[0][0];
+    expect(payload.returnedItems ?? []).toEqual([]);
+  });
+});
 
-    expect(switchOn()).toBe(true);
+describe('NewSaleScreen/encabezado de devoluciones', () => {
+  // La seccion se confundia con el resto del formulario: mismo fondo, mismo
+  // tipo de titulo que PRODUCTOS y COBRO. Una banda propia la separa de un
+  // vistazo, que es lo que el chofer necesita cuando la busca apurado.
+  it('gives the returns header a band of its own so it reads apart', async () => {
+    await renderSaleScreen();
+
+    const header = await screen.findByTestId('new-sale-returns-header');
+    const style = StyleSheet.flatten(header.props.style);
+
+    expect(style.backgroundColor).toEqual(expect.any(String));
+    expect(style.borderRadius).toEqual(expect.any(Number));
   });
 
-  it('goes back off when the driver takes the last empty out of the section', async () => {
+  it('keeps the section collapsed by default, band and all', async () => {
     await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-returns-toggle'));
-    await fireEvent.press(screen.getByTestId('returned-row-G45-increment'));
-    expect(switchOn()).toBe(true);
 
-    await fireEvent.press(screen.getByTestId('returned-row-G45-decrement'));
-
-    expect(switchOn()).toBe(false);
-  });
-
-  it('clears the empties when the shortcut is flipped off', async () => {
-    await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-returns-toggle'));
-    await fireEvent.press(screen.getByTestId('returned-row-G45-increment'));
-    await fireEvent.press(screen.getByTestId('returned-row-G45-increment'));
-
-    await fireEvent(
-      screen.getByTestId('new-sale-container-returned-switch'),
-      'valueChange',
-      false,
-    );
-
-    expect(screen.getByTestId('returned-row-G45-quantity')).toHaveTextContent('0');
-    expect(switchOn()).toBe(false);
-  });
-
-  // Un cambio por falla no es un envase devuelto: volvio una unidad, si, pero
-  // se entrego un reemplazo. Marcar el atajo mentiria sobre esa visita (D9).
-  it('never lights up for a swap, which returns a unit but gets one back', async () => {
-    await renderSaleScreen();
-    await fireEvent.press(screen.getByTestId('new-sale-returns-toggle'));
-    await fireEvent.press(screen.getByTestId('swapped-row-G10-increment'));
-
-    expect(switchOn()).toBe(false);
+    expect(await screen.findByTestId('new-sale-returns-header')).toBeTruthy();
+    expect(screen.queryByTestId('returned-row-G10')).toBeNull();
   });
 });
