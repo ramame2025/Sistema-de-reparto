@@ -447,10 +447,39 @@ export class SalesService {
     // editar cantidades, que un churn no.
     const isMoneyless = isChurn || isSwap;
 
+    /**
+     * Que hacer con lo que VUELVE, decidido por PRESENCIA en el payload.
+     *
+     * La edicion reescribia los `SaleItem` y dejaba los `SaleReturnItem`
+     * intactos: en un cambio por falla eso movia el reemplazo y dejaba la
+     * fallada en su numero viejo, rompiendo por la puerta de atras el 1 a 1
+     * que la pantalla no puede romper (D6b).
+     *
+     * Reescribirlos SIEMPRE no era la salida: un cliente viejo -- y hay
+     * telefonos con ventas encoladas -- no manda estas listas, y borraria en
+     * silencio lo que volvio en cualquier venta que edite. Asi que lo que el
+     * payload no nombra, no se toca.
+     *
+     * Las falladas tienen una fuente de respaldo y no por simetria: en una
+     * fila de cambio los `items` SON los reemplazos, o sea el mismo numero que
+     * las falladas. Derivar los dos lados de una sola lista -- venga como
+     * `swappedItems` o como `items` -- es lo que hace que el 1 a 1 se sostenga
+     * incluso frente a un cliente que no conoce las listas nuevas. No hay
+     * borrado en silencio: se reescribe con el numero que ya define la fila.
+     *
+     * Los vacios no tienen respaldo posible: nada en un payload viejo los
+     * nombra, y por eso sobreviven intactos a cualquier edicion que no los
+     * traiga.
+     */
+    const emptySource = input.returnedItems;
+    const faultySource = input.swappedItems ?? (isSwap ? input.items : undefined);
+
     if (!isChurn) {
-      await this.productsService.assertProductCodesExist(
-        input.items.map((item) => item.productCode),
-      );
+      await this.productsService.assertProductCodesExist([
+        ...input.items.map((item) => item.productCode),
+        ...(emptySource ?? []).map((item) => item.productCode),
+        ...(input.swappedItems ?? []).map((item) => item.productCode),
+      ]);
     }
 
     if (!isMoneyless) {
@@ -478,8 +507,24 @@ export class SalesService {
     const { items: resolvedItems, total } = isChurn
       ? { items: [] as PricedSaleItem[], total: 0 }
       : isSwap
-        ? { items: this.buildReplacementItems(input.items), total: 0 }
-        : this.priceItemsOrReject(customerType, input.items, priceTable);
+        ? // Los reemplazos salen de la MISMA lista que las falladas, para que
+          // los dos lados no puedan quedar en numeros distintos.
+          { items: this.buildReplacementItems(faultySource ?? []), total: 0 }
+        : // En una venta, `items` es lo VENDIDO y el reemplazo se deriva de
+          // `swappedItems`, igual que en la creacion: una visita mixta vendio
+          // y ademas cambio, y la linea del cambio entra con precio cero sin
+          // sumar al total. Que `items` signifique lo mismo en los dos caminos
+          // es lo que evita que una edicion cobre un reemplazo o lo pierda.
+          (() => {
+            const sold = this.priceItemsOrReject(customerType, input.items, priceTable);
+            return {
+              items: [
+                ...sold.items,
+                ...this.buildReplacementItems(input.swappedItems ?? []),
+              ],
+              total: sold.total,
+            };
+          })();
     const resolvedPaymentMethod = isMoneyless ? null : input.paymentMethod;
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
@@ -521,8 +566,27 @@ export class SalesService {
       })),
     };
 
+    // Solo los motivos que el payload nombra: lo que no menciona, sobrevive.
+    const rewrittenReturnRows = [
+      ...(emptySource ? this.buildReturnRows(emptySource, []) : []),
+      ...(faultySource ? this.buildReturnRows([], faultySource) : []),
+    ];
+    const rewritesReturns = emptySource !== undefined || faultySource !== undefined;
+
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.saleItem.deleteMany({ where: { saleId: id } });
+
+      if (emptySource !== undefined) {
+        await tx.saleReturnItem.deleteMany({
+          where: { saleId: id, reason: PrismaReturnReason.empty },
+        });
+      }
+
+      if (faultySource !== undefined) {
+        await tx.saleReturnItem.deleteMany({
+          where: { saleId: id, reason: PrismaReturnReason.faulty },
+        });
+      }
 
       const sale = await tx.sale.update({
         where: { id },
@@ -543,6 +607,9 @@ export class SalesService {
           items: {
             create: resolvedItems,
           },
+          // Ausente, no vacio, cuando el payload no nombra ningun motivo: un
+          // `create: []` seria indistinguible de "borralo todo".
+          ...(rewritesReturns ? { returnItems: { create: rewrittenReturnRows } } : {}),
         },
         include: { items: true, returnItems: true },
       });

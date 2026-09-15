@@ -1539,4 +1539,189 @@ describe('SalesService', () => {
       );
     });
   });
+
+  /**
+   * El agujero de edicion: `updateSale` reescribia los `SaleItem` y dejaba las
+   * filas de `SaleReturnItem` como estaban. En un cambio por falla eso rompe
+   * el 1 a 1 por la puerta de atras -- cambia el reemplazo y la fallada queda
+   * en su numero viejo -- justo lo que D6b vuelve imposible desde la pantalla.
+   *
+   * Y no se arregla reescribiendo siempre lo que vuelve: un cliente viejo, que
+   * no manda las listas nuevas, borraria en silencio los retornos de cualquier
+   * venta que edite. La regla es por PRESENCIA.
+   */
+  describe('updateSale/lo que vuelve (container-swap)', () => {
+    const FAULTY = { productCode: 'G10', quantity: 2, reason: 'faulty' };
+    const EMPTY = { productCode: 'G15', quantity: 1, reason: 'empty' };
+
+    const buildSwapRow = (overrides: Record<string, unknown> = {}) =>
+      buildSaleRow({
+        kind: 'swap',
+        paymentMethod: null,
+        total: 0,
+        items: [{ productCode: 'G10', quantity: 2, unitPrice: 0 }],
+        returnItems: [FAULTY],
+        ...overrides,
+      });
+
+    beforeEach(() => {
+      prisma.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) =>
+        cb(prisma),
+      );
+    });
+
+    it('keeps the 1:1 when a swap is edited: both sides move together', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildSwapRow());
+      prisma.sale.update.mockResolvedValue(buildSwapRow());
+
+      await service.updateSale('sale-1', {
+        ...buildUpdateInput({ items: [] }),
+        kind: 'swap',
+        swappedItems: [{ productCode: 'G10', quantity: 5 }],
+      });
+
+      const call = prisma.sale.update.mock.calls[0][0];
+      // Un solo numero alimenta los dos lados: no hay dos campos que puedan
+      // discrepar, ni siquiera desde un payload armado a mano.
+      expect(call.data.items.create).toEqual([
+        { productCode: 'G10', quantity: 5, unitPrice: 0 },
+      ]);
+      expect(call.data.returnItems.create).toEqual([
+        { productCode: 'G10', quantity: 5, reason: 'faulty' },
+      ]);
+      expect(call.data.total).toBe(0);
+    });
+
+    // El caso que no se puede romper en silencio: un telefono viejo edita una
+    // venta normal y no manda las listas nuevas. Lo que volvio no se toca.
+    it('never deletes the return rows of a sale edited by an old client', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({ returnItems: [EMPTY], items: [{ productCode: 'G10', quantity: 2 }] }),
+      );
+      prisma.sale.update.mockResolvedValue(buildSaleRow({ returnItems: [EMPTY] }));
+
+      await service.updateSale(
+        'sale-1',
+        buildUpdateInput({ items: [{ productCode: 'G10', quantity: 3 }] }),
+      );
+
+      expect(prisma.saleReturnItem.deleteMany).not.toHaveBeenCalled();
+      const call = prisma.sale.update.mock.calls[0][0];
+      expect(call.data.returnItems).toBeUndefined();
+    });
+
+    it('rewrites the empties when the payload does bring them', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildSaleRow({ returnItems: [EMPTY] }));
+      prisma.sale.update.mockResolvedValue(buildSaleRow());
+
+      await service.updateSale('sale-1', {
+        ...buildUpdateInput(),
+        returnedItems: [{ productCode: 'G45', quantity: 4 }],
+      });
+
+      expect(prisma.saleReturnItem.deleteMany).toHaveBeenCalledWith({
+        where: { saleId: 'sale-1', reason: 'empty' },
+      });
+      const call = prisma.sale.update.mock.calls[0][0];
+      expect(call.data.returnItems.create).toEqual([
+        { productCode: 'G45', quantity: 4, reason: 'empty' },
+      ]);
+    });
+
+    // Las dos listas son independientes: tocar una no puede borrar la otra.
+    it('leaves the empties of a swap alone when only the swapped lines are sent', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSwapRow({ returnItems: [FAULTY, EMPTY] }),
+      );
+      prisma.sale.update.mockResolvedValue(buildSwapRow());
+
+      await service.updateSale('sale-1', {
+        ...buildUpdateInput({ items: [] }),
+        kind: 'swap',
+        swappedItems: [{ productCode: 'G10', quantity: 1 }],
+      });
+
+      expect(prisma.saleReturnItem.deleteMany).toHaveBeenCalledWith({
+        where: { saleId: 'sale-1', reason: 'faulty' },
+      });
+      expect(prisma.saleReturnItem.deleteMany).not.toHaveBeenCalledWith({
+        where: { saleId: 'sale-1', reason: 'empty' },
+      });
+    });
+
+    /**
+     * El resto del agujero, que la regla por presencia sola no cierra: un
+     * cliente viejo editando un SWAP manda solo `items`, y en una fila de
+     * cambio los `items` SON los reemplazos. Dejar las falladas quietas ahi
+     * rompe el 1 a 1 igual que antes.
+     *
+     * Se cierra sin inventar nada: en una fila de cambio los dos lados salen
+     * de la MISMA lista, venga en `swappedItems` o en `items`. No es un
+     * borrado en silencio -- se reescribe con el mismo numero que ya define la
+     * fila -- y los vacios siguen sin tocarse.
+     */
+    it('keeps the 1:1 even when an old client edits a swap with items only', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildSwapRow({ returnItems: [FAULTY, EMPTY] }));
+      prisma.sale.update.mockResolvedValue(buildSwapRow());
+
+      await service.updateSale('sale-1', {
+        ...buildUpdateInput({ items: [{ productCode: 'G10', quantity: 7 }] }),
+        kind: 'swap',
+      });
+
+      const call = prisma.sale.update.mock.calls[0][0];
+      expect(call.data.items.create).toEqual([
+        { productCode: 'G10', quantity: 7, unitPrice: 0 },
+      ]);
+      expect(call.data.returnItems.create).toEqual([
+        { productCode: 'G10', quantity: 7, reason: 'faulty' },
+      ]);
+      expect(prisma.saleReturnItem.deleteMany).not.toHaveBeenCalledWith({
+        where: { saleId: 'sale-1', reason: 'empty' },
+      });
+    });
+
+    /**
+     * Mismo contrato que en la creacion, para que `items` signifique lo mismo
+     * en los dos caminos: `items` es lo VENDIDO y el reemplazo se deriva de
+     * `swappedItems`, una sola vez. Sin esto, una visita mixta editada perdia
+     * la linea gratis del reemplazo o la cobraba a precio de lista.
+     */
+    it('rebuilds the free replacement line of a mixed visit from the swapped list', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({ returnItems: [FAULTY], items: [{ productCode: 'G10', quantity: 2 }] }),
+      );
+      prisma.sale.update.mockResolvedValue(buildSaleRow());
+
+      await service.updateSale('sale-1', {
+        ...buildUpdateInput({ items: [{ productCode: 'G10', quantity: 2 }] }),
+        swappedItems: [{ productCode: 'G15', quantity: 1 }],
+      });
+
+      const call = prisma.sale.update.mock.calls[0][0];
+      expect(call.data.items.create).toEqual([
+        { productCode: 'G10', quantity: 2, unitPrice: 100 },
+        { productCode: 'G15', quantity: 1, unitPrice: 0 },
+      ]);
+      // El reemplazo no suma plata: el total sigue siendo el de lo vendido.
+      expect(call.data.total).toBe(200);
+      expect(call.data.returnItems.create).toEqual([
+        { productCode: 'G15', quantity: 1, reason: 'faulty' },
+      ]);
+    });
+
+    it('checks that the products of the new return lines exist before writing', async () => {
+      prisma.sale.findUnique.mockResolvedValue(buildSaleRow());
+      prisma.sale.update.mockResolvedValue(buildSaleRow());
+
+      await service.updateSale('sale-1', {
+        ...buildUpdateInput(),
+        returnedItems: [{ productCode: 'G45', quantity: 1 }],
+      });
+
+      expect(productsService.assertProductCodesExist).toHaveBeenCalledWith(
+        expect.arrayContaining(['G10', 'G45']),
+      );
+    });
+  });
 });
