@@ -322,8 +322,17 @@ El booleano sobrevive tal cual para las filas históricas. **No hay backfill
 posible**: hay filas que dicen "sí, devolvió envase" y nunca se guardó cuántos
 ni de qué producto. Ese dato no se puede recuperar porque nunca se recolectó.
 
-Para las filas nuevas pasa a derivarse (`returnItems.length > 0`), así todo lo
-que hoy lee el booleano sigue funcionando sin tocarse. Historia vieja y datos
+Para las filas nuevas pasa a derivarse, pero **sólo de los envases vacíos**,
+no de todo lo que vuelve. El booleano significa "volvió un envase vacío y no le
+dimos nada a cambio": en un cambio por falla también vuelve una unidad, pero se
+entregó un reemplazo, y marcarlo mentiría sobre lo que pasó en esa visita.
+
+```
+returnedItems.length > 0  →  containerReturned: true
+sólo swappedItems         →  containerReturned: null
+```
+
+Así todo lo que hoy lee el booleano sigue funcionando sin tocarse. Historia vieja y datos
 nuevos conviviendo: feo, y honesto. Borrarlo inventaría una precisión que el
 pasado nunca tuvo.
 
