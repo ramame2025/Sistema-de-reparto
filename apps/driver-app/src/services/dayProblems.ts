@@ -2,16 +2,18 @@ import {
   priceSaleItems,
   type CreateSaleInput,
   type PaymentMethod,
+  type PaymentMethodRecord,
   type PriceTable,
   type SaleRecord,
 } from '@distribuidor/shared';
 import type { PendingSale } from './offlineQueue';
+import { paymentMethodLabel, proofPolicyOf } from './paymentMethods';
 
 export type SaleProblem = {
   /**
    * `not-sent`: el servidor nunca la recibio, sigue en la cola del telefono.
-   * `missing-proof`: esta guardada, pero se cobro sin efectivo y no tiene foto
-   * del comprobante.
+   * `missing-proof`: esta guardada, pero se cobro con un medio cuya
+   * `proofPolicy` no es `none` y no tiene foto del comprobante.
    */
   kind: 'not-sent' | 'missing-proof';
   /** queueId para `not-sent`, id de la venta para `missing-proof`. */
@@ -21,6 +23,12 @@ export type SaleProblem = {
   total?: number;
   attempts?: number;
   paymentMethod?: PaymentMethod;
+  /**
+   * Como se muestra el medio de pago. Viaja resuelto para que la tarjeta que
+   * lo pinta no tenga que conocer el catalogo: es un componente de
+   * presentacion y recibe texto, no codigos que traducir.
+   */
+  paymentMethodLabel?: string;
 };
 
 /**
@@ -58,13 +66,20 @@ const totalOfQueued = (entry: PendingSale, prices: PriceTable | null): number | 
  * comprobante ya esta guardada y solo le falta un adjunto. Primero lo que se
  * puede perder.
  *
- * El comprobante sigue siendo opcional al momento de cobrar -- esto es un
- * aviso al cierre del dia, no una validacion que bloquee la venta.
+ * Con `proofPolicy: 'optional'` el comprobante sigue siendo opcional al
+ * momento de cobrar -- esto es un aviso al cierre del dia, no una validacion
+ * que bloquee la venta. Con `'required'` la venta ni siquiera se pudo guardar
+ * sin el, asi que ahi este aviso no tiene a quien avisarle.
+ *
+ * `paymentMethods` NO tiene default a proposito: sin el, la funcion no puede
+ * saber que medio lleva comprobante, y un default silencioso convertiria esa
+ * ignorancia en avisos inventados.
  */
 export function buildDayProblems(
   pendingSales: PendingSale[],
   todaySales: SaleRecord[],
   prices: PriceTable | null,
+  paymentMethods: PaymentMethodRecord[],
 ): SaleProblem[] {
   // La cola se restaura desde el almacenamiento del telefono, asi que una
   // entrada puede llegar incompleta (version vieja de la app, escritura
@@ -81,15 +96,24 @@ export function buildDayProblems(
     attempts: entry.retries,
   }));
 
+  // Sin catalogo no hay reglas que aplicar, y NO se inventan: con la lista
+  // vacia todo codigo caeria en el default `optional` y cada venta en efectivo
+  // del dia apareceria reclamando un comprobante que no existe. Se avisa de lo
+  // que si se sabe -- las que no se enviaron -- y nada mas.
+  if (paymentMethods.length === 0) {
+    return notSent;
+  }
+
   const missingProof: SaleProblem[] = todaySales
     .filter(
       (sale) =>
         sale.status === 'active' &&
         sale.kind === 'sale' &&
-        // Una visita sin venta y una venta en efectivo no tienen comprobante
-        // que adjuntar: `paymentMethod` es null en la primera.
-        sale.paymentMethod !== null &&
-        sale.paymentMethod !== 'efectivo' &&
+        // Una visita sin venta no tiene comprobante que adjuntar
+        // (`paymentMethod` es null), y un medio con politica `none` -- el
+        // efectivo -- tampoco. Antes esto era la comparacion literal
+        // `!== 'efectivo'`; ahora la regla la trae el medio de pago.
+        proofPolicyOf(paymentMethods, sale.paymentMethod) !== 'none' &&
         !sale.paymentProofRef,
     )
     .map((sale) => ({
@@ -98,6 +122,11 @@ export function buildDayProblems(
       customerName: sale.customerName,
       total: sale.total,
       paymentMethod: sale.paymentMethod as PaymentMethod,
+      paymentMethodLabel: paymentMethodLabel(
+        paymentMethods,
+        sale.paymentMethod,
+        'venta',
+      ),
     }));
 
   return [...notSent, ...missingProof];

@@ -5,7 +5,6 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
-  PAYMENT_METHODS,
   findUnitPrice,
   priceSaleItems,
   type CreateSaleInput,
@@ -35,6 +34,7 @@ import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { ApiError } from '../services/apiClient';
 import { API_URL } from '../services/config';
 import { captureDeviceLocation } from '../services/location';
+import { createsDebtOf, driverErrorMessage } from '../services/paymentMethods';
 import { useColors } from '../theme/ThemeContext';
 import type { Colors } from '../theme/colors';
 import { radii } from '../theme/radii';
@@ -55,18 +55,6 @@ const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
   comercio: 'Comercio',
   distribuidor: 'Distribuidor',
 };
-
-const PAYMENT_LABELS: Record<PaymentMethod, string> = {
-  efectivo: 'Efectivo',
-  transferencia: 'Transf.',
-  qr: 'QR',
-  tarjeta: 'Tarjeta',
-};
-
-const PAYMENT_OPTIONS = PAYMENT_METHODS.map((method) => ({
-  value: method,
-  label: PAYMENT_LABELS[method],
-}));
 
 const buildClientGeneratedId = () =>
   `m_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -108,8 +96,18 @@ export function NewSaleScreen() {
   const [customerType, setCustomerType] = useState<CustomerType | undefined>(undefined);
   const [customerName, setCustomerName] = useState('');
   const [customerId, setCustomerId] = useState<string | undefined>(undefined);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
-  const { products, prices, stale: pricesAreStale, canSell } = useCatalog();
+  // Lo que el chofer ELIGIO, que no es lo mismo que lo que esta seleccionado:
+  // `undefined` mientras no toco nada. El medio efectivo se deriva mas abajo.
+  const [chosenPaymentMethod, setChosenPaymentMethod] = useState<
+    PaymentMethod | undefined
+  >(undefined);
+  const {
+    products,
+    prices,
+    paymentMethods,
+    stale: pricesAreStale,
+    canSell,
+  } = useCatalog();
   const [quantities, setQuantities] = useState<Record<ProductCode, number>>(EMPTY_QUANTITIES);
   // `undefined` = nunca tocado (se omite del payload, "no preguntado" en el
   // backend). Solo pasa a true/false cuando el chofer toca el control.
@@ -144,6 +142,63 @@ export function NewSaleScreen() {
     setCustomerName(pickedCustomer.name);
     setCustomerType(pickedCustomer.customerType);
   }, [route.params?.pickedCustomer]);
+
+  const paymentOptions = useMemo(
+    () =>
+      paymentMethods.map((method) => ({
+        value: method.code,
+        label: method.name,
+      })),
+    [paymentMethods],
+  );
+
+  /**
+   * Deja elegido el primer medio de pago activo en cuanto el catalogo llega, y
+   * corrige la eleccion si el medio seleccionado deja de estar disponible (una
+   * baja que entra en la sincronizacion del medio del turno).
+   *
+   * Antes esto era `useState('efectivo')`: la pantalla asumia que el efectivo
+   * existia y estaba activo. Ahora eso lo decide la tabla.
+   */
+  /**
+   * El medio de pago efectivamente seleccionado: lo que el chofer eligio, o el
+   * primero del catalogo si todavia no eligio nada -- o si lo que habia
+   * elegido dejo de estar disponible (una baja que entra en la sincronizacion
+   * del medio del turno).
+   *
+   * Se DERIVA en el render en vez de sincronizarse con un efecto. Un efecto
+   * aca significaba una actualizacion de estado extra despues de cada montaje,
+   * y eso rompia el test de geolocalizacion con timers falsos: React
+   * reagendaba trabajo mientras `advanceTimersByTimeAsync` adelantaba el
+   * reloj, y los dos giraban para siempre. Derivarlo no tiene ese problema
+   * porque no hay nada que sincronizar.
+   */
+  const selectedPaymentMethod = useMemo(() => {
+    const chosen = paymentMethods.find(
+      (method) => method.code === chosenPaymentMethod,
+    );
+    return chosen ?? paymentMethods[0];
+  }, [paymentMethods, chosenPaymentMethod]);
+
+  const paymentMethod = selectedPaymentMethod?.code;
+
+  // La regla de comprobante sale del medio de pago, no de comparar el codigo
+  // contra el string 'efectivo' como se hacia hasta ahora.
+  const proofPolicy = selectedPaymentMethod?.proofPolicy ?? 'none';
+  const proofRequired = proofPolicy === 'required';
+
+  // Si el medio elegido deja al cliente debiendo. Se pregunta por la bandera
+  // del catalogo, nunca comparando el codigo contra 'cuenta_corriente': el dia
+  // que el duenio agregue otro medio a cuenta, esta pantalla ya lo entiende.
+  const paymentCreatesDebt = createsDebtOf(paymentMethods, paymentMethod);
+
+  // Una deuda tiene que tener un deudor, y el deudor tiene que ser una ficha
+  // del padron. Un nombre suelto -- el que queda cuando un alta rapida no
+  // llego a grabarse -- alcanza para una venta al contado, pero no para una a
+  // cuenta: despues no hay a quien cobrarle.
+  const debtNeedsDirectoryCustomer = paymentCreatesDebt && !customerId;
+
+  const paymentMethodName = selectedPaymentMethod?.name ?? 'Este medio de pago';
 
   const currentItems = useMemo(
     () =>
@@ -202,7 +257,7 @@ export function NewSaleScreen() {
    * Adaptado de ExpensesScreen.pickReceiptImage/captureReceiptImage/
    * uploadReceipt: mismo mecanismo (`/uploads/receipt`, reusado sin cambios
    * por decision del roadmap), mismo patron de estado local. Solo se
-   * renderiza cuando paymentMethod !== 'efectivo'.
+   * renderiza cuando la `proofPolicy` del medio elegido no es `none`.
    */
   const uploadPaymentProof = async (uri: string) => {
     // Uses expo-file-system's File.upload() (native multipart task) instead
@@ -321,6 +376,25 @@ export function NewSaleScreen() {
       return;
     }
 
+    // Sin medio de pago no hay venta que grabar. En la practica solo pasa con
+    // el catalogo sin cargar todavia, que es justamente cuando `canSell` ya
+    // bloquea la pantalla; es el cinturon ademas de los tiradores.
+    if (!paymentMethod) {
+      showMessage('Todavia no se cargaron los medios de pago.', 'error');
+      return;
+    }
+
+    // La unica barrera nueva que trae la tabla: un medio en `required` no se
+    // guarda sin comprobante. Ninguno de los cuatro medios semilla nace asi,
+    // asi que esto no cambia nada hasta que el duenio lo active.
+    if (proofRequired && !paymentProofRef) {
+      showMessage(
+        `Adjunta el comprobante: ${selectedPaymentMethod?.name ?? 'este medio de pago'} lo exige.`,
+        'error',
+      );
+      return;
+    }
+
     // Ultima barrera antes de armar el payload: sin precio no hay importe que
     // cobrar, y grabar la venta igual la congelaria en cero. Va antes de tomar
     // el candado porque una venta rechazada aca no llego a intentarse.
@@ -373,9 +447,24 @@ export function NewSaleScreen() {
     // check: catches a blank/whitespace-only name client-side, before it
     // either hits the API (400) or, worse, gets stuck forever in the
     // offline sync queue with no remediation UI.
-    const validationErrors = validateCreateSaleInput(payload);
+    //
+    // El catalogo va como segundo argumento porque la regla del deudor no se
+    // puede contestar sin el: `createsDebt` vive en la tabla de medios de
+    // pago, no en el payload. Sin pasarlo, una venta a cuenta sin cliente se
+    // encolaria sin senal y recien el servidor la rechazaria -- horas o dias
+    // despues, con el chofer lejos del cliente.
+    const validationErrors = validateCreateSaleInput(payload, paymentMethods);
     if (validationErrors.length > 0) {
-      showMessage(validationErrors[0], 'error');
+      // El motivo, en el idioma del chofer: el string crudo del validador
+      // habla en ingles y nombra un campo que esta pantalla no muestra.
+      showMessage(
+        driverErrorMessage(
+          validationErrors[0],
+          paymentMethodName,
+          'elegí un cliente del padrón antes de guardar.',
+        ),
+        'error',
+      );
       submittingRef.current = false;
       setSaving(false);
       return;
@@ -588,6 +677,21 @@ export function NewSaleScreen() {
         />
       )}
 
+      {/*
+        El aviso aparece en cuanto el chofer elige el medio, no recien al
+        apretar Guardar: un nombre suelto con un medio a cuenta es un estado
+        ambiguo, y dejarlo sin nombrar hasta el final le hace cargar la venta
+        entera para enterarse despues. Va pegado a la tarjeta del cliente, que
+        es la salida: un toque y elige del padron.
+      */}
+      {debtNeedsDirectoryCustomer && (
+        <FeedbackBanner
+          testID="new-sale-debt-needs-customer"
+          message={`${paymentMethodName} queda como deuda del cliente. Elegí un cliente del padrón para poder guardar esta venta.`}
+          tone="warning"
+        />
+      )}
+
       <CustomerCard
         testID="new-sale-customer-card"
         name={customerName || undefined}
@@ -612,18 +716,26 @@ export function NewSaleScreen() {
       <View style={styles.field}>
         <SectionLabel>COBRO</SectionLabel>
         <SegmentedPills
-          options={PAYMENT_OPTIONS}
-          value={paymentMethod}
-          onChange={setPaymentMethod}
+          options={paymentOptions}
+          // '' mientras el catalogo no llego: ninguna pastilla queda marcada,
+          // que es la verdad. El efecto de arriba elige la primera apenas hay
+          // medios, y `canSell` ya bloquea la venta hasta entonces.
+          value={paymentMethod ?? ''}
+          onChange={setChosenPaymentMethod}
+          // Tres por fila: estirados en un solo renglon, "Cuenta corriente" y
+          // "Transferencia" quedan ilegibles, y el catalogo puede crecer.
+          maxPerRow={3}
           testID="new-sale-payment"
         />
       </View>
 
-      {paymentMethod !== 'efectivo' && (
+      {proofPolicy !== 'none' && (
         <View style={styles.proof}>
           <View style={styles.sectionRow}>
             <SectionLabel>COMPROBANTE</SectionLabel>
-            <Text style={styles.optional}>opcional</Text>
+            <Text style={styles.optional}>
+              {proofRequired ? 'obligatorio' : 'opcional'}
+            </Text>
           </View>
           <View style={styles.proofButtons}>
             <View style={styles.proofButton}>

@@ -13,11 +13,13 @@ import { render, screen, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
   CustomerCategoryRecord,
+  PaymentMethodRecord,
   PriceTable,
   ProductRecord,
 } from '@distribuidor/shared';
 import { CatalogProvider, useCatalog } from './CatalogContext';
 import { useAuth } from './AuthContext';
+import { SEED_PAYMENT_METHODS } from '../test-utils/paymentMethods';
 import { CATALOG_CACHE_KEY } from '../services/catalog';
 
 const mockedUseAuth = useAuth as jest.Mock;
@@ -89,10 +91,12 @@ describe('CatalogContext', () => {
     products: ProductRecord[],
     prices: PriceTable,
     categories: CustomerCategoryRecord[] = CATEGORIES,
+    paymentMethods: PaymentMethodRecord[] = SEED_PAYMENT_METHODS,
   ) => {
     get.mockImplementation((path: string) => {
       if (path === '/products') return Promise.resolve(products);
       if (path === '/customer-categories') return Promise.resolve(categories);
+      if (path === '/payment-methods') return Promise.resolve(paymentMethods);
       return Promise.resolve(prices);
     });
   };
@@ -157,6 +161,7 @@ describe('CatalogContext', () => {
         products: PRODUCTS,
         prices: PRICES,
         categories: CATEGORIES,
+        paymentMethods: SEED_PAYMENT_METHODS,
         fetchedAt: '2026-08-26T10:00:00.000Z',
       }),
     );

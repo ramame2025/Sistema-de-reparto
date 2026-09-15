@@ -19,12 +19,20 @@ jest.mock('../context/SyncContext', () => {
   return { ...actual, useSync: jest.fn() };
 });
 
+jest.mock('../context/CatalogContext', () => {
+  const actual = jest.requireActual('../context/CatalogContext');
+  return { ...actual, useCatalog: jest.fn() };
+});
+
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react-native';
 import { SaleResultScreen } from './SaleResultScreen';
+import { useCatalog } from '../context/CatalogContext';
 import { useSync } from '../context/SyncContext';
+import { SEED_PAYMENT_METHODS } from '../test-utils/paymentMethods';
 
 const mockedUseSync = useSync as jest.Mock;
+const mockedUseCatalog = useCatalog as jest.Mock;
 
 const sentParams = {
   outcome: 'sent' as const,
@@ -44,6 +52,7 @@ beforeEach(() => {
   mockedNavigate.mockClear();
   mockedParentNavigate.mockClear();
   mockedParams = sentParams;
+  mockedUseCatalog.mockReturnValue({ paymentMethods: SEED_PAYMENT_METHODS });
   mockedUseSync.mockReturnValue({
     daySummary: { activeCount: 13, canceledCount: 0, activeTotal: 197500 },
     pendingSales: [],

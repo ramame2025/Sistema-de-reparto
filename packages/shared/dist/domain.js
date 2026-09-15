@@ -51,12 +51,39 @@ export function isWellFormedCustomerType(value) {
     const trimmed = value.trim();
     return trimmed.length > 0 && trimmed.length <= CUSTOMER_TYPE_MAX_LENGTH;
 }
-export const PAYMENT_METHODS = [
-    "efectivo",
-    "transferencia",
-    "qr",
-    "tarjeta",
-];
+/** Misma cota que `CUSTOMER_TYPE_MAX_LENGTH`, y por el mismo motivo. */
+export const PAYMENT_METHOD_MAX_LENGTH = 20;
+/**
+ * Que exige un medio de pago en materia de comprobante.
+ *
+ * - `none`: no aplica. El efectivo no tiene nada que adjuntar.
+ * - `optional`: se puede adjuntar, y si no se adjunta la venta queda marcada
+ *   como pendiente en el resumen del dia (`missing-proof`).
+ * - `required`: el chofer no puede guardar la venta sin el comprobante.
+ *
+ * Son TRES estados y no un booleano porque `optional` ya existe hoy en el
+ * comportamiento real: la pantalla dice "opcional" y el resumen del dia igual
+ * reclama el comprobante faltante. Un booleano obligaria a elegir cual de las
+ * dos mitades conservar.
+ */
+export const PROOF_POLICIES = ['none', 'optional', 'required'];
+/**
+ * Valida la FORMA de un medio de pago, no su pertenencia a la tabla.
+ *
+ * Mismo criterio que `isWellFormedCustomerType`: `packages/shared` corre en el
+ * telefono, que valida el payload contra el catalogo que tenga cacheado --
+ * posiblemente de hace dias. Comprobar pertenencia aca rechazaria una venta
+ * encolada con un medio de pago creado despues de la ultima sincronizacion, es
+ * decir, perderia una venta ya cobrada. Que el medio EXISTA se verifica contra
+ * la tabla, del lado del servidor.
+ */
+export function isWellFormedPaymentMethod(value) {
+    if (typeof value !== 'string') {
+        return false;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 && trimmed.length <= PAYMENT_METHOD_MAX_LENGTH;
+}
 export const EXPENSE_CATEGORIES = [
     'combustible',
     'peaje',
@@ -128,7 +155,31 @@ export function priceSaleItems(customerType, items, prices) {
     const total = priced.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
     return { ok: true, items: priced, total };
 }
-export function validateCreateSaleInput(input) {
+/**
+ * Si el medio de pago de este codigo deja al cliente debiendo, segun el
+ * catalogo que se haya pasado. Resuelve por `code` igual que `proofPolicyOf`
+ * en la app del chofer.
+ *
+ * Un codigo que no esta en el catalogo -- o un catalogo vacio, que es lo que
+ * recibe quien todavia no lo sincronizo -- devuelve `false`: la bandera es
+ * DESCONOCIDA, y suponer deuda rechazaria una venta ya cobrada en la calle
+ * por una regla que este lado no puede verificar. La existencia del medio la
+ * comprueba el servidor contra la tabla.
+ */
+function createsDebtFor(methods, code) {
+    if (!code) {
+        return false;
+    }
+    return methods.find((method) => method.code === code)?.createsDebt ?? false;
+}
+/**
+ * El segundo parametro es el catalogo de medios de pago disponible. Es
+ * opcional a proposito: sin catalogo el validador se comporta exactamente
+ * como antes, asi que los llamadores que todavia no lo pasan no cambian de
+ * comportamiento. Es tambien la unica forma de enterarse de `createsDebt`,
+ * que vive en otra tabla.
+ */
+export function validateCreateSaleInput(input, paymentMethods = []) {
     const errors = [];
     if (input.clientGeneratedId !== undefined &&
         input.clientGeneratedId.trim().length < 8) {
@@ -152,8 +203,15 @@ export function validateCreateSaleInput(input) {
     if (!isWellFormedCustomerType(input.customerType)) {
         errors.push("customerType is invalid");
     }
-    if (!PAYMENT_METHODS.includes(input.paymentMethod)) {
+    if (!isWellFormedPaymentMethod(input.paymentMethod)) {
         errors.push("paymentMethod is invalid");
+    }
+    // Una deuda tiene que tener un deudor, y el deudor tiene que ser una ficha
+    // de cliente y no un nombre tipeado. El mensaje dice el MOTIVO: quien lo
+    // lee no tiene por que saber que medio de pago genera deuda.
+    if (createsDebtFor(paymentMethods, input.paymentMethod) &&
+        (input.customerId === undefined || input.customerId.trim().length === 0)) {
+        errors.push('customerId is required when the payment method creates debt');
     }
     if (!Array.isArray(input.items) || input.items.length === 0) {
         errors.push("items must include at least one product");
@@ -236,13 +294,16 @@ function validateSaleIdentityFields(input) {
     }
     return errors;
 }
-export function validateUpdateSaleInput(input) {
+export function validateUpdateSaleInput(input, paymentMethods = []) {
     // input.kind is a validation hint only: it tells the pure validator whether
     // to skip paymentMethod/items checks. The service re-verifies it against
     // the stored row's kind before applying any change (never trusted alone).
+    //
+    // Una fila churn no tuvo cobro y por lo tanto no tiene medio de pago del
+    // que leer `createsDebt`: la rama de identidad ni ve el catalogo.
     const errors = input.kind === 'churn'
         ? validateSaleIdentityFields(input)
-        : validateCreateSaleInput(input);
+        : validateCreateSaleInput(input, paymentMethods);
     if (!input.reason || input.reason.trim().length < 3) {
         errors.push('reason must have at least 3 characters');
     }

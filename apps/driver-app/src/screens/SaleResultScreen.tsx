@@ -3,12 +3,13 @@ import { StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import type { PaymentMethod } from '@distribuidor/shared';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionLabel } from '../components/SectionLabel';
+import { useCatalog } from '../context/CatalogContext';
 import { useSync } from '../context/SyncContext';
+import { paymentMethodLabel } from '../services/paymentMethods';
 import type { NewSaleStackParamList } from '../navigation/NewSaleStack';
 import { useColors } from '../theme/ThemeContext';
 import type { Colors } from '../theme/colors';
@@ -17,13 +18,6 @@ import { typography } from '../theme/typography';
 import { formatArs } from '../utils/currency';
 
 type SaleResultNavigationProp = NativeStackNavigationProp<NewSaleStackParamList, 'SaleResult'>;
-
-const PAYMENT_LABELS: Record<PaymentMethod, string> = {
-  efectivo: 'Efectivo',
-  transferencia: 'Transferencia',
-  qr: 'QR',
-  tarjeta: 'Tarjeta',
-};
 
 /**
  * Lo que paso con la venta que se acaba de cargar, en una pantalla propia.
@@ -41,6 +35,7 @@ export function SaleResultScreen() {
   const route = useRoute<RouteProp<NewSaleStackParamList, 'SaleResult'>>();
   const navigation = useNavigation<SaleResultNavigationProp>();
   const { daySummary, pendingSales } = useSync();
+  const { paymentMethods } = useCatalog();
 
   const { outcome, customerName, total, paymentMethod } = route.params;
   const queuedCount = pendingSales.length;
@@ -67,7 +62,8 @@ export function SaleResultScreen() {
 
         {sent ? (
           <Text style={styles.summary} testID="sale-result-summary">
-            {customerName} · {formatArs(total)} · {PAYMENT_LABELS[paymentMethod]}
+            {customerName} · {formatArs(total)} ·{' '}
+            {paymentMethodLabel(paymentMethods, paymentMethod)}
           </Text>
         ) : (
           <Text style={styles.summary} testID="sale-result-queued-hint">

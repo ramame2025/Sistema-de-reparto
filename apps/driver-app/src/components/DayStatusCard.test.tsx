@@ -19,6 +19,9 @@ const missingProof: SaleProblem = {
   customerName: 'Distribuidora Sur',
   total: 96000,
   paymentMethod: 'transferencia',
+  // La etiqueta llega resuelta desde `buildDayProblems`: esta tarjeta pinta
+  // texto, no traduce codigos.
+  paymentMethodLabel: 'Transferencia',
 };
 
 describe('DayStatusCard/todo en orden', () => {
@@ -97,7 +100,33 @@ describe('DayStatusCard/con problemas', () => {
     );
 
     expect(screen.getByTestId('day-status-problem-s1-reason')).toHaveTextContent(
-      'Falta el comprobante de la transferencia',
+      'Falta el comprobante de la Transferencia',
+    );
+  });
+
+  /**
+   * Un medio dado de baja despues de la venta ya no trae etiqueta. La tarjeta
+   * dice algo legible en vez de un hueco.
+   */
+  it('falls back to a generic wording when no label came through', async () => {
+    const withoutLabel: SaleProblem = {
+      kind: 'missing-proof',
+      id: 's1',
+      customerName: 'Distribuidora Sur',
+      total: 96000,
+    };
+
+    await render(
+      <DayStatusCard
+        problems={[withoutLabel]}
+        sentCount={12}
+        onPressProblem={() => {}}
+        onResolve={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('day-status-problem-s1-reason')).toHaveTextContent(
+      'Falta el comprobante de la venta',
     );
   });
 

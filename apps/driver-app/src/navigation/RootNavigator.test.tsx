@@ -39,6 +39,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
 import { useCatalog } from '../context/CatalogContext';
+import { SEED_PAYMENT_METHODS } from '../test-utils/paymentMethods';
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseSync = useSync as jest.Mock;
@@ -74,6 +75,7 @@ const baseSyncValue = {
 beforeEach(() => {
   mockedUseSync.mockReturnValue(baseSyncValue);
   (useCatalog as jest.Mock).mockReturnValue({
+    paymentMethods: SEED_PAYMENT_METHODS,
     products: [],
     prices: null,
     stale: false,

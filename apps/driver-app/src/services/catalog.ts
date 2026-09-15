@@ -1,16 +1,28 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
   CustomerCategoryRecord,
+  PaymentMethodRecord,
   PriceTable,
   ProductRecord,
 } from '@distribuidor/shared';
 
 /**
- * La clave lleva version porque el bundle cambio de forma: la v2 agrega las
- * categorias de cliente. Cambiarla -- en vez de tolerar la forma vieja -- hace
- * que una cache anterior se ignore entera en lugar de leerse a medias.
+ * La clave lleva version porque el bundle cambio de forma: la v2 agrego las
+ * categorias de cliente, la v3 los medios de pago y la v4 la bandera
+ * `createsDebt` de cada medio. Cambiarla -- en vez de tolerar la forma vieja
+ * -- hace que una cache anterior se ignore entera en lugar de leerse a
+ * medias.
+ *
+ * La v4 importa aunque la bandera sea un solo booleano: una entrada v3 trae
+ * los medios sin ella, y leerla dejaria a la pantalla creyendo que ninguno
+ * genera deuda. La entrada vieja se abandona, no se migra.
+ *
+ * El costo de este bump es operativo y hay que tenerlo presente: un chofer que
+ * actualiza la app a mitad de turno queda con una cache ilegible y no puede
+ * vender hasta que el telefono agarre senal una vez. Por eso la app no se
+ * publica a mitad de turno.
  */
-export const CATALOG_CACHE_KEY = 'driver_catalog_v2';
+export const CATALOG_CACHE_KEY = 'driver_catalog_v4';
 
 /**
  * El catalogo y los precios tal como los devolvio la API la ultima vez, mas
@@ -23,11 +35,16 @@ export const CATALOG_CACHE_KEY = 'driver_catalog_v2';
  * Las categorias viajan en el mismo bundle porque el chofer da de alta
  * clientes SIN SENAL: sin la lista guardada, el alta rapida se quedaria sin
  * tipos que ofrecer justo cuando mas falta hace.
+ *
+ * Los medios de pago viajan por el mismo motivo, y ademas traen las reglas:
+ * `proofPolicy` decide si la venta lleva comprobante, y esa decision se toma
+ * en la calle, sin senal.
  */
 export type CachedCatalog = {
   products: ProductRecord[];
   prices: PriceTable;
   categories: CustomerCategoryRecord[];
+  paymentMethods: PaymentMethodRecord[];
   fetchedAt: string;
 };
 
@@ -40,6 +57,7 @@ function isCatalog(value: unknown): value is CachedCatalog {
   return (
     Array.isArray(candidate.products) &&
     Array.isArray(candidate.categories) &&
+    Array.isArray(candidate.paymentMethods) &&
     typeof candidate.prices === 'object' &&
     candidate.prices !== null &&
     typeof candidate.fetchedAt === 'string'

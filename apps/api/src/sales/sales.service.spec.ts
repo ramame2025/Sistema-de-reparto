@@ -10,6 +10,7 @@ import type {
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
 import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
+import { PaymentMethodsService } from '../payment-methods/payment-methods.service';
 import { ProductsService } from '../products/products.service';
 import { SalesService } from './sales.service';
 
@@ -107,6 +108,7 @@ describe('SalesService', () => {
   let pricesService: { getPriceTable: jest.Mock; getPriceTableAt: jest.Mock };
   let productsService: { assertProductCodesExist: jest.Mock };
   let categoriesService: { assertCategoryCodesExist: jest.Mock };
+  let paymentMethodsService: { assertPaymentMethodCodesExist: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -125,6 +127,9 @@ describe('SalesService', () => {
     categoriesService = {
       assertCategoryCodesExist: jest.fn().mockResolvedValue(undefined),
     };
+    paymentMethodsService = {
+      assertPaymentMethodCodesExist: jest.fn().mockResolvedValue(undefined),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -133,6 +138,7 @@ describe('SalesService', () => {
         { provide: PricesService, useValue: pricesService },
         { provide: ProductsService, useValue: productsService },
         { provide: CustomerCategoriesService, useValue: categoriesService },
+        { provide: PaymentMethodsService, useValue: paymentMethodsService },
       ],
     }).compile();
 
@@ -375,6 +381,47 @@ describe('SalesService', () => {
         service.createSale(buildCreateInput({ customerType: 'fantasma' })),
       ).rejects.toThrow(/fantasma/);
       expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    // Mismo contrato que la categoria, y por el mismo motivo: desde que los
+    // medios de pago viven en una tabla, `packages/shared` solo puede validar
+    // la forma del string.
+    it('verifies the paymentMethod against the payment methods table before writing', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(buildCreateInput({ paymentMethod: 'qr' }));
+
+      expect(
+        paymentMethodsService.assertPaymentMethodCodesExist,
+      ).toHaveBeenCalledWith(['qr']);
+    });
+
+    it('does not write anything when the paymentMethod does not exist', async () => {
+      paymentMethodsService.assertPaymentMethodCodesExist.mockRejectedValue(
+        new Error('Unknown paymentMethod: cripto'),
+      );
+
+      await expect(
+        service.createSale(buildCreateInput({ paymentMethod: 'cripto' })),
+      ).rejects.toThrow(/cripto/);
+      expect(prisma.sale.create).not.toHaveBeenCalled();
+    });
+
+    it('stores a payment method code that is not one of the four seeded ones', async () => {
+      prisma.sale.create.mockResolvedValue(
+        buildSaleRow({ paymentMethod: 'mercadopago' }),
+      );
+
+      const result = await service.createSale(
+        buildCreateInput({ paymentMethod: 'mercadopago' }),
+      );
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ paymentMethod: 'mercadopago' }),
+        }),
+      );
+      expect(result.paymentMethod).toBe('mercadopago');
     });
 
     it('does not write anything when a productCode is not in the catalogue', async () => {

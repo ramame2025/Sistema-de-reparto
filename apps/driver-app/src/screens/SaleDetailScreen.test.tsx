@@ -27,6 +27,11 @@ jest.mock('../context/SyncContext', () => {
   return { ...actual, useSync: jest.fn() };
 });
 
+jest.mock('../context/CatalogContext', () => {
+  const actual = jest.requireActual('../context/CatalogContext');
+  return { ...actual, useCatalog: jest.fn() };
+});
+
 const mockedGoBack = jest.fn();
 let mockedRouteSale: SaleRecord;
 
@@ -40,7 +45,12 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react-nativ
 import type { SaleRecord } from '@distribuidor/shared';
 import { SaleDetailScreen } from './SaleDetailScreen';
 import { useAuth } from '../context/AuthContext';
+import { useCatalog } from '../context/CatalogContext';
 import { useSync } from '../context/SyncContext';
+import {
+  SEED_PAYMENT_METHODS,
+  buildPaymentMethod,
+} from '../test-utils/paymentMethods';
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedUseSync = useSync as jest.Mock;
@@ -68,6 +78,10 @@ beforeEach(() => {
   mockedRouteSale = buildSale();
   mockedApiPatch = jest.fn().mockResolvedValue(buildSale());
   mockedRefreshDaySummary = jest.fn().mockResolvedValue(undefined);
+
+  (useCatalog as jest.Mock).mockReturnValue({
+    paymentMethods: SEED_PAYMENT_METHODS,
+  });
 
   mockedUseAuth.mockReturnValue({
     status: 'authenticated' as const,
@@ -401,6 +415,106 @@ describe('SaleDetailScreen/adjuntar el comprobante que falta', () => {
 
     await waitFor(() =>
       expect(screen.getByText('No se pudo subir el comprobante.')).toBeTruthy(),
+    );
+    expect(mockedApiPatch).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Fase 2 de docs/plans/current-account-sales.md: editar una venta para
+ * pasarla a un medio que genera deuda vale lo mismo que cargarla asi. La
+ * regla vive en el validador compartido; esta pantalla se la pasa el catalogo
+ * y traduce el motivo al idioma del chofer.
+ */
+describe('SaleDetailScreen/medios de pago que generan deuda', () => {
+  it('refuses the edit when the sale has no directory customer, and says why in Spanish', async () => {
+    mockedRouteSale = buildSale({ customerId: undefined });
+
+    await render(<SaleDetailScreen />);
+    await fireEvent.press(screen.getByTestId('sale-detail-payment-cuenta_corriente'));
+    await fireEvent.changeText(
+      screen.getByTestId('sale-detail-edit-reason'),
+      'Pasa a cuenta',
+    );
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'Cuenta corriente queda como deuda del cliente: esta venta no tiene un cliente del padrón.',
+        ),
+      ).toBeTruthy(),
+    );
+    expect(mockedApiPatch).not.toHaveBeenCalled();
+    expect(
+      screen.queryByText('customerId is required when the payment method creates debt'),
+    ).toBeNull();
+  });
+
+  it('accepts the edit when the sale is bound to a directory customer', async () => {
+    mockedRouteSale = buildSale({ customerId: 'cus-9' });
+
+    await render(<SaleDetailScreen />);
+    await fireEvent.press(screen.getByTestId('sale-detail-payment-cuenta_corriente'));
+    await fireEvent.changeText(
+      screen.getByTestId('sale-detail-edit-reason'),
+      'Pasa a cuenta',
+    );
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    expect(mockedApiPatch.mock.calls[0][1]).toMatchObject({
+      paymentMethod: 'cuenta_corriente',
+      customerId: 'cus-9',
+    });
+  });
+
+  it('leaves an edit to a method that creates no debt untouched', async () => {
+    mockedRouteSale = buildSale({ customerId: undefined });
+
+    await render(<SaleDetailScreen />);
+    await fireEvent.press(screen.getByTestId('sale-detail-payment-efectivo'));
+    await fireEvent.changeText(
+      screen.getByTestId('sale-detail-edit-reason'),
+      'Pago en efectivo',
+    );
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+  });
+
+  /** D2: la decision es la bandera, nunca el codigo. */
+  it('applies the same rule to any other method flagged as creating debt', async () => {
+    mockedRouteSale = buildSale({ customerId: undefined });
+    (useCatalog as jest.Mock).mockReturnValue({
+      paymentMethods: [
+        ...SEED_PAYMENT_METHODS,
+        buildPaymentMethod({
+          id: 'pm-fiado-30',
+          code: 'fiado_30',
+          name: 'Fiado 30 días',
+          sortOrder: 5,
+          proofPolicy: 'none',
+          countsAsCash: false,
+          createsDebt: true,
+        }),
+      ],
+    });
+
+    await render(<SaleDetailScreen />);
+    await fireEvent.press(screen.getByTestId('sale-detail-payment-fiado_30'));
+    await fireEvent.changeText(
+      screen.getByTestId('sale-detail-edit-reason'),
+      'Pasa a fiado',
+    );
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'Fiado 30 días queda como deuda del cliente: esta venta no tiene un cliente del padrón.',
+        ),
+      ).toBeTruthy(),
     );
     expect(mockedApiPatch).not.toHaveBeenCalled();
   });

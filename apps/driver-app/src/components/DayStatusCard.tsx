@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { PaymentMethod } from '@distribuidor/shared';
 import { Button } from './Button';
 import type { SaleProblem } from '../services/dayProblems';
 import { useColors } from '../theme/ThemeContext';
@@ -19,20 +18,15 @@ export type DayStatusCardProps = {
   testID?: string;
 };
 
-const PAYMENT_NAMES: Record<PaymentMethod, string> = {
-  efectivo: 'efectivo',
-  transferencia: 'transferencia',
-  qr: 'QR',
-  tarjeta: 'tarjeta',
-};
-
 const reasonFor = (problem: SaleProblem): string => {
   if (problem.kind === 'not-sent') {
     const attempts = problem.attempts ?? 0;
     return `No se pudo enviar · ${attempts} ${attempts === 1 ? 'intento' : 'intentos'}`;
   }
 
-  const method = problem.paymentMethod ? PAYMENT_NAMES[problem.paymentMethod] : 'la venta';
+  // La etiqueta llega resuelta desde `buildDayProblems`: esta tarjeta pinta
+  // texto, no traduce codigos.
+  const method = problem.paymentMethodLabel ?? 'venta';
   return `Falta el comprobante de la ${method}`;
 };
 
