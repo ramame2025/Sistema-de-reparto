@@ -531,6 +531,43 @@ describe('SalesService', () => {
       );
     });
 
+    // `containerReturned` significa "volvio un envase VACIO y no le dimos
+    // nada a cambio". Un cambio por falla no es eso: volvio una unidad
+    // fallada Y se entrego un reemplazo.
+    it('marks containerReturned when an empty container comes back', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow({ containerReturned: true }));
+
+      await service.createSale(
+        buildCreateInput({
+          returnedItems: [{ productCode: 'G10', quantity: 1 }],
+        }),
+      );
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ containerReturned: true }),
+        }),
+      );
+    });
+
+    it('does not mark containerReturned on a swap: something was given back', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow({ containerReturned: null }));
+
+      await service.createSale(
+        buildCreateInput({
+          items: [],
+          paymentMethod: undefined,
+          swappedItems: [{ productCode: 'G10', quantity: 1 }],
+        }),
+      );
+
+      expect(prisma.sale.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ containerReturned: null }),
+        }),
+      );
+    });
+
     it('stores containerReturned as null when omitted from the payload', async () => {
       prisma.sale.create.mockResolvedValue(buildSaleRow());
 

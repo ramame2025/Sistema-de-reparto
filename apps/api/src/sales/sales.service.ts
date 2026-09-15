@@ -314,8 +314,13 @@ export class SalesService {
         // El booleano historico se queda y ahora se deriva de lo que
         // efectivamente volvio (D9). No hay backfill posible para las filas
         // viejas: dicen que algo volvio y nunca se guardo cuanto.
+        //
+        // Se deriva SOLO de `returnedItems`, no de todo lo que vuelve: el
+        // booleano significa "volvio un envase vacio y no le dimos nada a
+        // cambio". En un cambio por falla tambien vuelve una unidad, pero se
+        // entrego un reemplazo, asi que no es lo mismo y marcarlo mentiria.
         containerReturned:
-          input.containerReturned ?? (returnRows.length > 0 ? true : null),
+          input.containerReturned ?? (returnedItems.length > 0 ? true : null),
         latitude: input.latitude ?? null,
         longitude: input.longitude ?? null,
         items: {
