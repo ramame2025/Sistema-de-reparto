@@ -422,6 +422,9 @@ export function SaleDetailScreen() {
             // ninguna pastilla marcada, que es la verdad.
             value={paymentMethod ?? ''}
             onChange={setPaymentMethod}
+            // Misma grilla que la pantalla de venta nueva: el chofer ve el
+            // mismo cobro en los dos lados.
+            maxPerRow={3}
             testID="sale-detail-payment"
           />
 
