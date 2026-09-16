@@ -36,6 +36,17 @@ import { CustomerCategoriesService } from '../customer-categories/customer-categ
 import { PaymentMethodsService } from '../payment-methods/payment-methods.service';
 import { ProductsService } from '../products/products.service';
 
+/**
+ * Una linea de `SaleItem` lista para grabar: el precio congelado mas la
+ * bandera que dice si es la unidad de REEMPLAZO de un cambio por falla.
+ *
+ * La bandera se escribe SIEMPRE, en los dos lados, y no solo en el reemplazo:
+ * una linea vendida marcada explicitamente en `false` es lo que deja leer la
+ * fila sin adivinar, y evita que "sin bandera" signifique dos cosas distintas
+ * segun quien la escribio.
+ */
+type SaleItemRow = PricedSaleItem & { isReplacement: boolean };
+
 type ResolvedSaleLinks = {
   customerType: CustomerType;
   customerName: string;
@@ -190,15 +201,26 @@ export class SalesService {
    *
    * Es el MISMO numero que la fallada que vuelve: un solo campo del payload
    * alimenta los dos lados, asi que el 1 a 1 no se puede romper.
+   *
+   * Quedan marcadas con `isReplacement`, que es lo unico que despues permite
+   * volver a separarlas de lo vendido cuando la fila se lee para editarla. La
+   * marca no las saca de ninguna consulta de stock: salieron del camion y
+   * descuentan igual que cualquier otra linea.
    */
   private buildReplacementItems(
     swappedItems: SaleReturnItemInput[],
-  ): PricedSaleItem[] {
+  ): SaleItemRow[] {
     return swappedItems.map((item) => ({
       productCode: item.productCode,
       quantity: item.quantity,
       unitPrice: 0,
+      isReplacement: true,
     }));
+  }
+
+  /** Lo vendido, marcado como tal. Ver `SaleItemRow`. */
+  private markAsSold(items: PricedSaleItem[]): SaleItemRow[] {
+    return items.map((item) => ({ ...item, isReplacement: false }));
   }
 
   async listSales(): Promise<SaleRecord[]> {
@@ -286,7 +308,10 @@ export class SalesService {
       input.items.length > 0
         ? this.priceItemsOrReject(customerType, input.items, priceTable)
         : { items: [] as PricedSaleItem[], total: 0 };
-    const pricedItems = [...soldItems, ...this.buildReplacementItems(swappedItems)];
+    const pricedItems: SaleItemRow[] = [
+      ...this.markAsSold(soldItems),
+      ...this.buildReplacementItems(swappedItems),
+    ];
     const returnRows = this.buildReturnRows(returnedItems, swappedItems);
     // Forzado server-side, sin importar lo que traiga el payload: si la visita
     // no vendio nada, no cobro nada. Un swap con `paymentMethod: 'efectivo'`
@@ -505,10 +530,13 @@ export class SalesService {
     // que entran con `unitPrice: 0` y un precio faltante nunca puede bloquear
     // la edicion de un cambio, igual que no bloquea su creacion (D4).
     const { items: resolvedItems, total } = isChurn
-      ? { items: [] as PricedSaleItem[], total: 0 }
+      ? { items: [] as SaleItemRow[], total: 0 }
       : isSwap
         ? // Los reemplazos salen de la MISMA lista que las falladas, para que
-          // los dos lados no puedan quedar en numeros distintos.
+          // los dos lados no puedan quedar en numeros distintos. En una fila
+          // de cambio TODA linea es un reemplazo, asi que todas quedan
+          // marcadas -- tambien cuando el numero llego por `items`, que es lo
+          // que manda un cliente viejo.
           { items: this.buildReplacementItems(faultySource ?? []), total: 0 }
         : // En una venta, `items` es lo VENDIDO y el reemplazo se deriva de
           // `swappedItems`, igual que en la creacion: una visita mixta vendio
@@ -519,7 +547,7 @@ export class SalesService {
             const sold = this.priceItemsOrReject(customerType, input.items, priceTable);
             return {
               items: [
-                ...sold.items,
+                ...this.markAsSold(sold.items),
                 ...this.buildReplacementItems(input.swappedItems ?? []),
               ],
               total: sold.total,
@@ -732,6 +760,11 @@ export class SalesService {
         productCode: item.productCode,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
+        // Cual linea salio sin cargo por un cambio por falla. Es lo unico que
+        // le permite a quien lee la fila volver a partir una visita mixta en
+        // lo vendido y lo cambiado, que es justo lo que hace falta para poder
+        // editarla.
+        isReplacement: item.isReplacement,
       })),
       // Lo que volvio, por producto y por motivo. Siempre presente en la
       // respuesta, aunque este vacio: quien la lee no tiene que distinguir

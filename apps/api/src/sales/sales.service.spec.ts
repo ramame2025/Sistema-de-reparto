@@ -278,8 +278,8 @@ describe('SalesService', () => {
           data: expect.objectContaining({
             items: {
               create: [
-                { productCode: 'G10', quantity: 2, unitPrice: 100 },
-                { productCode: 'G45', quantity: 1, unitPrice: 300 },
+                { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
+                { productCode: 'G45', quantity: 1, unitPrice: 300, isReplacement: false },
               ],
             },
           }),
@@ -633,8 +633,8 @@ describe('SalesService', () => {
       // 2 x G10 a 100. El reemplazo de G15 entra en 0 y no suma.
       expect(data.total).toBe(200);
       expect(data.items.create).toEqual([
-        { productCode: 'G10', quantity: 2, unitPrice: 100 },
-        { productCode: 'G15', quantity: 1, unitPrice: 0 },
+        { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
+        { productCode: 'G15', quantity: 1, unitPrice: 0, isReplacement: true },
       ]);
       expect(data.returnItems.create).toEqual([
         { productCode: 'G10', quantity: 1, reason: 'empty' },
@@ -661,7 +661,7 @@ describe('SalesService', () => {
       expect(data.paymentProofRef).toBeNull();
       // La de reemplazo SI sale del camion: es un SaleItem, con precio 0.
       expect(data.items.create).toEqual([
-        { productCode: 'G10', quantity: 1, unitPrice: 0 },
+        { productCode: 'G10', quantity: 1, unitPrice: 0, isReplacement: true },
       ]);
       expect(data.returnItems.create).toEqual([
         { productCode: 'G10', quantity: 1, reason: 'faulty' },
@@ -755,7 +755,7 @@ describe('SalesService', () => {
       expect(data.paymentMethod).toBe('efectivo');
       expect(data.total).toBe(200);
       expect(data.items.create).toEqual([
-        { productCode: 'G10', quantity: 2, unitPrice: 100 },
+        { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
       ]);
       expect(data.returnItems.create).toEqual([]);
       expect(data.containerReturned).toBeNull();
@@ -883,7 +883,7 @@ describe('SalesService', () => {
 
       const call = prisma.sale.update.mock.calls[0][0];
       expect(call.data.items.create).toEqual([
-        { productCode: 'G10', quantity: 2, unitPrice: 100 },
+        { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
       ]);
       expect(call.data.total).toBe(200);
     });
@@ -1396,7 +1396,7 @@ describe('SalesService', () => {
       expect(data.total).toBe(0);
       // Un swap SI puede editar cantidades: es su diferencia con el churn.
       expect(data.items.create).toEqual([
-        { productCode: 'G10', quantity: 3, unitPrice: 0 },
+        { productCode: 'G10', quantity: 3, unitPrice: 0, isReplacement: true },
       ]);
     });
 
@@ -1584,7 +1584,7 @@ describe('SalesService', () => {
       // Un solo numero alimenta los dos lados: no hay dos campos que puedan
       // discrepar, ni siquiera desde un payload armado a mano.
       expect(call.data.items.create).toEqual([
-        { productCode: 'G10', quantity: 5, unitPrice: 0 },
+        { productCode: 'G10', quantity: 5, unitPrice: 0, isReplacement: true },
       ]);
       expect(call.data.returnItems.create).toEqual([
         { productCode: 'G10', quantity: 5, reason: 'faulty' },
@@ -1671,7 +1671,7 @@ describe('SalesService', () => {
 
       const call = prisma.sale.update.mock.calls[0][0];
       expect(call.data.items.create).toEqual([
-        { productCode: 'G10', quantity: 7, unitPrice: 0 },
+        { productCode: 'G10', quantity: 7, unitPrice: 0, isReplacement: true },
       ]);
       expect(call.data.returnItems.create).toEqual([
         { productCode: 'G10', quantity: 7, reason: 'faulty' },
@@ -1700,8 +1700,8 @@ describe('SalesService', () => {
 
       const call = prisma.sale.update.mock.calls[0][0];
       expect(call.data.items.create).toEqual([
-        { productCode: 'G10', quantity: 2, unitPrice: 100 },
-        { productCode: 'G15', quantity: 1, unitPrice: 0 },
+        { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
+        { productCode: 'G15', quantity: 1, unitPrice: 0, isReplacement: true },
       ]);
       // El reemplazo no suma plata: el total sigue siendo el de lo vendido.
       expect(call.data.total).toBe(200);
@@ -1722,6 +1722,157 @@ describe('SalesService', () => {
       expect(productsService.assertProductCodesExist).toHaveBeenCalledWith(
         expect.arrayContaining(['G10', 'G45']),
       );
+    });
+  });
+
+  /**
+   * La bandera que distingue una linea VENDIDA de una de REEMPLAZO.
+   *
+   * Sin ella `SaleRecord.items` devuelve las dos mezcladas y nadie puede
+   * partirlas: el telefono no sabe cual mandar como `items` y cual como
+   * `swappedItems`, asi que una visita mixta no se puede editar.
+   *
+   * La bandera NO excluye nada del stock. Un reemplazo SALE del camion y tiene
+   * que descontar igual que cualquier otra linea; lo que no puede estar en
+   * `SaleItem` es lo que ENTRA, y para eso esta `SaleReturnItem`.
+   */
+  describe('la bandera isReplacement', () => {
+    beforeEach(() => {
+      prisma.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) =>
+        cb(prisma),
+      );
+    });
+
+    it('marks the replacement line and leaves the sold one unmarked, on create', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow());
+
+      await service.createSale(
+        buildCreateInput({
+          items: [{ productCode: 'G10', quantity: 2 }],
+          swappedItems: [{ productCode: 'G15', quantity: 1 }],
+        }),
+      );
+
+      const { data } = prisma.sale.create.mock.calls[0][0];
+      expect(data.items.create).toEqual([
+        { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
+        { productCode: 'G15', quantity: 1, unitPrice: 0, isReplacement: true },
+      ]);
+    });
+
+    it('marks every line of a pure swap: they are all replacements', async () => {
+      prisma.sale.create.mockResolvedValue(buildSaleRow({ kind: 'swap', total: 0 }));
+
+      await service.createSale(
+        buildCreateInput({
+          items: [],
+          swappedItems: [{ productCode: 'G10', quantity: 1 }],
+        }),
+      );
+
+      const { data } = prisma.sale.create.mock.calls[0][0];
+      expect(data.items.create).toEqual([
+        { productCode: 'G10', quantity: 1, unitPrice: 0, isReplacement: true },
+      ]);
+    });
+
+    it('marks the rebuilt replacement line when a mixed visit is edited', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({
+          items: [
+            { productCode: 'G10', quantity: 2 },
+            { productCode: 'G15', quantity: 1 },
+          ],
+          returnItems: [{ productCode: 'G15', quantity: 1, reason: 'faulty' }],
+        }),
+      );
+      prisma.sale.update.mockResolvedValue(buildSaleRow());
+
+      // La pantalla ya pudo partir la fila: manda lo vendido en `items` y el
+      // cambio en `swappedItems`, y las dos cantidades se mueven.
+      await service.updateSale('sale-1', {
+        ...buildUpdateInput({ items: [{ productCode: 'G10', quantity: 3 }] }),
+        swappedItems: [{ productCode: 'G15', quantity: 2 }],
+      });
+
+      const call = prisma.sale.update.mock.calls[0][0];
+      expect(call.data.items.create).toEqual([
+        { productCode: 'G10', quantity: 3, unitPrice: 100, isReplacement: false },
+        { productCode: 'G15', quantity: 2, unitPrice: 0, isReplacement: true },
+      ]);
+      // El 1 a 1 se sostiene: el numero viajo una sola vez.
+      expect(call.data.returnItems.create).toEqual([
+        { productCode: 'G15', quantity: 2, reason: 'faulty' },
+      ]);
+      // Y el cobro sigue siendo solo el de lo vendido: 3 x 100.
+      expect(call.data.total).toBe(300);
+    });
+
+    it('marks the replacement of a stored swap edited by an old client', async () => {
+      prisma.sale.findUnique.mockResolvedValue(
+        buildSaleRow({
+          kind: 'swap',
+          paymentMethod: null,
+          total: 0,
+          items: [{ productCode: 'G10', quantity: 1 }],
+          returnItems: [{ productCode: 'G10', quantity: 1, reason: 'faulty' }],
+        }),
+      );
+      prisma.sale.update.mockResolvedValue(
+        buildSaleRow({ kind: 'swap', paymentMethod: null, total: 0 }),
+      );
+
+      // Un payload viejo: nombra el cambio solo en `items`, sin `swappedItems`.
+      // Es exactamente lo que resolvio la fase 2 y tiene que seguir andando.
+      await service.updateSale('sale-1', {
+        ...buildUpdateInput({ items: [{ productCode: 'G10', quantity: 4 }] }),
+        kind: 'swap',
+      });
+
+      const call = prisma.sale.update.mock.calls[0][0];
+      expect(call.data.items.create).toEqual([
+        { productCode: 'G10', quantity: 4, unitPrice: 0, isReplacement: true },
+      ]);
+      expect(call.data.returnItems.create).toEqual([
+        { productCode: 'G10', quantity: 4, reason: 'faulty' },
+      ]);
+      expect(call.data.total).toBe(0);
+    });
+
+    it('exposes the flag on the record, so the phone can split the row', async () => {
+      prisma.sale.findMany.mockResolvedValue([
+        buildSaleRow({
+          items: [
+            { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
+            { productCode: 'G15', quantity: 1, unitPrice: 0, isReplacement: true },
+          ],
+        }),
+      ]);
+
+      const [record] = await service.listSales();
+
+      expect(record.items).toEqual([
+        { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
+        { productCode: 'G15', quantity: 1, unitPrice: 0, isReplacement: true },
+      ]);
+    });
+
+    // Una fila grabada antes de la columna la lee como `false` por el DEFAULT
+    // de la migracion, y eso es la verdad: ninguna venta vieja tuvo un
+    // reemplazo, porque los cambios no existian.
+    it('reads an old row exactly as it read before the column existed', async () => {
+      prisma.sale.findMany.mockResolvedValue([
+        buildSaleRow({
+          items: [{ productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false }],
+        }),
+      ]);
+
+      const [record] = await service.listSales();
+
+      expect(record.kind).toBe('sale');
+      expect(record.items).toEqual([
+        { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
+      ]);
     });
   });
 });

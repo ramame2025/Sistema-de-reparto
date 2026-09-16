@@ -637,3 +637,112 @@ describe('SaleDetailScreen/un cambio por falla (container-swap)', () => {
     expect(screen.getByTestId('sale-detail-payment-row')).toBeTruthy();
   });
 });
+
+/**
+ * Una visita MIXTA: se vendio algo Y ademas se cambio una fallada. Es una sola
+ * fila de `kind: 'sale'`, y sus `items` traen las dos cosas mezcladas -- lo
+ * vendido con su precio y el reemplazo con precio cero.
+ *
+ * La bandera `isReplacement` es lo que deja partirlas: sin ella la pantalla no
+ * sabe cual linea mandar como `items` y cual reconstruir desde `swappedItems`,
+ * y una mixta directamente no se puede editar.
+ */
+describe('SaleDetailScreen/una visita mixta (container-swap)', () => {
+  const buildMixed = (overrides: Partial<SaleRecord> = {}): SaleRecord =>
+    buildSale({
+      id: 'mixed-1',
+      kind: 'sale',
+      paymentMethod: 'efectivo',
+      total: 15000,
+      items: [
+        { productCode: 'G10', quantity: 2, unitPrice: 7500, isReplacement: false },
+        { productCode: 'G15', quantity: 1, unitPrice: 0, isReplacement: true },
+      ],
+      returnItems: [{ productCode: 'G15', quantity: 1, reason: 'faulty' }],
+      ...overrides,
+    });
+
+  it('shows the sold line as a product and the swap on its own side', async () => {
+    mockedRouteSale = buildMixed();
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('product-row-G10-quantity')).toHaveTextContent('2');
+    // El reemplazo no es un producto vendido: no se edita desde la lista de
+    // productos, se mueve con la fallada que volvio.
+    expect(screen.queryByTestId('product-row-G15-quantity')).toBeNull();
+    expect(screen.getByTestId('faulty-row-G15-quantity')).toHaveTextContent('1');
+  });
+
+  it('sends what was sold and what was swapped as two separate lists', async () => {
+    mockedRouteSale = buildMixed();
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('faulty-row-G15-increment'));
+    await fireEvent.changeText(
+      screen.getByTestId('sale-detail-edit-reason'),
+      'Eran tres garrafas y dos falladas',
+    );
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [, payload] = mockedApiPatch.mock.calls[0];
+    expect(payload.items).toEqual([{ productCode: 'G10', quantity: 3 }]);
+    expect(payload.swappedItems).toEqual([{ productCode: 'G15', quantity: 2 }]);
+    // Sigue siendo una venta: el kind no cambia porque vendio algo.
+    expect(payload.paymentMethod).toBe('efectivo');
+  });
+
+  // El 1 a 1 no se revalida en la mixta tampoco: el numero es uno solo y sale
+  // de `swappedItems`. El reemplazo viejo NO viaja en `items`, o la API lo
+  // cobraria como si se hubiera vendido.
+  it('never sends the replacement line as something that was sold', async () => {
+    mockedRouteSale = buildMixed();
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Sin cambios');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [, payload] = mockedApiPatch.mock.calls[0];
+    expect(payload.items).toEqual([{ productCode: 'G10', quantity: 2 }]);
+  });
+
+  it('only charges what was sold, never the free replacement', async () => {
+    mockedRouteSale = buildMixed();
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$15.000');
+
+    await fireEvent.press(screen.getByTestId('faulty-row-G15-increment'));
+
+    // Una fallada mas no suma un peso: el reemplazo sale sin cargo.
+    expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$15.000');
+
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+
+    expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$22.500');
+  });
+
+  // Una fila vieja no trae la bandera en ninguna linea. Tiene que leerse igual
+  // que siempre: todo vendido, ningun reemplazo, cero cambios en el payload.
+  it('reads a row saved before the flag existed exactly as it did before', async () => {
+    mockedRouteSale = buildSale({
+      items: [{ productCode: 'G10', quantity: 2, unitPrice: 7500 }],
+    });
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('product-row-G10-quantity')).toHaveTextContent('2');
+    expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$15.000');
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [, payload] = mockedApiPatch.mock.calls[0];
+    expect(payload.items).toEqual([{ productCode: 'G10', quantity: 2 }]);
+    // Nada que cambiar: sin falladas, la lista no viaja y la API no toca lo
+    // que volvio.
+    expect(Object.prototype.hasOwnProperty.call(payload, 'swappedItems')).toBe(false);
+  });
+});

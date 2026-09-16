@@ -618,4 +618,67 @@ describe('getTruckStockForDay frente a una visita mixta', () => {
     expect(byProduct.G15).toEqual({ productCode: 'G15', loaded: 5, sold: 1, remaining: 4 });
     expect(byProduct.G45).toEqual({ productCode: 'G45', loaded: 0, sold: 0, remaining: 0 });
   });
+
+  /**
+   * La bandera `isReplacement` marca la linea de reemplazo para que el telefono
+   * pueda partir la fila, y NO PUEDE excluirla de ninguna consulta de stock.
+   *
+   * El peligro que D7 nombra es el contrario: anotar en `SaleItem` algo que
+   * ENTRA al camion. Un reemplazo SALE, asi que descuenta igual que cualquier
+   * otra linea. Este test lo fija: si alguien algun dia le suma un
+   * `where: { isReplacement: false }` a esta consulta, el camion empieza a
+   * decir que tiene mercaderia que ya no esta y este numero cambia.
+   */
+  it('still counts a line marked as a replacement: the flag excludes nothing', async () => {
+    const prisma = {
+      loadManifest: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue({
+          createdAt: new Date('2026-01-01T08:00:00.000Z'),
+        }),
+      },
+      loadManifestItem: {
+        findMany: jest.fn().mockResolvedValue([{ productCode: 'G15', quantity: 5 }]),
+      },
+      saleItem: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { productCode: 'G15', quantity: 2, unitPrice: 0, isReplacement: true },
+          ]),
+      },
+      product: {
+        findMany: jest.fn().mockResolvedValue([{ code: 'G15' }]),
+      },
+      truck: { findUnique: jest.fn() },
+    };
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        LoadManifestsService,
+        { provide: PrismaService, useValue: prisma },
+        {
+          provide: ProductsService,
+          useValue: { assertProductCodesExist: jest.fn().mockResolvedValue(undefined) },
+        },
+      ],
+    }).compile();
+
+    const stock = await moduleRef
+      .get(LoadManifestsService)
+      .getTruckStockForDay('truck-1', '2026-01-01');
+
+    expect(stock.lines).toEqual([
+      { productCode: 'G15', loaded: 5, sold: 2, remaining: 3 },
+    ]);
+    // La consulta no filtra por la bandera, y no puede empezar a hacerlo.
+    expect(prisma.saleItem.findMany.mock.calls[0][0].where).toEqual({
+      sale: {
+        truckId: 'truck-1',
+        status: 'active',
+        createdAt: expect.anything(),
+      },
+    });
+  });
 });

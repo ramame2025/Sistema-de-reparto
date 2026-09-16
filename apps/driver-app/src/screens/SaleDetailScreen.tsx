@@ -8,6 +8,7 @@ import {
   type PaymentMethod,
   type SaleRecord,
   type UpdateSaleInput,
+  splitSaleItems,
   validateUpdateSaleInput,
 } from '@distribuidor/shared';
 import { Button } from '../components/Button';
@@ -93,6 +94,28 @@ export function SaleDetailScreen() {
     [sale.returnItems],
   );
 
+  /**
+   * Lo que salio del camion, partido en las dos cosas que `sale.items` trae
+   * mezcladas: lo VENDIDO, que se cobra y se edita como producto, y el
+   * REEMPLAZO de un cambio por falla, que salio sin cargo y se mueve junto con
+   * la fallada que volvio.
+   *
+   * Sin esta particion una visita mixta no se puede editar: el payload
+   * necesita las dos listas por separado -- `items` y `swappedItems` -- y
+   * mandar el reemplazo dentro de `items` haria que la API lo cobrara como si
+   * se hubiera vendido.
+   *
+   * Una fila de `kind: 'swap'` se saltea la particion a proposito: ahi TODA
+   * linea es un reemplazo por definicion, y leerla asi es lo que hace que un
+   * cambio grabado antes de que existiera la bandera se siga viendo entero.
+   */
+  const { soldItems, replacementItems } = useMemo(() => {
+    if (isSwap) {
+      return { soldItems: [], replacementItems: sale.items };
+    }
+    return splitSaleItems(sale.items);
+  }, [isSwap, sale.items]);
+
   // Unit prices come from the sale itself, never from today's price table:
   // re-pricing a March sale at August's rates is exactly what the API's
   // `getPriceTableAt(existing.occurredAt)` refuses to do server-side.
@@ -104,9 +127,11 @@ export function SaleDetailScreen() {
     return table;
   }, [sale.items]);
 
+  // Solo lo vendido: el reemplazo de un cambio no es un producto que el chofer
+  // edite por aca, y meterlo en este estado lo cobraria al guardar.
   const [quantities, setQuantities] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
-    sale.items.forEach((item) => {
+    soldItems.forEach((item) => {
       initial[item.productCode] = item.quantity;
     });
     return initial;
@@ -155,13 +180,13 @@ export function SaleDetailScreen() {
   // error rather than a removal.
   const editedItems = useMemo(
     () =>
-      sale.items
+      soldItems
         .filter((item) => (quantities[item.productCode] ?? 0) > 0)
         .map((item) => ({
           productCode: item.productCode,
           quantity: quantities[item.productCode],
         })),
-    [sale.items, quantities],
+    [soldItems, quantities],
   );
 
   const total = useMemo(
@@ -218,6 +243,17 @@ export function SaleDetailScreen() {
     [swapQuantities],
   );
 
+  /**
+   * Si esta visita tiene un lado de cambio que la edicion pueda mover.
+   *
+   * Decide si `swappedItems` viaja en el payload, y la ausencia importa: la
+   * API deja quietas las filas de retorno que el payload no nombra. Una venta
+   * sin falladas no manda la lista, asi que no puede borrar nada; una que si
+   * las tiene la manda siempre -- incluso vacia -- porque bajarlas a cero es
+   * una edicion legitima que tiene que llegar.
+   */
+  const hasSwapSide = isSwap || faultyItems.length > 0 || replacementItems.length > 0;
+
   const saveEdit = async () => {
     setMessage(null);
 
@@ -257,7 +293,12 @@ export function SaleDetailScreen() {
       // `items` abriria la puerta a que los dos lados discrepen, que es
       // exactamente lo que D6b vuelve imposible.
       items: isSwap ? [] : editedItems,
-      ...(isSwap ? { swappedItems: editedSwappedItems } : {}),
+      // En una visita MIXTA las dos listas viajan juntas y separadas: `items`
+      // es lo vendido, `swappedItems` es el cambio. El servidor reconstruye de
+      // ahi la linea de reemplazo con precio cero y la fallada que volvio, asi
+      // que el 1 a 1 se sostiene y el reemplazo no se cobra. Sin esta division
+      // una mixta directamente no se podia editar.
+      ...(hasSwapSide ? { swappedItems: editedSwappedItems } : {}),
       // El `kind` viaja como pista de validacion: el servidor lo compara
       // contra el de la fila guardada y rechaza una edicion que le cambie la
       // clase, nunca le cree de entrada.
@@ -378,6 +419,12 @@ export function SaleDetailScreen() {
         customerType: sale.customerType,
         paymentMethod,
         items: editedItems,
+        // El cambio viaja tambien aca, y no por simetria: `updateSale`
+        // reescribe TODOS los `SaleItem` de la fila con lo que reciba. Sin
+        // esta lista, adjuntar un comprobante a una visita mixta borraria la
+        // linea del reemplazo y dejaria la fallada sola, rompiendo el 1 a 1 y
+        // devolviendole al camion una unidad que ya no esta.
+        ...(hasSwapSide ? { swappedItems: editedSwappedItems } : {}),
         reason: 'Se adjunta el comprobante',
         paymentProofRef: url,
         ...(sale.customerId ? { customerId: sale.customerId } : {}),
@@ -455,10 +502,16 @@ export function SaleDetailScreen() {
         )}
       </Card>
 
-      {sale.items.length > 0 && (
+      {/*
+        En una venta esta lista es lo VENDIDO y nada mas: el reemplazo de un
+        cambio sale del camion sin cargo y se edita del lado de la fallada, no
+        aca. En una fila de cambio la lista ES el reemplazo, y por eso las dos
+        entran por el mismo lugar.
+      */}
+      {(isSwap ? replacementItems : soldItems).length > 0 && (
         <Card style={styles.card}>
           <SectionLabel variant="field">Productos</SectionLabel>
-          {sale.items.map((item) => (
+          {(isSwap ? replacementItems : soldItems).map((item) => (
             <ProductRow
               key={item.productCode}
               code={item.productCode}
@@ -489,7 +542,13 @@ export function SaleDetailScreen() {
         </Card>
       )}
 
-      {isSwap && faultyItems.length > 0 && (
+      {/*
+        Tambien en una visita mixta, que es donde mas hace falta: ahi el cambio
+        convive con lo vendido y este es el unico lugar donde se lo puede
+        mover. Su numero dice las dos cosas a la vez -- la fallada que entro y
+        el reemplazo que salio -- asi que no hay dos campos que discrepen.
+      */}
+      {faultyItems.length > 0 && (
         <Card style={styles.card}>
           <SectionLabel variant="field">Unidades falladas que volvieron</SectionLabel>
           {faultyItems.map((item) => (

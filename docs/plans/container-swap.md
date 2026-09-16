@@ -1,7 +1,27 @@
 # Change: Container Swap — Delivery With No Money
 
-Status: **planned — not implemented**. Decisiones de negocio cerradas con el
-dueño el 2026-09-15; queda abierta sólo la pregunta A.
+Status: **fases 1, 2, 2b y 3 implementadas. Migraciones NO aplicadas.**
+
+Decisiones de negocio cerradas con el dueño el 2026-09-15. La pregunta A
+quedó resuelta al implementar la fase 3: un cambio y una devolución NO cuentan
+como venta, se cuentan aparte como visitas atendidas. `countsAsSale` en
+`apps/dashboard/src/lib/kpis.ts` es la línea que lo revierte.
+
+## PENDIENTE — las tres migraciones no están aplicadas
+
+```bash
+pnpm --filter api exec prisma migrate deploy
+```
+
+Aplica `20260915100000_sale_kind_swap`, `20260915100100_sale_return_items` y
+`20260915100200_sale_item_is_replacement`. La primera va sola en su archivo
+porque Postgres no deja usar un valor de enum recién agregado en la misma
+transacción que lo agrega.
+
+**Fase 2b, no prevista en este plan**: `SaleItem.isReplacement`. Sin esa
+bandera una visita mixta no se podía editar desde el teléfono — peor, se
+editaba mal: mandaba el reemplazo como vendido y le cobraba al cliente la
+unidad que se le había cambiado sin cargo.
 
 ## No, this does not exist yet
 
