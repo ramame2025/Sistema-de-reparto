@@ -79,6 +79,18 @@ export default function DashboardPage() {
               tone="text-sky-800"
               hint={`${kpis.ventasHoy} ventas`}
             />
+            {/*
+              Pregunta A del plan container-swap.md: un cambio por falla y una
+              devolucion de envase NO son ventas, asi que van en su propio
+              indicador. Mezclarlas con las ventas las contaria como ventas de
+              $0 y bajaria el ticket promedio sin que se note por que.
+            */}
+            <Kpi
+              label="Visitas atendidas hoy"
+              value={String(kpis.visitasHoy)}
+              tone="text-amber-700"
+              hint="cambios y devoluciones, sin venta"
+            />
             <Kpi
               label="Neto acumulado"
               value={money(kpis.neto)}

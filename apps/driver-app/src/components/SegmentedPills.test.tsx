@@ -116,4 +116,57 @@ describe('SegmentedPills/varias filas', () => {
     const style = StyleSheet.flatten(screen.getByTestId('cobro-qr').props.style);
     expect(style.flex).toBe(1);
   });
+
+  // D10 del plan de cambio de envase: cuando no hay nada que cobrar, el cobro
+  // se bloquea. La pastilla gris es lo que hace VISIBLE ese bloqueo -- sin la
+  // prop, la pantalla tendria que esconder el selector y el chofer no sabria
+  // por que desaparecio.
+  describe('disabled', () => {
+    it('ignores a tap while it is blocked', async () => {
+      const onChange = jest.fn();
+      await render(
+        <SegmentedPills
+          options={OPTIONS}
+          value="efectivo"
+          onChange={onChange}
+          disabled
+          testID="cobro"
+        />,
+      );
+
+      await fireEvent.press(screen.getByTestId('cobro-qr'));
+
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('tells assistive tech that the whole row is blocked', async () => {
+      await render(
+        <SegmentedPills
+          options={OPTIONS}
+          value="efectivo"
+          onChange={() => {}}
+          disabled
+          testID="cobro"
+        />,
+      );
+
+      OPTIONS.forEach((option) => {
+        expect(
+          screen.getByTestId(`cobro-${option.value}`).props.accessibilityState.disabled,
+        ).toBe(true);
+      });
+    });
+
+    it('keeps working when it is not blocked', async () => {
+      const onChange = jest.fn();
+      await render(
+        <SegmentedPills options={OPTIONS} value="efectivo" onChange={onChange} testID="cobro" />,
+      );
+
+      await fireEvent.press(screen.getByTestId('cobro-qr'));
+
+      expect(onChange).toHaveBeenCalledWith('qr');
+      expect(screen.getByTestId('cobro-qr').props.accessibilityState.disabled).toBe(false);
+    });
+  });
 });

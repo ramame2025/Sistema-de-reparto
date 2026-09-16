@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { File, UploadType } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
+  deriveSaleKind,
   findUnitPrice,
   priceSaleItems,
   type CreateSaleInput,
@@ -12,6 +13,7 @@ import {
   type PaymentMethod,
   type ProductCode,
   type RecordEmptyVisitInput,
+  type SaleReturnItemInput,
   validateCreateSaleInput,
   validateRecordEmptyVisitInput,
 } from '@distribuidor/shared';
@@ -25,7 +27,6 @@ import { SaleHeader } from '../components/SaleHeader';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionLabel } from '../components/SectionLabel';
 import { SegmentedPills } from '../components/SegmentedPills';
-import { ToggleRow } from '../components/ToggleRow';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
@@ -109,9 +110,20 @@ export function NewSaleScreen() {
     canSell,
   } = useCatalog();
   const [quantities, setQuantities] = useState<Record<ProductCode, number>>(EMPTY_QUANTITIES);
-  // `undefined` = nunca tocado (se omite del payload, "no preguntado" en el
-  // backend). Solo pasa a true/false cuando el chofer toca el control.
-  const [containerReturned, setContainerReturned] = useState<boolean | undefined>(undefined);
+  // Lo que VUELVE de la calle, en dos listas separadas y por producto.
+  //
+  // Dos listas y no un motivo por fila: un mismo producto puede tener las dos
+  // cosas a la vez -- te devuelven un vacio de 10kg Y te cambian otro de 10kg
+  // fallado -- y con un motivo por linea eso no se expresa sin duplicar filas.
+  const [returnedQuantities, setReturnedQuantities] =
+    useState<Record<ProductCode, number>>(EMPTY_QUANTITIES);
+  // El numero de un cambio por falla dice DOS cosas al mismo tiempo: la unidad
+  // que entra y la de reemplazo que sale del camion. Es un solo estado para
+  // que el 1 a 1 no se pueda romper (D6b).
+  const [swappedQuantities, setSwappedQuantities] =
+    useState<Record<ProductCode, number>>(EMPTY_QUANTITIES);
+  // La seccion arranca cerrada: la mayoria de las visitas no devuelven nada.
+  const [returnsOpen, setReturnsOpen] = useState(false);
   // '' = nunca tocado (se omite del payload, igual criterio que
   // containerReturned). Solo se completa cuando la foto termina de subirse.
   const [paymentProofRef, setPaymentProofRef] = useState('');
@@ -211,6 +223,37 @@ export function NewSaleScreen() {
     [products, quantities],
   );
 
+  /**
+   * Las dos listas de lo que vuelve, en la forma que viaja en el payload.
+   * Misma construccion que `currentItems`, para que las tres se lean igual.
+   */
+  const buildReturnLines = (source: Record<ProductCode, number>): SaleReturnItemInput[] =>
+    products
+      .filter((product) => (source[product.code] ?? 0) > 0)
+      .map((product) => ({ productCode: product.code, quantity: source[product.code] }));
+
+  const returnedItems = useMemo(
+    () => buildReturnLines(returnedQuantities),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- buildReturnLines es puro sobre products
+    [products, returnedQuantities],
+  );
+  const swappedItems = useMemo(
+    () => buildReturnLines(swappedQuantities),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- buildReturnLines es puro sobre products
+    [products, swappedQuantities],
+  );
+
+  /**
+   * Que fue esta visita, derivado de lo que quedo cargado y no de un control
+   * que el chofer prenda: la misma funcion pura que usa el servidor al grabar.
+   * Sin esto la pantalla tendria su propia opinion sobre el `kind`, y esa
+   * divergencia es la que hace que el pie prometa una cosa y se grabe otra.
+   */
+  const saleKind = useMemo(
+    () => deriveSaleKind({ items: currentItems, returnedItems, swappedItems }),
+    [currentItems, returnedItems, swappedItems],
+  );
+
   // Con los precios que vinieron de la API, no con una tabla compilada dentro
   // de la app, y por la MISMA funcion que usa el servidor al grabar: esta
   // pantalla cotizaba con su propia cuenta, y esa divergencia es plata.
@@ -243,6 +286,20 @@ export function NewSaleScreen() {
 
   const changeQty = (productCode: ProductCode, delta: number) => {
     setQuantities((previous) => ({
+      ...previous,
+      [productCode]: Math.max(0, (previous[productCode] ?? 0) + delta),
+    }));
+  };
+
+  const changeReturnedQty = (productCode: ProductCode, delta: number) => {
+    setReturnedQuantities((previous) => ({
+      ...previous,
+      [productCode]: Math.max(0, (previous[productCode] ?? 0) + delta),
+    }));
+  };
+
+  const changeSwappedQty = (productCode: ProductCode, delta: number) => {
+    setSwappedQuantities((previous) => ({
       ...previous,
       [productCode]: Math.max(0, (previous[productCode] ?? 0) + delta),
     }));
@@ -344,11 +401,15 @@ export function NewSaleScreen() {
   /** Deja la pantalla lista para la proxima venta sin perder el cliente. */
   const resetAfterSale = () => {
     setQuantities(EMPTY_QUANTITIES);
-    setContainerReturned(undefined);
+    setReturnedQuantities(EMPTY_QUANTITIES);
+    setSwappedQuantities(EMPTY_QUANTITIES);
     setPaymentProofRef('');
   };
 
   const saveSale = async () => {
+    // Lo que esta visita fue, derivado del contenido. El mismo valor decide el
+    // rotulo del pie, que barreras corren y como se cuenta el desenlace.
+    const isSale = saleKind === 'sale';
     // Primera linea: si ya hay una venta en vuelo, este tap no existe. Corta
     // antes de generar un clientGeneratedId nuevo y antes del await del GPS,
     // que es la ventana de ~8s donde el chofer alcanzaba a apretar 3 o 4
@@ -371,39 +432,46 @@ export function NewSaleScreen() {
       return;
     }
 
-    if (currentItems.length === 0) {
-      showMessage('Agrega al menos un producto antes de guardar.', 'error');
-      return;
-    }
+    // Las tres barreras de abajo son del COBRO, y por eso valen solo cuando la
+    // visita vendio algo. Un cambio por falla no cobra: ni el medio de pago ni
+    // el comprobante ni la falta de precios pueden trabarlo, porque el chofer
+    // ya hizo el cambio en la calle y volver sin registrarlo es peor que
+    // registrarlo sin precio (D4).
+    if (isSale) {
+      if (currentItems.length === 0) {
+        showMessage('Agrega al menos un producto antes de guardar.', 'error');
+        return;
+      }
 
-    // Sin medio de pago no hay venta que grabar. En la practica solo pasa con
-    // el catalogo sin cargar todavia, que es justamente cuando `canSell` ya
-    // bloquea la pantalla; es el cinturon ademas de los tiradores.
-    if (!paymentMethod) {
-      showMessage('Todavia no se cargaron los medios de pago.', 'error');
-      return;
-    }
+      // Sin medio de pago no hay venta que grabar. En la practica solo pasa con
+      // el catalogo sin cargar todavia, que es justamente cuando `canSell` ya
+      // bloquea la pantalla; es el cinturon ademas de los tiradores.
+      if (!paymentMethod) {
+        showMessage('Todavia no se cargaron los medios de pago.', 'error');
+        return;
+      }
 
-    // La unica barrera nueva que trae la tabla: un medio en `required` no se
-    // guarda sin comprobante. Ninguno de los cuatro medios semilla nace asi,
-    // asi que esto no cambia nada hasta que el duenio lo active.
-    if (proofRequired && !paymentProofRef) {
-      showMessage(
-        `Adjunta el comprobante: ${selectedPaymentMethod?.name ?? 'este medio de pago'} lo exige.`,
-        'error',
-      );
-      return;
-    }
+      // La unica barrera nueva que trae la tabla: un medio en `required` no se
+      // guarda sin comprobante. Ninguno de los cuatro medios semilla nace asi,
+      // asi que esto no cambia nada hasta que el duenio lo active.
+      if (proofRequired && !paymentProofRef) {
+        showMessage(
+          `Adjunta el comprobante: ${selectedPaymentMethod?.name ?? 'este medio de pago'} lo exige.`,
+          'error',
+        );
+        return;
+      }
 
-    // Ultima barrera antes de armar el payload: sin precio no hay importe que
-    // cobrar, y grabar la venta igual la congelaria en cero. Va antes de tomar
-    // el candado porque una venta rechazada aca no llego a intentarse.
-    if (!pricedSale?.ok) {
-      showMessage(
-        'A este cliente todavia no se le puede cotizar: faltan precios de su tipo.',
-        'error',
-      );
-      return;
+      // Ultima barrera antes de armar el payload: sin precio no hay importe que
+      // cobrar, y grabar la venta igual la congelaria en cero. Va antes de tomar
+      // el candado porque una venta rechazada aca no llego a intentarse.
+      if (!pricedSale?.ok) {
+        showMessage(
+          'A este cliente todavia no se le puede cotizar: faltan precios de su tipo.',
+          'error',
+        );
+        return;
+      }
     }
 
     // A partir de aca la venta va a intentarse de verdad. Tomamos el candado
@@ -428,11 +496,15 @@ export function NewSaleScreen() {
       truckCode: truck.code,
       customerName,
       customerType,
+      // Va siempre porque el tipo lo exige, y el servidor lo ignora cuando la
+      // visita no vendio nada: un payload de cambio con un medio de pago
+      // adentro no graba un cobro, se lo descarta server-side (D3).
       paymentMethod,
       items: currentItems,
-      // Omitido (no la key) si el chofer nunca toco el control -- "no
-      // preguntado", no "false".
-      ...(containerReturned !== undefined ? { containerReturned } : {}),
+      // Las dos listas de lo que volvio. Se omiten (no la clave) cuando no
+      // volvio nada, con el mismo criterio que el resto del payload.
+      ...(returnedItems.length > 0 ? { returnedItems } : {}),
+      ...(swappedItems.length > 0 ? { swappedItems } : {}),
       // Omitido (no la key) si nunca se subio una foto -- mismo criterio que
       // containerReturned, no un string vacio.
       ...(paymentProofRef ? { paymentProofRef } : {}),
@@ -470,10 +542,20 @@ export function NewSaleScreen() {
       return;
     }
 
-    const soldTotal = pricedSale.total;
+    // Un cambio no cobro nada: su importe es cero y eso es la verdad, no un
+    // precio que falto.
+    const soldTotal = isSale && pricedSale?.ok ? pricedSale.total : 0;
 
     try {
       await trySendSale(payload);
+      if (!isSale) {
+        // Copia deliberadamente distinta de la de una venta: el chofer no
+        // tiene que confundir un cambio con haber vendido.
+        showMessage('Cambio registrado. No se cobro nada.', 'success');
+        resetAfterSale();
+        await refreshDaySummary();
+        return;
+      }
       setLastSale({ customerName, total: soldTotal });
       resetAfterSale();
       await refreshDaySummary();
@@ -489,7 +571,15 @@ export function NewSaleScreen() {
       });
     } catch (error) {
       const cause = error instanceof Error ? error.message : 'No se pudo guardar en API';
-      await enqueueSale(payload, cause);
+      const queueLength = await enqueueSale(payload, cause);
+      if (!isSale) {
+        showMessage(
+          `Sin conexion. Cambio en cola offline (${queueLength} pendientes).`,
+          'warning',
+        );
+        resetAfterSale();
+        return;
+      }
       setLastSale({ customerName, total: soldTotal });
       resetAfterSale();
       navigation.navigate('SaleResult', {
@@ -538,6 +628,9 @@ export function NewSaleScreen() {
       truckCode: truck.code,
       customerName,
       customerType,
+      // El atajo ahora tambien dice CUANTOS vacios volvieron y de que
+      // producto, en vez de dejar solo el booleano historico.
+      ...(returnedItems.length > 0 ? { returnedItems } : {}),
       ...(customerId ? { customerId } : {}),
     };
 
@@ -593,10 +686,18 @@ export function NewSaleScreen() {
       return { label: 'Elegí un cliente', disabled: true, run: () => {} };
     }
     if (currentItems.length === 0) {
-      // Envase marcado y nada vendido es exactamente una visita sin venta:
-      // el chofer paso, le devolvieron el envase, no compro. Fila churn, no
-      // una venta en cero.
-      if (containerReturned === true) {
+      // Nada vendido: la accion la decide lo que volvio. Solo falladas es un
+      // cambio y va por el camino general; solo vacios es la visita sin venta
+      // de siempre, por su endpoint de siempre. Es el `kind` derivado el que
+      // manda, la misma respuesta que va a dar el servidor al grabar.
+      if (saleKind === 'swap') {
+        return {
+          label: 'Registrar cambio',
+          disabled: false,
+          run: () => void saveSale(),
+        };
+      }
+      if (returnedItems.length > 0) {
         return {
           label: 'Registrar devolución',
           disabled: false,
@@ -605,8 +706,9 @@ export function NewSaleScreen() {
       }
       return { label: 'Agregá productos', disabled: true, run: () => {} };
     }
-    // Despues del churn a proposito: una devolucion no tiene nada que
-    // cotizar, asi que la falta de precios no puede bloquearla.
+    // Despues de las dos ramas sin venta a proposito: ni una devolucion ni un
+    // cambio tienen nada que cotizar, asi que la falta de precios no puede
+    // bloquearlos.
     if (cannotQuoteCustomer) {
       return { label: 'Sin precios para este cliente', disabled: true, run: () => {} };
     }
@@ -618,14 +720,27 @@ export function NewSaleScreen() {
     truck,
     customerName,
     currentItems.length,
-    containerReturned,
+    saleKind,
+    returnedItems.length,
     cannotQuoteCustomer,
     saveSale,
     recordVisit,
   ]);
 
-  const containerSubtitle =
-    containerReturned === undefined ? 'Sin marcar' : containerReturned ? 'Devuelto' : 'No devolvió';
+  /**
+   * D10: el cobro se bloquea cuando no hay nada que cobrar, y eso lo contesta
+   * el total y nada mas.
+   *
+   * NO se bloquea por "hay envase devuelto" ni por "hay un cambio": el caso
+   * mas comun del dia es una venta normal CON envase devuelto, y una visita
+   * mixta -- vendio dos y ademas cambio una fallada -- tiene plata que cobrar
+   * por las dos vendidas. Los reemplazos entran con precio cero y no suman,
+   * asi que una visita que solo cambio falladas da cero sola.
+   *
+   * `undefined` (falta un precio) no es cero: ahi el bloqueo no lo pone esta
+   * regla sino el pie, que ya dice que a este cliente no se le puede cotizar.
+   */
+  const chargeBlocked = total === 0;
 
   return (
     <ScreenContainer
@@ -713,10 +828,25 @@ export function NewSaleScreen() {
         ))}
       </View>
 
+      {/*
+        D6: no hay un modo que prender, hay una seccion mas para cargar
+        cantidades. Colapsada por defecto porque la mayoria de las visitas no
+        devuelven nada, y una seccion siempre abierta es ruido en la pantalla
+        que mas se usa del dia.
+      */}
+      
       <View style={styles.field}>
         <SectionLabel>COBRO</SectionLabel>
+        {chargeBlocked && (
+          <Text style={styles.hint} testID="new-sale-charge-blocked">
+            Esta visita no cobra: no hay nada vendido.
+          </Text>
+        )}
         <SegmentedPills
           options={paymentOptions}
+          // D10: sin nada que cobrar, la fila se bloquea en vez de esconderse.
+          // Un control que desaparece deja al chofer sin saber que habia ahi.
+          disabled={chargeBlocked}
           // '' mientras el catalogo no llego: ninguna pastilla queda marcada,
           // que es la verdad. El efecto de arriba elige la primera apenas hay
           // medios, y `canSell` ya bloquea la venta hasta entonces.
@@ -727,6 +857,67 @@ export function NewSaleScreen() {
           maxPerRow={3}
           testID="new-sale-payment"
         />
+      </View>
+
+      <View style={styles.returnsBlock}>
+        {/*
+          El encabezado va con banda propia. Sin ella la seccion tenia el
+          mismo fondo y el mismo tipo de titulo que PRODUCTOS y COBRO, y se
+          perdia justo cuando el chofer la busca apurado con el cliente
+          adelante.
+        */}
+        <View style={styles.returnsHeader} testID="new-sale-returns-header">
+          <SectionLabel>DEVOLUCIONES Y CAMBIOS</SectionLabel>
+          <Button
+            label={returnsOpen ? 'Ocultar' : 'Mostrar'}
+            variant="secondary"
+            onPress={() => setReturnsOpen((open) => !open)}
+            testID="new-sale-returns-toggle"
+          />
+        </View>
+
+        {returnsOpen && (
+          <View style={styles.returns}>
+            <Text style={styles.hint}>Envases vacíos que vuelven</Text>
+            <View style={styles.products}>
+              {products.map((product) => (
+                <ProductRow
+                  key={`returned-${product.code}`}
+                  code={product.code}
+                  name={product.name}
+                  quantity={returnedQuantities[product.code] ?? 0}
+                  testIDPrefix="returned-row"
+                  onIncrement={() => changeReturnedQty(product.code, 1)}
+                  onDecrement={() => changeReturnedQty(product.code, -1)}
+                />
+              ))}
+            </View>
+
+            <Text style={styles.hint}>Cambios por falla</Text>
+            <View style={styles.products}>
+              {products.map((product) => (
+                <ProductRow
+                  key={`swapped-${product.code}`}
+                  code={product.code}
+                  name={product.name}
+                  quantity={swappedQuantities[product.code] ?? 0}
+                  testIDPrefix="swapped-row"
+                  onIncrement={() => changeSwappedQty(product.code, 1)}
+                  onDecrement={() => changeSwappedQty(product.code, -1)}
+                />
+              ))}
+            </View>
+            {/*
+              El numero de arriba dice las dos cosas a la vez, y el chofer
+              tiene que verlo escrito: entra la fallada y sale el reemplazo,
+              sin cargo. Un solo numero es lo que hace que el 1 a 1 no se
+              pueda romper (D6b).
+            */}
+            <Text style={styles.hint} testID="new-sale-swap-hint">
+              Sale del camión un reemplazo por cada unidad fallada, sin cargo.
+            </Text>
+          </View>
+        )}
       </View>
 
       {proofPolicy !== 'none' && (
@@ -770,14 +961,12 @@ export function NewSaleScreen() {
         </View>
       )}
 
-      <ToggleRow
-        label="Envase devuelto"
-        subtitle={containerSubtitle}
-        value={containerReturned === true}
-        onValueChange={setContainerReturned}
-        testID="new-sale-container-returned"
-      />
-
+      {/*
+        El atajo del caso comun. Escribe en la MISMA lista que la seccion y se
+        muestra prendido si esa lista tiene algo: dos estados paralelos sobre
+        el mismo hecho garantizan que algun dia digan cosas distintas.
+      */}
+      
       {lastSale && (
         <Text style={styles.lastSale} testID="new-sale-last-sale">
           Última: {lastSale.customerName} · {formatArs(lastSale.total)}
@@ -810,6 +999,28 @@ const makeStyles = (colors: Colors) =>
   },
   proof: {
     gap: spacing.sm,
+  },
+  returns: {
+    gap: spacing.sm,
+  },
+  // El bloque entero lleva el fondo, no solo el titulo: asi el encabezado, el
+  // atajo y el detalle se leen como una sola cosa y no como tres sueltas.
+  returnsBlock: {
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: spacing.sm,
+    padding: spacing.sm,
+  },
+  returnsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.background,
+    borderRadius: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   proofButtons: {
     flexDirection: 'row',

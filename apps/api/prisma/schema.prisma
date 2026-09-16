@@ -30,6 +30,18 @@ enum SaleStatus {
 enum SaleKind {
   sale
   churn
+  swap
+}
+
+/// Por que volvio una unidad. Enum y no tabla por el mismo criterio que
+/// `SaleKind` y `ProofPolicy`: los dos motivos los entiende el codigo, y un
+/// tercero seria una funcionalidad nueva que hay que programar, no
+/// configuracion del duenio.
+enum ReturnReason {
+  /// Envase vacio que el cliente devuelve.
+  empty
+  /// Unidad fallada que se cambio por una nueva.
+  faulty
 }
 
 enum SaleAuditAction {
@@ -97,6 +109,7 @@ model Sale {
   customer          Customer?      @relation(fields: [customerId], references: [id])
   truck             Truck?         @relation(fields: [truckId], references: [id])
   items             SaleItem[]
+  returnItems       SaleReturnItem[]
   audits            SaleAudit[]
 
   @@index([createdAt])
@@ -108,21 +121,57 @@ model Sale {
 }
 
 model SaleItem {
-  id          String  @id @default(cuid())
-  saleId      String
-  productCode String
-  quantity    Int
+  id            String  @id @default(cuid())
+  saleId        String
+  productCode   String
+  quantity      Int
   /// Precio unitario congelado en el momento de la venta. Es el registro
   /// definitivo: ningun cambio de precio posterior, ni una correccion del
   /// historial, puede alterar lo que esta linea cobro.
-  unitPrice   Int
-  sale        Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  unitPrice     Int
+  /// `true` cuando la linea es la unidad de REEMPLAZO de un cambio por falla:
+  /// salio del camion sin cargo y su espejo es un `SaleReturnItem` con motivo
+  /// `faulty`. Sin esta bandera lo vendido y los reemplazos vuelven mezclados
+  /// en la misma lista, y una visita mixta -- vendio Y cambio -- deja de ser
+  /// editable porque nadie puede volver a partirlos.
+  ///
+  /// NO es un filtro de stock, y leerla asi seria el error de `SaleReturnItem`
+  /// al reves: un reemplazo SALIO del camion y descuenta como cualquier otra
+  /// linea. `getTruckStockForDay` sigue sumando TODAS, marcadas o no.
+  isReplacement Boolean @default(false)
+  sale          Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
   /// Restrict, no Cascade: un producto que alguna vez se vendio no se puede
   /// borrar nunca. Se da de baja con isActive.
-  product     Product @relation(fields: [productCode], references: [code], onDelete: Restrict)
+  product       Product @relation(fields: [productCode], references: [code], onDelete: Restrict)
 
   @@index([saleId])
   @@index([productCode])
+}
+
+/// Lo que VUELVE de la calle: envases vacios y unidades falladas.
+///
+/// Tabla propia y no una columna sobre `SaleItem`, a proposito. El stock del
+/// camion suma TODA linea de `SaleItem` sin filtrar (`getTruckStockForDay`),
+/// asi que una unidad que ENTRA anotada ahi se contaria como mercaderia que
+/// SALIO y los numeros del chofer dejarian de cerrar contra su remito, en
+/// silencio. Una tabla nueva no la puede sumar por accidente una consulta que
+/// ya existe: la garantia es estructural y no depende de que cada consulta
+/// futura se acuerde de filtrar.
+///
+/// La unidad de REEMPLAZO de un cambio no vive aca: esa si salio del camion y
+/// es un `SaleItem` con `unitPrice` en 0.
+model SaleReturnItem {
+  id          String       @id @default(cuid())
+  saleId      String
+  productCode String
+  quantity    Int
+  reason      ReturnReason
+  sale        Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  /// Restrict, igual que en `SaleItem`: un producto que alguna vez volvio no
+  /// se puede borrar del catalogo sin perder el registro de por que volvio.
+  product     Product      @relation(fields: [productCode], references: [code], onDelete: Restrict)
+
+  @@index([saleId])
 }
 
 model SaleAudit {
@@ -321,6 +370,7 @@ model Product {
   updatedAt       DateTime           @updatedAt
   prices          ProductPrice[]
   saleItems       SaleItem[]
+  saleReturnItems SaleReturnItem[]
   manifestItems   LoadManifestItem[]
   truckCapacities TruckCapacity[]
 

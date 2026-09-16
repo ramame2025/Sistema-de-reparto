@@ -16,10 +16,9 @@ function queuedUnitsByProduct(
   const units = new Map<string, number>();
 
   for (const entry of pendingSales) {
-    // Una visita sin venta no baja nada del camion: no tiene items, y por eso
-    // tampoco tiene lugar en esta cuenta. Mismo guard que `totalOfQueued`
-    // sobre `payload`: una entrada vieja de la cola puede no traerlo.
-    if (entry.kind === 'churn' || !entry.payload) {
+    // Mismo guard que `totalOfQueued` sobre `payload`: una entrada vieja de la
+    // cola puede no traerlo.
+    if (!entry.payload) {
       continue;
     }
 
@@ -31,6 +30,14 @@ function queuedUnitsByProduct(
       continue;
     }
 
+    // La pregunta es "que salio del camion", y eso lo contestan los items, no
+    // la clase de la fila. Una visita sin venta no descuenta porque no tiene
+    // items; un cambio por falla SI descuenta, porque la unidad de reemplazo
+    // salio del camion aunque nadie haya pagado. Escrito sobre el `kind`, el
+    // cambio de envase obligaba a volver aca, y el proximo `kind` tambien.
+    //
+    // Lo que VUELVE (`returnedItems`, `swappedItems`) no se mira nunca: entra
+    // al camion, no sale.
     const items = (entry.payload as CreateSaleInput).items ?? [];
     for (const item of items) {
       units.set(item.productCode, (units.get(item.productCode) ?? 0) + item.quantity);

@@ -4,6 +4,10 @@ import type { CreateLoadManifestInput, LoadManifestRecord } from '@distribuidor/
 import { PrismaService } from '../prisma/prisma.service';
 import { ProductsService } from '../products/products.service';
 import { LoadManifestsService } from './load-manifests.service';
+import { SalesService } from '../sales/sales.service';
+import { PricesService } from '../prices/prices.service';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
+import { PaymentMethodsService } from '../payment-methods/payment-methods.service';
 
 function buildManifestRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -469,6 +473,212 @@ describe('LoadManifestsService', () => {
         sold: 8,
         remaining: -3,
       });
+    });
+  });
+});
+
+/**
+ * La trampa que hace posible todo el cambio de envase, fijada con un test.
+ *
+ * `getTruckStockForDay` suma TODA linea de `SaleItem` sin filtrar por `kind`.
+ * Eso es lo que hace que el reemplazo de un cambio descuente del camion sin
+ * tocar una linea de esa consulta, y es exactamente lo que prohibe guardar ahi
+ * lo que VUELVE: una unidad que entra anotada como `SaleItem` se contaria como
+ * mercaderia que salio, y los numeros dejarian de cerrar contra el remito de
+ * la manana sin que nada falle.
+ *
+ * El test no inventa las filas: se las pide a `createSale`, asi que prueba los
+ * bytes que la venta realmente escribe y no una suposicion sobre ellos.
+ */
+describe('getTruckStockForDay frente a una visita mixta', () => {
+  it('discounts what was sold plus the swap replacement, and not one unit more', async () => {
+    const salesPrisma = {
+      sale: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
+      saleItem: { deleteMany: jest.fn() },
+      saleReturnItem: { deleteMany: jest.fn() },
+      saleAudit: { create: jest.fn() },
+      customer: { findUnique: jest.fn() },
+      truck: { findUnique: jest.fn().mockResolvedValue({ id: 'truck-1', isActive: true }) },
+      $transaction: jest.fn(),
+    };
+    salesPrisma.sale.create.mockResolvedValue({
+      id: 'sale-1',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      occurredAt: new Date('2026-01-01T00:00:00.000Z'),
+      status: 'active',
+      canceledAt: null,
+      cancelReason: null,
+      driverName: 'juan.perez',
+      truckCode: null,
+      total: 200,
+      customerName: 'Kiosco Sur',
+      customerType: 'final',
+      paymentMethod: 'efectivo',
+      note: null,
+      kind: 'sale',
+      containerReturned: true,
+      paymentProofRef: null,
+      latitude: null,
+      longitude: null,
+      customerId: null,
+      items: [],
+      returnItems: [],
+    });
+
+    const catalogueProducts = {
+      assertProductCodesExist: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const salesModule = await Test.createTestingModule({
+      providers: [
+        SalesService,
+        { provide: PrismaService, useValue: salesPrisma },
+        {
+          provide: PricesService,
+          useValue: {
+            getPriceTable: jest.fn(),
+            getPriceTableAt: jest
+              .fn()
+              .mockResolvedValue({ final: { G10: 100, G15: 200, G45: 300 } }),
+          },
+        },
+        { provide: ProductsService, useValue: catalogueProducts },
+        {
+          provide: CustomerCategoriesService,
+          useValue: { assertCategoryCodesExist: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: PaymentMethodsService,
+          useValue: { assertPaymentMethodCodesExist: jest.fn().mockResolvedValue(undefined) },
+        },
+      ],
+    }).compile();
+
+    // Vende 2 G10, le devuelven 1 envase vacio de G10 y le cambian 1 G15
+    // fallado. Del camion salen 2 G10 y 1 G15 de reemplazo: nada mas.
+    await salesModule.get(SalesService).createSale({
+      driverName: 'juan.perez',
+      customerName: 'Kiosco Sur',
+      customerType: 'final',
+      paymentMethod: 'efectivo',
+      truckId: 'truck-1',
+      items: [{ productCode: 'G10', quantity: 2 }],
+      returnedItems: [{ productCode: 'G10', quantity: 1 }],
+      swappedItems: [{ productCode: 'G15', quantity: 1 }],
+    });
+
+    const written = salesPrisma.sale.create.mock.calls[0][0].data as {
+      items: { create: { productCode: string; quantity: number }[] };
+      returnItems: { create: unknown[] };
+    };
+
+    // Lo que vuelve NO es un SaleItem, y por eso la consulta de stock no lo ve.
+    expect(written.returnItems.create).toHaveLength(2);
+
+    const stockPrisma = {
+      loadManifest: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue({
+          createdAt: new Date('2026-01-01T08:00:00.000Z'),
+        }),
+      },
+      loadManifestItem: {
+        findMany: jest.fn().mockResolvedValue([
+          { productCode: 'G10', quantity: 10 },
+          { productCode: 'G15', quantity: 5 },
+        ]),
+      },
+      // Exactamente las lineas que `createSale` acaba de escribir.
+      saleItem: { findMany: jest.fn().mockResolvedValue(written.items.create) },
+      product: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue(['G10', 'G15', 'G45'].map((code) => ({ code }))),
+      },
+      truck: { findUnique: jest.fn() },
+    };
+
+    const stockModule = await Test.createTestingModule({
+      providers: [
+        LoadManifestsService,
+        { provide: PrismaService, useValue: stockPrisma },
+        { provide: ProductsService, useValue: catalogueProducts },
+      ],
+    }).compile();
+
+    const stock = await stockModule
+      .get(LoadManifestsService)
+      .getTruckStockForDay('truck-1', '2026-01-01');
+    const byProduct = Object.fromEntries(stock.lines.map((line) => [line.productCode, line]));
+
+    // 2 vendidas. El vacio que volvio no las devuelve al camion.
+    expect(byProduct.G10).toEqual({ productCode: 'G10', loaded: 10, sold: 2, remaining: 8 });
+    // 1 de reemplazo salio del camion. La fallada que entro no la suma.
+    expect(byProduct.G15).toEqual({ productCode: 'G15', loaded: 5, sold: 1, remaining: 4 });
+    expect(byProduct.G45).toEqual({ productCode: 'G45', loaded: 0, sold: 0, remaining: 0 });
+  });
+
+  /**
+   * La bandera `isReplacement` marca la linea de reemplazo para que el telefono
+   * pueda partir la fila, y NO PUEDE excluirla de ninguna consulta de stock.
+   *
+   * El peligro que D7 nombra es el contrario: anotar en `SaleItem` algo que
+   * ENTRA al camion. Un reemplazo SALE, asi que descuenta igual que cualquier
+   * otra linea. Este test lo fija: si alguien algun dia le suma un
+   * `where: { isReplacement: false }` a esta consulta, el camion empieza a
+   * decir que tiene mercaderia que ya no esta y este numero cambia.
+   */
+  it('still counts a line marked as a replacement: the flag excludes nothing', async () => {
+    const prisma = {
+      loadManifest: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue({
+          createdAt: new Date('2026-01-01T08:00:00.000Z'),
+        }),
+      },
+      loadManifestItem: {
+        findMany: jest.fn().mockResolvedValue([{ productCode: 'G15', quantity: 5 }]),
+      },
+      saleItem: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { productCode: 'G15', quantity: 2, unitPrice: 0, isReplacement: true },
+          ]),
+      },
+      product: {
+        findMany: jest.fn().mockResolvedValue([{ code: 'G15' }]),
+      },
+      truck: { findUnique: jest.fn() },
+    };
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        LoadManifestsService,
+        { provide: PrismaService, useValue: prisma },
+        {
+          provide: ProductsService,
+          useValue: { assertProductCodesExist: jest.fn().mockResolvedValue(undefined) },
+        },
+      ],
+    }).compile();
+
+    const stock = await moduleRef
+      .get(LoadManifestsService)
+      .getTruckStockForDay('truck-1', '2026-01-01');
+
+    expect(stock.lines).toEqual([
+      { productCode: 'G15', loaded: 5, sold: 2, remaining: 3 },
+    ]);
+    // La consulta no filtra por la bandera, y no puede empezar a hacerlo.
+    expect(prisma.saleItem.findMany.mock.calls[0][0].where).toEqual({
+      sale: {
+        truckId: 'truck-1',
+        status: 'active',
+        createdAt: expect.anything(),
+      },
     });
   });
 });

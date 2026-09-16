@@ -93,7 +93,39 @@ export const EXPENSE_CATEGORIES = [
 ];
 export const USER_ROLES = ['admin', 'chofer'];
 export const ASSIGNMENT_KINDS = ['titular', 'cobertura'];
-export const SALE_KINDS = ['sale', 'churn'];
+export const SALE_KINDS = ['sale', 'churn', 'swap'];
+/**
+ * Por que vuelve una unidad. Es un enum y no una tabla por el mismo criterio
+ * que `SaleKind`: sus valores los entiende el codigo, asi que un tercer motivo
+ * es funcionalidad nueva que hay que programar, no configuracion del duenio.
+ */
+export const RETURN_REASONS = ['empty', 'faulty'];
+/**
+ * Parte las lineas de una venta en las dos cosas que `SaleRecord.items` trae
+ * mezcladas: lo que se VENDIO y la unidad de REEMPLAZO que salio del camion
+ * sin cargo en un cambio por falla.
+ *
+ * Pura y compartida a proposito, igual que `deriveSaleKind`: el servidor y la
+ * pantalla del chofer tienen que leer la misma fila de la misma manera. Vive
+ * aca y no dentro de la pantalla porque la regla es del dominio, no de la UI.
+ *
+ * Una linea sin la bandera cuenta como vendida. No es un default de
+ * conveniencia: ninguna fila anterior a esta columna tiene reemplazos, porque
+ * los cambios no existian.
+ */
+export function splitSaleItems(items) {
+    const soldItems = [];
+    const replacementItems = [];
+    for (const item of items) {
+        if (item.isReplacement === true) {
+            replacementItems.push(item);
+        }
+        else {
+            soldItems.push(item);
+        }
+    }
+    return { soldItems, replacementItems };
+}
 /** Tamano de pagina fijo del historial de asignaciones (vista admin). */
 export const DRIVER_CUSTOMER_ASSIGNMENT_HISTORY_PAGE_SIZE = 15;
 export const DEFAULT_PRICE_TABLE = {
@@ -173,14 +205,92 @@ function createsDebtFor(methods, code) {
     return methods.find((method) => method.code === code)?.createsDebt ?? false;
 }
 /**
+ * Cuantas unidades suma una lista, ignorando las lineas que no aportan
+ * ninguna. La pantalla mantiene una fila por producto con el contador en
+ * cero, asi que contar FILAS derivaria mal el `kind` de una visita en la que
+ * el chofer abrio la seccion y no cargo nada.
+ */
+function countUnits(lines) {
+    if (!Array.isArray(lines)) {
+        return 0;
+    }
+    return lines.reduce((sum, line) => {
+        const quantity = line?.quantity;
+        return typeof quantity === 'number' && Number.isFinite(quantity) && quantity > 0
+            ? sum + quantity
+            : sum;
+    }, 0);
+}
+/**
+ * De que clase es la visita, segun lo que paso en ella.
+ *
+ * El `kind` no se elige: se deriva. Una misma visita puede vender, recibir un
+ * vacio y cambiar una fallada, y eso es UN hecho comercial y UNA fila. La
+ * tabla de decision es esta, y no tiene mas ramas:
+ *
+ * | Que paso                                     | kind    | cobra |
+ * |----------------------------------------------|---------|-------|
+ * | Se vendio algo (con o sin cambios ni vacios) | `sale`  | si    |
+ * | Solo se cambiaron falladas                   | `swap`  | no    |
+ * | Solo volvieron envases vacios                | `churn` | no    |
+ *
+ * Pura y sin dependencias a proposito: la usan el servidor para decidir que
+ * graba y la pantalla del chofer para saber que rotulo poner en el pie, y las
+ * dos tienen que llegar siempre a la misma respuesta.
+ *
+ * Una visita vacia en los tres lados cae en `churn`, que es la rama que no
+ * cobra; el error de "no hay nada que registrar" lo pone el validador, porque
+ * derivar no es validar.
+ */
+export function deriveSaleKind(input) {
+    if (countUnits(input.items) > 0) {
+        return 'sale';
+    }
+    if (countUnits(input.swappedItems) > 0) {
+        return 'swap';
+    }
+    return 'churn';
+}
+/**
+ * Valida la forma de una lista de lo que vuelve. Mismo contrato que las
+ * lineas vendidas -- codigo bien formado y cantidad entera mayor que cero --
+ * con el nombre del campo en el mensaje para que quien lo lee sepa cual de
+ * las dos listas esta mal.
+ */
+function validateReturnLines(lines, field) {
+    if (lines === undefined) {
+        return [];
+    }
+    if (!Array.isArray(lines)) {
+        return [`${field} must be an array when provided`];
+    }
+    const errors = [];
+    lines.forEach((line, index) => {
+        if (!isWellFormedProductCode(line?.productCode)) {
+            errors.push(`${field}[${index}].productCode is invalid`);
+        }
+        if (!Number.isInteger(line?.quantity) || line.quantity <= 0) {
+            errors.push(`${field}[${index}].quantity must be an integer greater than 0`);
+        }
+    });
+    return errors;
+}
+/**
  * El segundo parametro es el catalogo de medios de pago disponible. Es
  * opcional a proposito: sin catalogo el validador se comporta exactamente
  * como antes, asi que los llamadores que todavia no lo pasan no cambian de
  * comportamiento. Es tambien la unica forma de enterarse de `createsDebt`,
  * que vive en otra tabla.
+ *
+ * El tercero es el `kind` que hay que dar por bueno en lugar de derivarlo del
+ * payload. Solo lo usa la edicion: una fila de swap guarda sus reemplazos en
+ * `items`, asi que derivar sobre un payload de edicion daria `sale` y exigiria
+ * un cobro que esa fila nunca tuvo. Para la creacion no se pasa nunca -- ahi
+ * el contenido es la unica fuente de verdad.
  */
-export function validateCreateSaleInput(input, paymentMethods = []) {
+export function validateCreateSaleInput(input, paymentMethods = [], kindOverride) {
     const errors = [];
+    const kind = kindOverride ?? deriveSaleKind(input);
     if (input.clientGeneratedId !== undefined &&
         input.clientGeneratedId.trim().length < 8) {
         errors.push('clientGeneratedId must have at least 8 characters when provided');
@@ -203,17 +313,29 @@ export function validateCreateSaleInput(input, paymentMethods = []) {
     if (!isWellFormedCustomerType(input.customerType)) {
         errors.push("customerType is invalid");
     }
-    if (!isWellFormedPaymentMethod(input.paymentMethod)) {
-        errors.push("paymentMethod is invalid");
+    // El cobro se exige SOLO cuando la visita vendio algo. Es la garantia que
+    // sobrevive a derivar el `kind`: una fila que vendio no se puede grabar sin
+    // medio de pago. Un cambio o una devolucion no tienen nada que cobrar, y un
+    // `paymentMethod` que igual venga en el payload lo ignora el servidor.
+    if (kind === 'sale') {
+        if (!isWellFormedPaymentMethod(input.paymentMethod)) {
+            errors.push("paymentMethod is invalid");
+        }
+        // Una deuda tiene que tener un deudor, y el deudor tiene que ser una ficha
+        // de cliente y no un nombre tipeado. El mensaje dice el MOTIVO: quien lo
+        // lee no tiene por que saber que medio de pago genera deuda.
+        if (createsDebtFor(paymentMethods, input.paymentMethod) &&
+            (input.customerId === undefined || input.customerId.trim().length === 0)) {
+            errors.push('customerId is required when the payment method creates debt');
+        }
     }
-    // Una deuda tiene que tener un deudor, y el deudor tiene que ser una ficha
-    // de cliente y no un nombre tipeado. El mensaje dice el MOTIVO: quien lo
-    // lee no tiene por que saber que medio de pago genera deuda.
-    if (createsDebtFor(paymentMethods, input.paymentMethod) &&
-        (input.customerId === undefined || input.customerId.trim().length === 0)) {
-        errors.push('customerId is required when the payment method creates debt');
-    }
-    if (!Array.isArray(input.items) || input.items.length === 0) {
+    // Una visita tiene que haber sido ALGO. El mensaje se conserva tal cual
+    // aunque ahora tres listas puedan satisfacerlo: es el que ya devuelve la
+    // API a los telefonos que mandan una venta vacia.
+    const hasSoldLines = Array.isArray(input.items) && input.items.length > 0;
+    const hasReturnedLines = Array.isArray(input.returnedItems) && input.returnedItems.length > 0;
+    const hasSwappedLines = Array.isArray(input.swappedItems) && input.swappedItems.length > 0;
+    if (!hasSoldLines && !hasReturnedLines && !hasSwappedLines) {
         errors.push("items must include at least one product");
     }
     if (Array.isArray(input.items)) {
@@ -226,6 +348,8 @@ export function validateCreateSaleInput(input, paymentMethods = []) {
             }
         });
     }
+    errors.push(...validateReturnLines(input.returnedItems, 'returnedItems'));
+    errors.push(...validateReturnLines(input.swappedItems, 'swappedItems'));
     if (input.paymentProofRef !== undefined && input.paymentProofRef.trim().length === 0) {
         errors.push('paymentProofRef must not be empty when provided');
     }
@@ -266,6 +390,7 @@ export function validateRecordEmptyVisitInput(input) {
     if (!isWellFormedCustomerType(input.customerType)) {
         errors.push("customerType is invalid");
     }
+    errors.push(...validateReturnLines(input.returnedItems, 'returnedItems'));
     return errors;
 }
 function validateSaleIdentityFields(input) {
@@ -301,9 +426,14 @@ export function validateUpdateSaleInput(input, paymentMethods = []) {
     //
     // Una fila churn no tuvo cobro y por lo tanto no tiene medio de pago del
     // que leer `createsDebt`: la rama de identidad ni ve el catalogo.
+    //
+    // Un swap SI tiene items -- la unidad de reemplazo que salio del camion --
+    // asi que no puede ir por la rama de identidad del churn; va por la
+    // completa, pero con el `kind` pasado a mano para que no se le exija un
+    // cobro que esa fila nunca tuvo.
     const errors = input.kind === 'churn'
         ? validateSaleIdentityFields(input)
-        : validateCreateSaleInput(input, paymentMethods);
+        : validateCreateSaleInput(input, paymentMethods, input.kind);
     if (!input.reason || input.reason.trim().length < 3) {
         errors.push('reason must have at least 3 characters');
     }

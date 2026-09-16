@@ -154,6 +154,65 @@ describe('buildDayProblems/ventas que no se pudieron enviar', () => {
   });
 });
 
+describe('buildDayProblems/un cambio encolado no vale plata', () => {
+  // Un cambio por falla no cobro nada, y su payload lo dice solo: `items` va
+  // vacio y la unidad de reemplazo viaja una sola vez, en `swappedItems` --
+  // el servidor la deriva de ahi. Sin lineas vendidas no hay nada que
+  // valorizar, igual que en la visita sin venta y por el mismo motivo.
+  it('reports a queued swap without an amount: nobody paid for a replacement', () => {
+    const queued = buildQueued({
+      queueId: 'q-swap',
+      kind: 'swap',
+      payload: {
+        driverName: 'chofer1',
+        customerName: 'Marta Suárez',
+        customerType: 'comercio',
+        paymentMethod: 'efectivo',
+        items: [],
+        swappedItems: [{ productCode: 'G10', quantity: 1 }],
+      },
+    });
+
+    const [problem] = buildDayProblems([queued], [], prices, paymentMethods);
+
+    expect(problem).toMatchObject({ kind: 'not-sent', customerName: 'Marta Suárez' });
+    expect(problem.total).toBeUndefined();
+  });
+});
+
+describe('buildDayProblems/un cambio nunca reclama comprobante', () => {
+  // Cae bajo la regla que ya existe y no bajo una excepcion nueva: un swap no
+  // cobro, asi que su `paymentMethod` es null y `proofPolicyOf` devuelve
+  // 'none'. El test fija ese desenlace para que nadie lo rompa sin enterarse.
+  it('never asks a swap for a payment proof it could not possibly have', () => {
+    const swap = buildSale({
+      id: 'swap-1',
+      kind: 'swap',
+      paymentMethod: null,
+      total: 0,
+      items: [{ productCode: 'G10', quantity: 1, unitPrice: 0 }],
+      returnItems: [{ productCode: 'G10', quantity: 1, reason: 'faulty' }],
+      paymentProofRef: undefined,
+    });
+
+    expect(buildDayProblems([], [swap], prices, paymentMethods)).toEqual([]);
+  });
+
+  // Y la contraparte, para que el test de arriba no pase por estar mirando el
+  // `kind`: una venta de verdad sin comprobante si aparece.
+  it('still reports a real sale that owes its proof', () => {
+    const sale = buildSale({
+      id: 'sale-1',
+      paymentMethod: 'transferencia',
+      paymentProofRef: undefined,
+    });
+
+    expect(buildDayProblems([], [sale], prices, paymentMethods)).toMatchObject([
+      { kind: 'missing-proof', id: 'sale-1' },
+    ]);
+  });
+});
+
 describe('buildDayProblems/entrada de cola malformada', () => {
   it('still lists an entry whose payload did not survive storage, instead of crashing', () => {
     // Inicio es la primera pantalla que el chofer abre. Una entrada rota

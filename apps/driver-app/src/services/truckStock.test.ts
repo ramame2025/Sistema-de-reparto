@@ -109,6 +109,84 @@ describe('buildTruckStockLines', () => {
     expect(result[0].remaining).toBe(12);
   });
 
+  // El guard dejo de decidir por el `kind` y pasa a decidir por lo que la
+  // entrada lleva: un cambio por falla no cobra, pero la unidad de reemplazo
+  // SALE del camion igual que una venta y tiene que descontar. Escrito sobre
+  // el `kind`, el proximo `kind` obligaba a volver aca.
+  it('discounts a queued swap: the replacement unit left the truck even though nobody paid', () => {
+    const result = buildTruckStockLines(
+      [stockLine()],
+      [
+        {
+          queueId: 'queue-swap',
+          kind: 'swap',
+          payload: {
+            customerType: 'comercio',
+            items: [{ productCode: 'G10', quantity: 2 }],
+            swappedItems: [{ productCode: 'G10', quantity: 2 }],
+          },
+          createdAt: '2026-01-31T12:00:00.000Z',
+          retries: 0,
+          nextRetryAt: 0,
+        } as unknown as PendingSale,
+      ],
+      PRODUCTS,
+      TODAY,
+    );
+
+    expect(result[0].remaining).toBe(10);
+  });
+
+  // Lo que vuelve no descuenta: entra al camion, no sale.
+  it('never counts the empties of a queued visit as merchandise that left', () => {
+    const result = buildTruckStockLines(
+      [stockLine()],
+      [
+        {
+          queueId: 'queue-returns',
+          kind: 'churn',
+          payload: {
+            customerType: 'comercio',
+            returnedItems: [{ productCode: 'G10', quantity: 3 }],
+          },
+          createdAt: '2026-01-31T12:00:00.000Z',
+          retries: 0,
+          nextRetryAt: 0,
+        } as unknown as PendingSale,
+      ],
+      PRODUCTS,
+      TODAY,
+    );
+
+    expect(result[0].remaining).toBe(12);
+  });
+
+  // La decision es "tiene items", no "es de tal clase". Una entrada rotulada
+  // churn que igual trae items descuenta, porque lo que salio del camion salio:
+  // la etiqueta puede estar mal, las unidades no.
+  it('decides by the items it carries, not by the label on the entry', () => {
+    const result = buildTruckStockLines(
+      [stockLine()],
+      [
+        {
+          queueId: 'queue-mislabeled',
+          kind: 'churn',
+          payload: {
+            customerType: 'comercio',
+            items: [{ productCode: 'G10', quantity: 4 }],
+          },
+          createdAt: '2026-01-31T12:00:00.000Z',
+          retries: 0,
+          nextRetryAt: 0,
+        } as unknown as PendingSale,
+      ],
+      PRODUCTS,
+      TODAY,
+    );
+
+    expect(result[0].remaining).toBe(8);
+  });
+
   it('ignores a queued sale from another day, which is not part of today’s manifest', () => {
     const result = buildTruckStockLines(
       [stockLine()],
