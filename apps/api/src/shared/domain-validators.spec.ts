@@ -43,6 +43,7 @@ import {
   validateUpdateTruckInput,
   validateCreateZoneInput,
   validateUpdateZoneInput,
+  splitSaleItems,
 } from '@distribuidor/shared';
 
 describe('validateCreateCustomerInput', () => {
@@ -1792,5 +1793,58 @@ describe('validateUpdateSaleInput para una fila de swap', () => {
       reason: 'Corrección de cantidad',
     } as UpdateSaleInput;
     expect(validateUpdateSaleInput(input)).toContain('paymentMethod is invalid');
+  });
+});
+
+/**
+ * `SaleRecord.items` mezcla dos cosas distintas: lo que se VENDIO y la unidad
+ * de REEMPLAZO que salio del camion sin cargo en un cambio por falla. Las dos
+ * salieron del camion, asi que las dos son `SaleItem` y las dos descuentan
+ * stock -- pero solo una se cobra, y solo una se edita como venta.
+ *
+ * Partirlas es una funcion pura y vive aca, no dentro de la pantalla: el
+ * servidor y el telefono tienen que leer la misma fila de la misma manera.
+ */
+describe('splitSaleItems', () => {
+  it('separates what was sold from the replacement lines of a mixed visit', () => {
+    const { soldItems, replacementItems } = splitSaleItems([
+      { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
+      { productCode: 'G15', quantity: 1, unitPrice: 0, isReplacement: true },
+    ]);
+
+    expect(soldItems).toEqual([
+      { productCode: 'G10', quantity: 2, unitPrice: 100, isReplacement: false },
+    ]);
+    expect(replacementItems).toEqual([
+      { productCode: 'G15', quantity: 1, unitPrice: 0, isReplacement: true },
+    ]);
+  });
+
+  // Una fila grabada antes de que existiera la columna no trae la bandera, y
+  // ninguna de esas filas tiene reemplazos: los cambios no existian. Leerla
+  // como vendida es la verdad, no un default de conveniencia.
+  it('treats a line with no flag as sold, which is what every old row is', () => {
+    const { soldItems, replacementItems } = splitSaleItems([
+      { productCode: 'G10', quantity: 2, unitPrice: 100 },
+    ]);
+
+    expect(soldItems).toHaveLength(1);
+    expect(replacementItems).toEqual([]);
+  });
+
+  it('keeps the original order inside each side', () => {
+    const { soldItems, replacementItems } = splitSaleItems([
+      { productCode: 'G10', quantity: 1, unitPrice: 100, isReplacement: false },
+      { productCode: 'G45', quantity: 1, unitPrice: 0, isReplacement: true },
+      { productCode: 'G15', quantity: 1, unitPrice: 200, isReplacement: false },
+      { productCode: 'G10', quantity: 1, unitPrice: 0, isReplacement: true },
+    ]);
+
+    expect(soldItems.map((item) => item.productCode)).toEqual(['G10', 'G15']);
+    expect(replacementItems.map((item) => item.productCode)).toEqual(['G45', 'G10']);
+  });
+
+  it('returns two empty sides for a row with no items at all', () => {
+    expect(splitSaleItems([])).toEqual({ soldItems: [], replacementItems: [] });
   });
 });

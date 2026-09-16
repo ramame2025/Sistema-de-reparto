@@ -261,7 +261,60 @@ export type UpdateSaleInput = CreateSaleInput & {
  */
 export type SaleItemRecord = SaleItemInput & {
   unitPrice: number;
+  /**
+   * `true` cuando la linea es la unidad de REEMPLAZO de un cambio por falla:
+   * salio del camion sin cargo y su espejo es un `SaleReturnItem` con motivo
+   * `faulty`.
+   *
+   * Existe porque sin ella `SaleRecord.items` devuelve lo vendido y los
+   * reemplazos mezclados, y quien lee la fila no puede volver a partirlos: una
+   * visita mixta -- vendio Y cambio -- deja de ser editable, porque no hay
+   * forma de saber que linea va en `items` y cual se reconstruye desde
+   * `swappedItems`.
+   *
+   * NO es un filtro de stock, y confundirlo con eso seria el error de D7 al
+   * reves: un reemplazo SALIO del camion y descuenta como cualquier otra
+   * linea. Lo que nunca puede vivir en `SaleItem` es lo que ENTRA, y para eso
+   * esta `SaleReturnItem`.
+   *
+   * Opcional en el tipo, igual que `returnItems`: una venta cacheada en el
+   * telefono antes de este cambio no la trae, y leerla no puede romperse por
+   * eso. Su ausencia significa "no es un reemplazo", que es la verdad de toda
+   * fila vieja -- los cambios no existian.
+   */
+  isReplacement?: boolean;
 };
+
+/**
+ * Parte las lineas de una venta en las dos cosas que `SaleRecord.items` trae
+ * mezcladas: lo que se VENDIO y la unidad de REEMPLAZO que salio del camion
+ * sin cargo en un cambio por falla.
+ *
+ * Pura y compartida a proposito, igual que `deriveSaleKind`: el servidor y la
+ * pantalla del chofer tienen que leer la misma fila de la misma manera. Vive
+ * aca y no dentro de la pantalla porque la regla es del dominio, no de la UI.
+ *
+ * Una linea sin la bandera cuenta como vendida. No es un default de
+ * conveniencia: ninguna fila anterior a esta columna tiene reemplazos, porque
+ * los cambios no existian.
+ */
+export function splitSaleItems(items: SaleItemRecord[]): {
+  soldItems: SaleItemRecord[];
+  replacementItems: SaleItemRecord[];
+} {
+  const soldItems: SaleItemRecord[] = [];
+  const replacementItems: SaleItemRecord[] = [];
+
+  for (const item of items) {
+    if (item.isReplacement === true) {
+      replacementItems.push(item);
+    } else {
+      soldItems.push(item);
+    }
+  }
+
+  return { soldItems, replacementItems };
+}
 
 /**
  * Una linea que volvio, tal como quedo grabada, con su motivo.

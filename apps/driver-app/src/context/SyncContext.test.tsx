@@ -157,6 +157,39 @@ describe('SyncContext/4.1 enqueueSale persistence + due filtering', () => {
     expect(stored[0].payload.customerName).toBe('Cliente de prueba');
   });
 
+  // El `kind` de una entrada encolada sale de lo que la visita tuvo adentro,
+  // con la misma funcion pura que usa el servidor al grabar. Estaba fijo en
+  // 'sale': un cambio por falla se encolaba rotulado como venta, y cualquier
+  // lector de la cola que decida por el `kind` leia otra cosa que el servidor.
+  it('enqueueSale labels a swap as a swap, derived from what the visit carried', async () => {
+    globalThis.fetch = makeFetchRouter();
+    const result = await renderAuthenticated();
+
+    await act(async () => {
+      await result.current.sync.enqueueSale(
+        buildPayload({ items: [], swappedItems: [{ productCode: 'G10', quantity: 1 }] }),
+        'offline',
+      );
+    });
+
+    expect(result.current.sync.pendingSales[0].kind).toBe('swap');
+
+    const stored = JSON.parse((await AsyncStorage.getItem(OFFLINE_QUEUE_KEY)) as string);
+    expect(stored[0].kind).toBe('swap');
+    expect(stored[0].payload.swappedItems).toEqual([{ productCode: 'G10', quantity: 1 }]);
+  });
+
+  it('enqueueSale still labels a normal sale as a sale', async () => {
+    globalThis.fetch = makeFetchRouter();
+    const result = await renderAuthenticated();
+
+    await act(async () => {
+      await result.current.sync.enqueueSale(buildPayload(), 'offline');
+    });
+
+    expect(result.current.sync.pendingSales[0].kind).toBe('sale');
+  });
+
   it('restores a previously persisted queue from driver_pending_sales_v1 on mount', async () => {
     await AsyncStorage.setItem(
       OFFLINE_QUEUE_KEY,

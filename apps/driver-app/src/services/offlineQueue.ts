@@ -11,7 +11,14 @@ export const computeBackoff = (retries: number): number =>
  * on a driver's device from before this change have no `kind` field at all.
  * Every consumer treats a missing `kind` as `'sale'` (see
  * `SyncContext.syncPendingSales`) so old queued sales keep working without a
- * migration. Only `enqueueEmptyVisit` ever writes `kind: 'churn'`.
+ * migration. `enqueueEmptyVisit` siempre escribe `kind: 'churn'`; `enqueueSale`
+ * lo DERIVA del contenido con `deriveSaleKind`, asi que una visita que solo
+ * cambio falladas queda rotulada `'swap'` y no como una venta.
+ *
+ * El `payload` de una entrada nueva puede traer `returnedItems` y
+ * `swappedItems`; el de una vieja no los trae, y su ausencia se lee como "no
+ * volvio nada". Ningun consumidor puede exigirlos: hay ventas encoladas en
+ * telefonos reales que se grabaron antes de que existieran.
  */
 export type PendingSale = {
   queueId: string;

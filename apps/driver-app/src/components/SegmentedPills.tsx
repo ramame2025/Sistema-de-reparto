@@ -33,6 +33,16 @@ export type SegmentedPillsProps<T extends string> = {
    * Tiene prioridad sobre `wrap`, porque ya envuelve por definicion.
    */
   maxPerRow?: number;
+  /**
+   * Bloquea la fila entera: ninguna pastilla responde al toque y todas se
+   * muestran apagadas.
+   *
+   * Existe para que un bloqueo sea VISIBLE. La alternativa era esconder el
+   * grupo, y un control que desaparece deja al lector sin saber que habia ahi
+   * ni por que ya no esta; una fila gris sigue diciendo que el cobro existe y
+   * que ahora mismo no hay nada que cobrar.
+   */
+  disabled?: boolean;
   /** Each pill gets `${testID}-${option.value}`; the row gets `${testID}-row`. */
   testID?: string;
 };
@@ -59,6 +69,7 @@ export function SegmentedPills<T extends string>({
   onChange,
   wrap = false,
   maxPerRow,
+  disabled = false,
   testID,
 }: SegmentedPillsProps<T>) {
   const colors = useColors();
@@ -81,7 +92,8 @@ export function SegmentedPills<T extends string>({
           <Pressable
             key={option.value}
             accessibilityRole="button"
-            accessibilityState={{ selected }}
+            accessibilityState={{ selected, disabled }}
+            disabled={disabled}
             onPress={() => onChange(option.value)}
             testID={testID ? `${testID}-${option.value}` : undefined}
             style={[
@@ -89,9 +101,16 @@ export function SegmentedPills<T extends string>({
               grid || wrap ? styles.pillAuto : styles.pillStretch,
               gridPill,
               selected ? styles.pillSelected : styles.pillIdle,
+              disabled && styles.pillDisabled,
             ]}
           >
-            <Text style={[styles.label, selected ? styles.labelSelected : styles.labelIdle]}>
+            <Text
+              style={[
+                styles.label,
+                selected ? styles.labelSelected : styles.labelIdle,
+                disabled && styles.labelDisabled,
+              ]}
+            >
               {option.label}
             </Text>
           </Pressable>
@@ -132,6 +151,10 @@ const makeStyles = (colors: Colors) =>
     backgroundColor: colors.surface,
     borderColor: colors.border,
   },
+  pillDisabled: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+  },
   label: {
     fontSize: typography.sizes.sm,
     fontWeight: typography.weights.semibold,
@@ -141,5 +164,8 @@ const makeStyles = (colors: Colors) =>
   },
   labelIdle: {
     color: colors.textPrimary,
+  },
+  labelDisabled: {
+    color: colors.textSecondary,
   },
 });
