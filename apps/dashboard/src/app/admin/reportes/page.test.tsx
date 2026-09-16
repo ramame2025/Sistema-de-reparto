@@ -324,3 +324,114 @@ describe("ReportesPage · filtro de fechas y paginacion", () => {
     expect(bodyRowCount()).toBe(15);
   });
 });
+
+describe("ReportesPage · tipo de fila (venta / visita / cambio)", () => {
+  beforeEach(() => {
+    mockedUseSWR.mockReset();
+    mockedUseSearchParams.mockReturnValue({ get: () => null });
+    mockedUseApiClient.mockReturnValue({ patch: jest.fn() });
+    mockedUseAuth.mockReturnValue({ token: "tok" });
+  });
+
+  const swapSale = {
+    ...baseSale,
+    id: "sale-swap",
+    kind: "swap" as const,
+    total: 0,
+    paymentMethod: null,
+    items: [{ productCode: "G10", quantity: 1, unitPrice: 0, isReplacement: true }],
+    returnItems: [{ productCode: "G10", quantity: 1, reason: "faulty" as const }],
+  };
+
+  const churnSale = {
+    ...baseSale,
+    id: "sale-churn",
+    kind: "churn" as const,
+    total: 0,
+    paymentMethod: null,
+    items: [],
+    returnItems: [{ productCode: "G15", quantity: 2, reason: "empty" as const }],
+  };
+
+  const mixedSale = {
+    ...baseSale,
+    id: "sale-mixta",
+    kind: "sale" as const,
+    total: 26000,
+    paymentMethod: "efectivo" as const,
+    items: [
+      { productCode: "G10", quantity: 2, unitPrice: 13000 },
+      { productCode: "G10", quantity: 1, unitPrice: 0, isReplacement: true },
+    ],
+    returnItems: [
+      { productCode: "G10", quantity: 1, reason: "empty" as const },
+      { productCode: "G10", quantity: 1, reason: "faulty" as const },
+    ],
+  };
+
+  // Sin esta columna un swap se lee como una venta de $0 sin explicacion, que
+  // es lo primero que hace desconfiar de todo el reporte.
+  it("lee un swap como 'Cambio' y no como una venta de $0", () => {
+    renderWithSales([swapSale]);
+
+    expect(screen.getByRole("columnheader", { name: "Tipo de fila" })).toBeInTheDocument();
+    // Por celda y no por texto suelto: "Cambio" tambien es una opcion del
+    // filtro, y buscarlo suelto pasaria el test con la tabla vacia.
+    expect(screen.getByRole("cell", { name: "Cambio" })).toBeInTheDocument();
+  });
+
+  it("lee un churn como 'Visita'", () => {
+    renderWithSales([churnSale]);
+
+    expect(screen.getByRole("cell", { name: "Visita" })).toBeInTheDocument();
+  });
+
+  it("lee una visita mixta como 'Venta': vendio algo, asi que cobra", () => {
+    renderWithSales([mixedSale]);
+
+    expect(screen.getByRole("cell", { name: "Venta" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "$26.000" })).toBeInTheDocument();
+  });
+
+  it("filtra por tipo de fila y deja solo los cambios", () => {
+    renderWithSales([mixedSale, swapSale, churnSale]);
+
+    expect(screen.getAllByRole("button", { name: "Ver" })).toHaveLength(3);
+
+    fireEvent.change(screen.getByLabelText("Tipo de fila"), {
+      target: { value: "swap" },
+    });
+
+    expect(screen.getAllByRole("button", { name: "Ver" })).toHaveLength(1);
+    expect(screen.getByRole("cell", { name: "Cambio" })).toBeInTheDocument();
+    expect(screen.queryByRole("cell", { name: "Visita" })).not.toBeInTheDocument();
+  });
+
+  it("filtra por venta y deja afuera cambios y visitas", () => {
+    renderWithSales([mixedSale, swapSale, churnSale]);
+
+    fireEvent.change(screen.getByLabelText("Tipo de fila"), {
+      target: { value: "sale" },
+    });
+
+    expect(screen.getAllByRole("button", { name: "Ver" })).toHaveLength(1);
+    expect(screen.getByRole("cell", { name: "Venta" })).toBeInTheDocument();
+  });
+
+  it("muestra en el detalle lo que volvio, con el motivo en castellano", () => {
+    renderWithSales([mixedSale]);
+
+    openFirstSale();
+
+    expect(screen.getByText(/1 Envase vacio/)).toBeInTheDocument();
+    expect(screen.getByText(/1 Unidad fallada/)).toBeInTheDocument();
+  });
+
+  it("no inventa una seccion de devoluciones para una venta que no trajo nada", () => {
+    renderWithSales([baseSale]);
+
+    openFirstSale();
+
+    expect(screen.getByText(/No volvio nada en esta visita/)).toBeInTheDocument();
+  });
+});

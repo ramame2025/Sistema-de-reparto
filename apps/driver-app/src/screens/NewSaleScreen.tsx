@@ -27,7 +27,6 @@ import { SaleHeader } from '../components/SaleHeader';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionLabel } from '../components/SectionLabel';
 import { SegmentedPills } from '../components/SegmentedPills';
-import { ToggleRow } from '../components/ToggleRow';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { useTruck } from '../context/TruckContext';
@@ -304,38 +303,6 @@ export function NewSaleScreen() {
       ...previous,
       [productCode]: Math.max(0, (previous[productCode] ?? 0) + delta),
     }));
-  };
-
-  /**
-   * El atajo de siempre, ahora escribiendo en la MISMA lista que la seccion.
-   *
-   * Un envase suelto es el caso comun y no merece abrir una seccion, pero el
-   * atajo y la seccion hablan del mismo hecho: si fueran dos estados
-   * paralelos, algun dia dirian cosas distintas. Prendido carga un vacio del
-   * producto que se acaba de vender -- el unico que la pantalla puede
-   * atribuir sin adivinar -- y apagado limpia la lista entera.
-   */
-  const containerReturnedOn = returnedItems.length > 0;
-
-  const toggleContainerReturned = (next: boolean) => {
-    if (!next) {
-      setReturnedQuantities(EMPTY_QUANTITIES);
-      return;
-    }
-
-    if (containerReturnedOn) {
-      return;
-    }
-
-    // El producto vendido; sin nada vendido, el primero del catalogo, que es
-    // lo unico que la pantalla puede ofrecer. La seccion queda para
-    // corregirlo, y lo que se cargo esta a la vista ahi.
-    const target = currentItems[0]?.productCode ?? products[0]?.code;
-    if (!target) {
-      return;
-    }
-
-    setReturnedQuantities({ [target]: 1 });
   };
 
   const showMessage = (text: string, tone: FeedbackTone) => {
@@ -760,14 +727,6 @@ export function NewSaleScreen() {
     recordVisit,
   ]);
 
-  const returnedUnits = returnedItems.reduce((sum, line) => sum + line.quantity, 0);
-  const containerSubtitle =
-    returnedUnits === 0
-      ? 'Ninguno'
-      : returnedUnits === 1
-        ? '1 envase vuelve'
-        : `${returnedUnits} envases vuelven`;
-
   /**
    * D10: el cobro se bloquea cuando no hay nada que cobrar, y eso lo contesta
    * el total y nada mas.
@@ -875,8 +834,39 @@ export function NewSaleScreen() {
         devuelven nada, y una seccion siempre abierta es ruido en la pantalla
         que mas se usa del dia.
       */}
+      
       <View style={styles.field}>
-        <View style={styles.sectionRow}>
+        <SectionLabel>COBRO</SectionLabel>
+        {chargeBlocked && (
+          <Text style={styles.hint} testID="new-sale-charge-blocked">
+            Esta visita no cobra: no hay nada vendido.
+          </Text>
+        )}
+        <SegmentedPills
+          options={paymentOptions}
+          // D10: sin nada que cobrar, la fila se bloquea en vez de esconderse.
+          // Un control que desaparece deja al chofer sin saber que habia ahi.
+          disabled={chargeBlocked}
+          // '' mientras el catalogo no llego: ninguna pastilla queda marcada,
+          // que es la verdad. El efecto de arriba elige la primera apenas hay
+          // medios, y `canSell` ya bloquea la venta hasta entonces.
+          value={paymentMethod ?? ''}
+          onChange={setChosenPaymentMethod}
+          // Tres por fila: estirados en un solo renglon, "Cuenta corriente" y
+          // "Transferencia" quedan ilegibles, y el catalogo puede crecer.
+          maxPerRow={3}
+          testID="new-sale-payment"
+        />
+      </View>
+
+      <View style={styles.returnsBlock}>
+        {/*
+          El encabezado va con banda propia. Sin ella la seccion tenia el
+          mismo fondo y el mismo tipo de titulo que PRODUCTOS y COBRO, y se
+          perdia justo cuando el chofer la busca apurado con el cliente
+          adelante.
+        */}
+        <View style={styles.returnsHeader} testID="new-sale-returns-header">
           <SectionLabel>DEVOLUCIONES Y CAMBIOS</SectionLabel>
           <Button
             label={returnsOpen ? 'Ocultar' : 'Mostrar'}
@@ -930,30 +920,6 @@ export function NewSaleScreen() {
         )}
       </View>
 
-      <View style={styles.field}>
-        <SectionLabel>COBRO</SectionLabel>
-        {chargeBlocked && (
-          <Text style={styles.hint} testID="new-sale-charge-blocked">
-            Esta visita no cobra: no hay nada vendido.
-          </Text>
-        )}
-        <SegmentedPills
-          options={paymentOptions}
-          // D10: sin nada que cobrar, la fila se bloquea en vez de esconderse.
-          // Un control que desaparece deja al chofer sin saber que habia ahi.
-          disabled={chargeBlocked}
-          // '' mientras el catalogo no llego: ninguna pastilla queda marcada,
-          // que es la verdad. El efecto de arriba elige la primera apenas hay
-          // medios, y `canSell` ya bloquea la venta hasta entonces.
-          value={paymentMethod ?? ''}
-          onChange={setChosenPaymentMethod}
-          // Tres por fila: estirados en un solo renglon, "Cuenta corriente" y
-          // "Transferencia" quedan ilegibles, y el catalogo puede crecer.
-          maxPerRow={3}
-          testID="new-sale-payment"
-        />
-      </View>
-
       {proofPolicy !== 'none' && (
         <View style={styles.proof}>
           <View style={styles.sectionRow}>
@@ -1000,14 +966,7 @@ export function NewSaleScreen() {
         muestra prendido si esa lista tiene algo: dos estados paralelos sobre
         el mismo hecho garantizan que algun dia digan cosas distintas.
       */}
-      <ToggleRow
-        label="Envase devuelto"
-        subtitle={containerSubtitle}
-        value={containerReturnedOn}
-        onValueChange={toggleContainerReturned}
-        testID="new-sale-container-returned"
-      />
-
+      
       {lastSale && (
         <Text style={styles.lastSale} testID="new-sale-last-sale">
           Última: {lastSale.customerName} · {formatArs(lastSale.total)}
@@ -1043,6 +1002,25 @@ const makeStyles = (colors: Colors) =>
   },
   returns: {
     gap: spacing.sm,
+  },
+  // El bloque entero lleva el fondo, no solo el titulo: asi el encabezado, el
+  // atajo y el detalle se leen como una sola cosa y no como tres sueltas.
+  returnsBlock: {
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: spacing.sm,
+    padding: spacing.sm,
+  },
+  returnsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.background,
+    borderRadius: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   proofButtons: {
     flexDirection: 'row',
