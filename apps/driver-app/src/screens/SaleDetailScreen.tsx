@@ -8,6 +8,7 @@ import {
   type PaymentMethod,
   type SaleRecord,
   type UpdateSaleInput,
+  splitSaleItems,
   validateUpdateSaleInput,
 } from '@distribuidor/shared';
 import { Button } from '../components/Button';
@@ -77,8 +78,43 @@ export function SaleDetailScreen() {
 
   const sale = route.params.sale;
   const isChurn = sale.kind === 'churn';
+  const isSwap = sale.kind === 'swap';
   const isCanceled = sale.status === 'canceled';
   const isEditable = !isCanceled && !isChurn;
+
+  // Lo que volvio, separado por motivo. Una fallada y un envase vacio no son
+  // lo mismo: la primera se cambio por una unidad nueva y el segundo volvio
+  // sin nada a cambio, y por eso se editan distinto.
+  const faultyItems = useMemo(
+    () => (sale.returnItems ?? []).filter((item) => item.reason === 'faulty'),
+    [sale.returnItems],
+  );
+  const emptyItems = useMemo(
+    () => (sale.returnItems ?? []).filter((item) => item.reason === 'empty'),
+    [sale.returnItems],
+  );
+
+  /**
+   * Lo que salio del camion, partido en las dos cosas que `sale.items` trae
+   * mezcladas: lo VENDIDO, que se cobra y se edita como producto, y el
+   * REEMPLAZO de un cambio por falla, que salio sin cargo y se mueve junto con
+   * la fallada que volvio.
+   *
+   * Sin esta particion una visita mixta no se puede editar: el payload
+   * necesita las dos listas por separado -- `items` y `swappedItems` -- y
+   * mandar el reemplazo dentro de `items` haria que la API lo cobrara como si
+   * se hubiera vendido.
+   *
+   * Una fila de `kind: 'swap'` se saltea la particion a proposito: ahi TODA
+   * linea es un reemplazo por definicion, y leerla asi es lo que hace que un
+   * cambio grabado antes de que existiera la bandera se siga viendo entero.
+   */
+  const { soldItems, replacementItems } = useMemo(() => {
+    if (isSwap) {
+      return { soldItems: [], replacementItems: sale.items };
+    }
+    return splitSaleItems(sale.items);
+  }, [isSwap, sale.items]);
 
   // Unit prices come from the sale itself, never from today's price table:
   // re-pricing a March sale at August's rates is exactly what the API's
@@ -91,9 +127,11 @@ export function SaleDetailScreen() {
     return table;
   }, [sale.items]);
 
+  // Solo lo vendido: el reemplazo de un cambio no es un producto que el chofer
+  // edite por aca, y meterlo en este estado lo cobraria al guardar.
   const [quantities, setQuantities] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
-    sale.items.forEach((item) => {
+    soldItems.forEach((item) => {
       initial[item.productCode] = item.quantity;
     });
     return initial;
@@ -105,6 +143,21 @@ export function SaleDetailScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | undefined>(
     sale.paymentMethod ?? undefined,
   );
+  /**
+   * Las cantidades de un cambio por falla, en UN solo estado.
+   *
+   * La unidad de reemplazo que salio del camion y la fallada que volvio son el
+   * mismo numero (D6b): con dos estados podrian discrepar, y el 1 a 1 se
+   * rompe. Las dos listas de la pantalla escriben aca, asi que el chofer puede
+   * tocar el lado que le quede mas a mano y los dos se mueven juntos.
+   */
+  const [swapQuantities, setSwapQuantities] = useState<Record<string, number>>(() => {
+    const initial: Record<string, number> = {};
+    faultyItems.forEach((item) => {
+      initial[item.productCode] = item.quantity;
+    });
+    return initial;
+  });
   const [editReason, setEditReason] = useState('');
   const [cancelReason, setCancelReason] = useState('');
   const [saving, setSaving] = useState(false);
@@ -127,13 +180,13 @@ export function SaleDetailScreen() {
   // error rather than a removal.
   const editedItems = useMemo(
     () =>
-      sale.items
+      soldItems
         .filter((item) => (quantities[item.productCode] ?? 0) > 0)
         .map((item) => ({
           productCode: item.productCode,
           quantity: quantities[item.productCode],
         })),
-    [sale.items, quantities],
+    [soldItems, quantities],
   );
 
   const total = useMemo(
@@ -170,6 +223,37 @@ export function SaleDetailScreen() {
     }));
   };
 
+  const changeSwapQty = (productCode: string, delta: number) => {
+    setSwapQuantities((previous) => ({
+      ...previous,
+      [productCode]: Math.max(0, (previous[productCode] ?? 0) + delta),
+    }));
+  };
+
+  /**
+   * El cambio tal como viaja: una sola lista. El servidor deriva de ella los
+   * dos lados -- el `SaleItem` de reemplazo y el `SaleReturnItem` fallado --
+   * asi que no hay forma de que una edicion los deje en numeros distintos.
+   */
+  const editedSwappedItems = useMemo(
+    () =>
+      Object.entries(swapQuantities)
+        .filter(([, quantity]) => quantity > 0)
+        .map(([productCode, quantity]) => ({ productCode, quantity })),
+    [swapQuantities],
+  );
+
+  /**
+   * Si esta visita tiene un lado de cambio que la edicion pueda mover.
+   *
+   * Decide si `swappedItems` viaja en el payload, y la ausencia importa: la
+   * API deja quietas las filas de retorno que el payload no nombra. Una venta
+   * sin falladas no manda la lista, asi que no puede borrar nada; una que si
+   * las tiene la manda siempre -- incluso vacia -- porque bajarlas a cero es
+   * una edicion legitima que tiene que llegar.
+   */
+  const hasSwapSide = isSwap || faultyItems.length > 0 || replacementItems.length > 0;
+
   const saveEdit = async () => {
     setMessage(null);
 
@@ -178,15 +262,20 @@ export function SaleDetailScreen() {
       return;
     }
 
-    if (editedItems.length === 0) {
+    if (isSwap && editedSwappedItems.length === 0) {
+      showMessage('El cambio tiene que quedar con al menos una unidad.', 'error');
+      return;
+    }
+
+    if (!isSwap && editedItems.length === 0) {
       showMessage('La venta tiene que quedar con al menos un producto.', 'error');
       return;
     }
 
     // Una venta editable siempre se cobro con algo, asi que en la practica
     // esto no se dispara; esta para que el payload no pueda salir sin medio de
-    // pago si esa premisa cambia.
-    if (!paymentMethod) {
+    // pago si esa premisa cambia. Un cambio nunca cobro, asi que no aplica.
+    if (!isSwap && !paymentMethod) {
       showMessage('Elegi un medio de pago antes de guardar.', 'error');
       return;
     }
@@ -196,8 +285,24 @@ export function SaleDetailScreen() {
       truckCode: sale.truckCode,
       customerName: sale.customerName,
       customerType: sale.customerType,
-      paymentMethod,
-      items: editedItems,
+      // Una fila de cambio no tiene medio de pago que conservar: viaja vacio
+      // porque el tipo exige la clave, y el servidor lo fuerza a null igual.
+      paymentMethod: isSwap ? (sale.paymentMethod ?? '') : (paymentMethod as PaymentMethod),
+      // En un cambio el numero viaja UNA sola vez, en `swappedItems`: el
+      // servidor deriva de ahi la unidad de reemplazo. Mandarlo tambien en
+      // `items` abriria la puerta a que los dos lados discrepen, que es
+      // exactamente lo que D6b vuelve imposible.
+      items: isSwap ? [] : editedItems,
+      // En una visita MIXTA las dos listas viajan juntas y separadas: `items`
+      // es lo vendido, `swappedItems` es el cambio. El servidor reconstruye de
+      // ahi la linea de reemplazo con precio cero y la fallada que volvio, asi
+      // que el 1 a 1 se sostiene y el reemplazo no se cobra. Sin esta division
+      // una mixta directamente no se podia editar.
+      ...(hasSwapSide ? { swappedItems: editedSwappedItems } : {}),
+      // El `kind` viaja como pista de validacion: el servidor lo compara
+      // contra el de la fila guardada y rechaza una edicion que le cambie la
+      // clase, nunca le cree de entrada.
+      ...(isSwap ? { kind: 'swap' as const } : {}),
       reason: editReason,
       // Omitido (no la key) si la venta nunca estuvo enganchada a un cliente
       // del padron. Mandarlo cuando existe es lo que evita que la edicion le
@@ -217,6 +322,10 @@ export function SaleDetailScreen() {
         : {}),
       ...(sale.note ? { note: sale.note } : {}),
     };
+
+    // Los envases vacios de la visita NO viajan en el payload, y esa ausencia
+    // es deliberada: la API deja quietas las filas de retorno que el payload
+    // no nombra, asi que editar un cambio no puede borrarlos sin querer.
 
     // El catalogo va como segundo argumento por el mismo motivo que en la
     // carga de una venta: pasar una venta ya grabada a un medio que genera
@@ -310,6 +419,12 @@ export function SaleDetailScreen() {
         customerType: sale.customerType,
         paymentMethod,
         items: editedItems,
+        // El cambio viaja tambien aca, y no por simetria: `updateSale`
+        // reescribe TODOS los `SaleItem` de la fila con lo que reciba. Sin
+        // esta lista, adjuntar un comprobante a una visita mixta borraria la
+        // linea del reemplazo y dejaria la fallada sola, rompiendo el 1 a 1 y
+        // devolviendole al camion una unidad que ya no esta.
+        ...(hasSwapSide ? { swappedItems: editedSwappedItems } : {}),
         reason: 'Se adjunta el comprobante',
         paymentProofRef: url,
         ...(sale.customerId ? { customerId: sale.customerId } : {}),
@@ -372,6 +487,13 @@ export function SaleDetailScreen() {
           </Text>
         )}
 
+        {isSwap && (
+          <Text style={styles.churn} testID="sale-detail-swap">
+            Cambio por falla — salio un reemplazo del camion y volvio la unidad
+            fallada. No se cobro nada.
+          </Text>
+        )}
+
         {isCanceled && (
           <View testID="sale-detail-canceled">
             <Text style={styles.canceledTag}>ANULADA</Text>
@@ -380,19 +502,79 @@ export function SaleDetailScreen() {
         )}
       </Card>
 
-      {sale.items.length > 0 && (
+      {/*
+        En una venta esta lista es lo VENDIDO y nada mas: el reemplazo de un
+        cambio sale del camion sin cargo y se edita del lado de la fallada, no
+        aca. En una fila de cambio la lista ES el reemplazo, y por eso las dos
+        entran por el mismo lugar.
+      */}
+      {(isSwap ? replacementItems : soldItems).length > 0 && (
         <Card style={styles.card}>
           <SectionLabel variant="field">Productos</SectionLabel>
-          {sale.items.map((item) => (
+          {(isSwap ? replacementItems : soldItems).map((item) => (
             <ProductRow
               key={item.productCode}
               code={item.productCode}
               name={item.productCode}
               unitPrice={item.unitPrice}
-              quantity={quantities[item.productCode] ?? 0}
-              onIncrement={() => isEditable && changeQty(item.productCode, 1)}
-              onDecrement={() => isEditable && changeQty(item.productCode, -1)}
+              // En un cambio esta lista es el lado que SALIO del camion, y su
+              // numero es el mismo que el de la fallada que volvio: las dos
+              // leen y escriben el mismo estado.
+              quantity={
+                isSwap
+                  ? (swapQuantities[item.productCode] ?? 0)
+                  : (quantities[item.productCode] ?? 0)
+              }
+              onIncrement={() =>
+                isEditable &&
+                (isSwap
+                  ? changeSwapQty(item.productCode, 1)
+                  : changeQty(item.productCode, 1))
+              }
+              onDecrement={() =>
+                isEditable &&
+                (isSwap
+                  ? changeSwapQty(item.productCode, -1)
+                  : changeQty(item.productCode, -1))
+              }
             />
+          ))}
+        </Card>
+      )}
+
+      {/*
+        Tambien en una visita mixta, que es donde mas hace falta: ahi el cambio
+        convive con lo vendido y este es el unico lugar donde se lo puede
+        mover. Su numero dice las dos cosas a la vez -- la fallada que entro y
+        el reemplazo que salio -- asi que no hay dos campos que discrepen.
+      */}
+      {faultyItems.length > 0 && (
+        <Card style={styles.card}>
+          <SectionLabel variant="field">Unidades falladas que volvieron</SectionLabel>
+          {faultyItems.map((item) => (
+            <ProductRow
+              key={`faulty-${item.productCode}`}
+              code={item.productCode}
+              name={item.productCode}
+              quantity={swapQuantities[item.productCode] ?? 0}
+              testIDPrefix="faulty-row"
+              onIncrement={() => isEditable && changeSwapQty(item.productCode, 1)}
+              onDecrement={() => isEditable && changeSwapQty(item.productCode, -1)}
+            />
+          ))}
+          <Text style={styles.meta}>
+            Es el mismo numero que el reemplazo: mover uno mueve los dos.
+          </Text>
+        </Card>
+      )}
+
+      {emptyItems.length > 0 && (
+        <Card style={styles.card} testID="sale-detail-empties">
+          <SectionLabel variant="field">Envases vacios que volvieron</SectionLabel>
+          {emptyItems.map((item) => (
+            <Text key={`empty-${item.productCode}`} style={styles.meta}>
+              {item.productCode} · {item.quantity}
+            </Text>
           ))}
         </Card>
       )}
@@ -415,18 +597,27 @@ export function SaleDetailScreen() {
 
       {isEditable && (
         <Card style={styles.card}>
-          <SectionLabel variant="field">Cobro</SectionLabel>
-          <SegmentedPills
-            options={paymentOptions}
-            // '' si la venta no tiene medio (churn) o el catalogo no llego:
-            // ninguna pastilla marcada, que es la verdad.
-            value={paymentMethod ?? ''}
-            onChange={setPaymentMethod}
-            // Misma grilla que la pantalla de venta nueva: el chofer ve el
-            // mismo cobro en los dos lados.
-            maxPerRow={3}
-            testID="sale-detail-payment"
-          />
+          {/*
+            Un cambio no cobro nada: el selector no se muestra en absoluto. Una
+            fila de pastillas aca solo podria inventar un medio de pago para
+            una fila que nunca tuvo uno.
+          */}
+          {!isSwap && (
+            <>
+              <SectionLabel variant="field">Cobro</SectionLabel>
+              <SegmentedPills
+                options={paymentOptions}
+                // '' si la venta no tiene medio (churn) o el catalogo no llego:
+                // ninguna pastilla marcada, que es la verdad.
+                value={paymentMethod ?? ''}
+                onChange={setPaymentMethod}
+                // Misma grilla que la pantalla de venta nueva: el chofer ve el
+                // mismo cobro en los dos lados.
+                maxPerRow={3}
+                testID="sale-detail-payment"
+              />
+            </>
+          )}
 
           <SectionLabel variant="field">Motivo de la edicion</SectionLabel>
           <TextField

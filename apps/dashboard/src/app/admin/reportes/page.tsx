@@ -9,9 +9,16 @@ import { Pager } from "../../../components/Pager";
 import { resolveReceiptUrl } from "../../../lib/api-client";
 import { downloadCsvReport } from "../../../lib/csv";
 import { isoDateDaysAgo, todayIsoDate } from "../../../lib/dates";
-import { formatPaymentMethod } from "../../../lib/format";
+import {
+  formatPaymentMethod,
+  formatReturnReason,
+  formatReturnItems,
+  formatSaleKind,
+  SALE_KIND_LABELS,
+} from "../../../lib/format";
 import {
   EXPENSE_CATEGORIES,
+  SALE_KINDS,
   type ExpenseCategory,
   type ExpenseRecord,
   type PaymentMethod,
@@ -19,10 +26,18 @@ import {
   type ProductCode,
   type ProductRecord,
   type SaleAuditRecord,
+  type SaleKind,
   type SaleRecord,
 } from "@distribuidor/shared";
 
 type SaleStatusFilter = "all" | "active" | "canceled";
+/**
+ * Que clase de fila mostrar. Una venta, una visita que solo devolvio envases
+ * y un cambio por falla son tres hechos de negocio distintos que conviven en
+ * la misma tabla; sin este filtro, mirar solo los cambios de un chofer obliga
+ * a leer fila por fila.
+ */
+type SaleKindFilter = "all" | SaleKind;
 type PaymentFilter = "all" | PaymentMethod;
 type ProductFilter = "all" | ProductCode;
 type ExpenseCategoryFilter = "all" | ExpenseCategory;
@@ -76,6 +91,7 @@ export default function ReportesPage() {
   const [saleDateFrom, setSaleDateFrom] = useState(() => isoDateDaysAgo(7));
   const [saleDateTo, setSaleDateTo] = useState(() => todayIsoDate());
   const [saleStatusFilter, setSaleStatusFilter] = useState<SaleStatusFilter>("all");
+  const [saleKindFilter, setSaleKindFilter] = useState<SaleKindFilter>("all");
   const [salePaymentFilter, setSalePaymentFilter] = useState<PaymentFilter>("all");
   const [saleProductFilter, setSaleProductFilter] = useState<ProductFilter>("all");
   const [saleDriverFilter, setSaleDriverFilter] = useState("");
@@ -171,6 +187,12 @@ export default function ReportesPage() {
         return false;
       }
 
+      // Una fila vieja sin `kind` es una venta: es lo que era, porque los
+      // cambios y las devoluciones con cantidades no existian.
+      if (saleKindFilter !== "all" && (sale.kind ?? "sale") !== saleKindFilter) {
+        return false;
+      }
+
       if (salePaymentFilter !== "all" && sale.paymentMethod !== salePaymentFilter) {
         return false;
       }
@@ -212,6 +234,7 @@ export default function ReportesPage() {
     saleDateFrom,
     saleDateTo,
     saleStatusFilter,
+    saleKindFilter,
     salePaymentFilter,
     saleProductFilter,
     saleDriverFilter,
@@ -253,6 +276,7 @@ export default function ReportesPage() {
     saleDateFrom,
     saleDateTo,
     saleStatusFilter,
+    saleKindFilter,
     salePaymentFilter,
     saleProductFilter,
     saleDriverFilter,
@@ -332,10 +356,12 @@ export default function ReportesPage() {
         "cliente",
         "tipo_cliente",
         "medio_pago",
+        "tipo_fila",
         "estado",
         "total",
         "motivo_anulacion",
         "items",
+        "devoluciones",
       ],
       rows: filteredSales.map((sale) => [
         new Date(sale.createdAt).toISOString(),
@@ -345,10 +371,19 @@ export default function ReportesPage() {
         sale.customerName,
         sale.customerType,
         formatPaymentMethod(sale.paymentMethod, paymentMethods),
+        // Un swap exportado sin esta columna se lee como una venta de $0 en
+        // la planilla, que es exactamente lo que este reporte no puede hacer.
+        formatSaleKind(sale.kind),
         sale.status,
         sale.total,
         sale.cancelReason ?? "",
-        sale.items.map((item) => `${item.productCode}x${item.quantity}`).join(" | "),
+        sale.items
+          .map(
+            (item) =>
+              `${item.productCode}x${item.quantity}${item.isReplacement ? " (reemplazo sin cargo)" : ""}`,
+          )
+          .join(" | "),
+        formatReturnItems(sale.returnItems),
       ]),
     });
   };
@@ -450,6 +485,21 @@ export default function ReportesPage() {
             </select>
           </label>
           <label className="text-sm text-slate-600">
+            Tipo de fila
+            <select
+              value={saleKindFilter}
+              onChange={(event) => setSaleKindFilter(event.target.value as SaleKindFilter)}
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+            >
+              <option value="all">Todos</option>
+              {SALE_KINDS.map((kind) => (
+                <option key={kind} value={kind}>
+                  {SALE_KIND_LABELS[kind]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-slate-600">
             Medio de pago
             <select
               value={salePaymentFilter}
@@ -543,6 +593,7 @@ export default function ReportesPage() {
                   <th className="py-2 pr-4">Cliente</th>
                   <th className="py-2 pr-4">Tipo</th>
                   <th className="py-2 pr-4">Pago</th>
+                  <th className="py-2 pr-4">Tipo de fila</th>
                   <th className="py-2 pr-4">Estado</th>
                   <th className="py-2 pr-4">Total</th>
                   <th className="py-2 pr-4">Accion</th>
@@ -562,6 +613,7 @@ export default function ReportesPage() {
                     <td className="py-2 pr-4">
                       {formatPaymentMethod(sale.paymentMethod, paymentMethods)}
                     </td>
+                    <td className="py-2 pr-4">{formatSaleKind(sale.kind)}</td>
                     <td className="py-2 pr-4">
                       <span
                         className={
@@ -799,6 +851,23 @@ export default function ReportesPage() {
                       ? "Sin comprobante adjunto."
                       : "El chofer no adjunto comprobante para esta venta."}
                 </p>
+              )}
+            </section>
+
+            <section className="mt-6">
+              <h4 className="text-sm font-semibold text-slate-700">Lo que volvio</h4>
+              {(selectedSaleForAudit.returnItems ?? []).length === 0 ? (
+                <p className="mt-1 text-sm text-slate-500">
+                  No volvio nada en esta visita.
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                  {(selectedSaleForAudit.returnItems ?? []).map((item, index) => (
+                    <li key={`${item.productCode}-${item.reason}-${index}`}>
+                      {item.productCode}: {item.quantity} {formatReturnReason(item.reason)}
+                    </li>
+                  ))}
+                </ul>
               )}
             </section>
 

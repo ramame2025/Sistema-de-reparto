@@ -1,7 +1,27 @@
 # Change: Container Swap — Delivery With No Money
 
-Status: **planned — not implemented**. Decisiones de negocio cerradas con el
-dueño el 2026-09-15; queda abierta sólo la pregunta A.
+Status: **fases 1, 2, 2b y 3 implementadas. Migraciones NO aplicadas.**
+
+Decisiones de negocio cerradas con el dueño el 2026-09-15. La pregunta A
+quedó resuelta al implementar la fase 3: un cambio y una devolución NO cuentan
+como venta, se cuentan aparte como visitas atendidas. `countsAsSale` en
+`apps/dashboard/src/lib/kpis.ts` es la línea que lo revierte.
+
+## PENDIENTE — las tres migraciones no están aplicadas
+
+```bash
+pnpm --filter api exec prisma migrate deploy
+```
+
+Aplica `20260915100000_sale_kind_swap`, `20260915100100_sale_return_items` y
+`20260915100200_sale_item_is_replacement`. La primera va sola en su archivo
+porque Postgres no deja usar un valor de enum recién agregado en la misma
+transacción que lo agrega.
+
+**Fase 2b, no prevista en este plan**: `SaleItem.isReplacement`. Sin esa
+bandera una visita mixta no se podía editar desde el teléfono — peor, se
+editaba mal: mandaba el reemplazo como vendido y le cobraba al cliente la
+unidad que se le había cambiado sin cargo.
 
 ## No, this does not exist yet
 
@@ -87,8 +107,9 @@ venta de $0 y bajaría el ticket promedio de cualquier lectura futura. Mi
 recomendación: contarlo aparte, como visita atendida y no como venta. Es la
 misma decisión que ya se tomó con `churn`.
 
-**B. ¿Hay que verificar que sea 1:1?** — **RESPONDIDA: sí, obligatorio.** Ver
-D7 y D8. El costo aceptado está anotado en Risks: si la fallada es de un
+**B. ¿Hay que verificar que sea 1:1?** — **RESPONDIDA: sí, obligatorio**, y
+resuelto por construcción en D6b: no hace falta verificarlo porque no se puede
+romper. Ver D6b y la nota de D8. El costo aceptado está anotado en Risks: si la fallada es de un
 producto que el camión ya no tiene, el chofer no puede registrar la operación.
 
 ## Design Decisions
@@ -282,7 +303,24 @@ La unidad de reemplazo **sí** es un `SaleItem`: salió del camión y tiene que
 descontar. La fallada que vuelve es un `SaleReturnItem`: queda registrada y no
 toca el stock.
 
-**D8 — El 1:1 se valida por producto, no por total.**
+**D8 — MUERTA. La reemplazó D6b, y no se puede tener las dos.**
+
+Lo que decía esta decisión queda abajo tachado, porque entender por qué no se
+puede implementar vale más que borrarla.
+
+Con D6b el reemplazo se **deriva** de `swappedItems`: no existe una segunda
+lista que pueda discrepar, ni en el servidor ni en el teléfono. No hay nada
+que comparar.
+
+Y peor: un payload armado a mano con `items: [X]` y `swappedItems: [Y]` **no
+es un swap roto**. Bajo D1 es una visita mixta perfectamente legítima — vendió
+X y cambió Y — y su `kind` es `'sale'`. Un validador de espejo rechazaría
+operaciones válidas.
+
+Las dos decisiones no pueden convivir. Ganó D6b porque es la garantía más
+fuerte: D8 detectaba un error, D6b lo vuelve imposible.
+
+~~**D8 (original) — El 1:1 se valida por producto, no por total.**~~
 
 Para un `swap`, cada línea de `SaleItem` tiene que tener su espejo en
 `SaleReturnItem` con `reason: 'faulty'`: mismo `productCode` y misma
@@ -304,8 +342,17 @@ El booleano sobrevive tal cual para las filas históricas. **No hay backfill
 posible**: hay filas que dicen "sí, devolvió envase" y nunca se guardó cuántos
 ni de qué producto. Ese dato no se puede recuperar porque nunca se recolectó.
 
-Para las filas nuevas pasa a derivarse (`returnItems.length > 0`), así todo lo
-que hoy lee el booleano sigue funcionando sin tocarse. Historia vieja y datos
+Para las filas nuevas pasa a derivarse, pero **sólo de los envases vacíos**,
+no de todo lo que vuelve. El booleano significa "volvió un envase vacío y no le
+dimos nada a cambio": en un cambio por falla también vuelve una unidad, pero se
+entregó un reemplazo, y marcarlo mentiría sobre lo que pasó en esa visita.
+
+```
+returnedItems.length > 0  →  containerReturned: true
+sólo swappedItems         →  containerReturned: null
+```
+
+Así todo lo que hoy lee el booleano sigue funcionando sin tocarse. Historia vieja y datos
 nuevos conviviendo: feo, y honesto. Borrarlo inventaría una precisión que el
 pasado nunca tuvo.
 

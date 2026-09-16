@@ -122,4 +122,38 @@ describe('offlineQueue/normalizePendingSalePayload', () => {
     const result = normalizePendingSalePayload(basePayload, 'chofer1', '');
     expect(result.truckCode).toBeUndefined();
   });
+
+  // Una entrada nueva lleva lo que volvio de la calle, y la normalizacion no
+  // la puede perder: lo que entro en la cola es todo lo que va a llegar al
+  // servidor cuando el telefono vuelva a tener senal.
+  it('carries the returned and swapped lines through untouched', () => {
+    const result = normalizePendingSalePayload(
+      {
+        ...basePayload,
+        items: [{ productCode: 'G10', quantity: 2 }],
+        returnedItems: [{ productCode: 'G10', quantity: 1 }],
+        swappedItems: [{ productCode: 'G15', quantity: 1 }],
+      },
+      'chofer1',
+      'CAMION-02',
+    );
+
+    expect(result.returnedItems).toEqual([{ productCode: 'G10', quantity: 1 }]);
+    expect(result.swappedItems).toEqual([{ productCode: 'G15', quantity: 1 }]);
+  });
+
+  // Y la de al lado: hay ventas encoladas en telefonos reales que se grabaron
+  // antes de que estas dos listas existieran. Una entrada vieja no las trae y
+  // tiene que seguir saliendo igual, sin las claves inventadas en vacio.
+  it('leaves an entry queued before this change exactly as it was', () => {
+    const result = normalizePendingSalePayload(
+      { ...basePayload, items: [{ productCode: 'G10', quantity: 2 }] },
+      'chofer1',
+      'CAMION-02',
+    );
+
+    expect(Object.prototype.hasOwnProperty.call(result, 'returnedItems')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(result, 'swappedItems')).toBe(false);
+    expect(result.items).toEqual([{ productCode: 'G10', quantity: 2 }]);
+  });
 });

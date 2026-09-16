@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  deriveSaleKind,
   priceSaleItems,
   resolveOccurredAt,
   type CancelSaleInput,
@@ -17,20 +18,34 @@ import {
   type SaleItemInput,
   type SaleKind,
   type SaleRecord,
+  type SaleReturnItemInput,
   type UpdateSaleInput,
 } from '@distribuidor/shared';
 import {
   SaleAuditAction as PrismaSaleAuditAction,
   SaleKind as PrismaSaleKind,
+  ReturnReason as PrismaReturnReason,
   type SaleAudit,
   type Sale,
   type SaleItem,
+  type SaleReturnItem,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
 import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
 import { PaymentMethodsService } from '../payment-methods/payment-methods.service';
 import { ProductsService } from '../products/products.service';
+
+/**
+ * Una linea de `SaleItem` lista para grabar: el precio congelado mas la
+ * bandera que dice si es la unidad de REEMPLAZO de un cambio por falla.
+ *
+ * La bandera se escribe SIEMPRE, en los dos lados, y no solo en el reemplazo:
+ * una linea vendida marcada explicitamente en `false` es lo que deja leer la
+ * fila sin adivinar, y evita que "sin bandera" signifique dos cosas distintas
+ * segun quien la escribio.
+ */
+type SaleItemRow = PricedSaleItem & { isReplacement: boolean };
 
 type ResolvedSaleLinks = {
   customerType: CustomerType;
@@ -151,9 +166,66 @@ export class SalesService {
     return { items: priced.items, total: priced.total };
   }
 
+  /**
+   * Lo que vuelve de la calle, listo para grabar: los vacios con motivo
+   * `empty` y las falladas con motivo `faulty`, en ese orden.
+   *
+   * Va a `SaleReturnItem` y NUNCA a `SaleItem`. El stock del camion suma toda
+   * linea de `SaleItem` sin filtrar, asi que una unidad que ENTRA anotada ahi
+   * se contaria como mercaderia que SALIO.
+   */
+  private buildReturnRows(
+    returnedItems: SaleReturnItemInput[],
+    swappedItems: SaleReturnItemInput[],
+  ): { productCode: string; quantity: number; reason: PrismaReturnReason }[] {
+    return [
+      ...returnedItems.map((item) => ({
+        productCode: item.productCode,
+        quantity: item.quantity,
+        reason: PrismaReturnReason.empty,
+      })),
+      ...swappedItems.map((item) => ({
+        productCode: item.productCode,
+        quantity: item.quantity,
+        reason: PrismaReturnReason.faulty,
+      })),
+    ];
+  }
+
+  /**
+   * Las unidades de REEMPLAZO de un cambio por falla. Salen del camion, asi
+   * que son `SaleItem` y tienen que descontar; entran con `unitPrice: 0` y
+   * sin consultar la tabla de precios, porque un cambio no cobra y un precio
+   * faltante no puede bloquearlo (D4). El cero de aca es el importe real de
+   * una linea que no cobro nada, no un agujero disimulado.
+   *
+   * Es el MISMO numero que la fallada que vuelve: un solo campo del payload
+   * alimenta los dos lados, asi que el 1 a 1 no se puede romper.
+   *
+   * Quedan marcadas con `isReplacement`, que es lo unico que despues permite
+   * volver a separarlas de lo vendido cuando la fila se lee para editarla. La
+   * marca no las saca de ninguna consulta de stock: salieron del camion y
+   * descuentan igual que cualquier otra linea.
+   */
+  private buildReplacementItems(
+    swappedItems: SaleReturnItemInput[],
+  ): SaleItemRow[] {
+    return swappedItems.map((item) => ({
+      productCode: item.productCode,
+      quantity: item.quantity,
+      unitPrice: 0,
+      isReplacement: true,
+    }));
+  }
+
+  /** Lo vendido, marcado como tal. Ver `SaleItemRow`. */
+  private markAsSold(items: PricedSaleItem[]): SaleItemRow[] {
+    return items.map((item) => ({ ...item, isReplacement: false }));
+  }
+
   async listSales(): Promise<SaleRecord[]> {
     const sales = await this.prisma.sale.findMany({
-      include: { items: true },
+      include: { items: true, returnItems: true },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -163,7 +235,7 @@ export class SalesService {
   async listSalesByDriver(driverName: string): Promise<SaleRecord[]> {
     const sales = await this.prisma.sale.findMany({
       where: { driverName },
-      include: { items: true },
+      include: { items: true, returnItems: true },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -174,7 +246,7 @@ export class SalesService {
     if (input.clientGeneratedId) {
       const existing = await this.prisma.sale.findUnique({
         where: { clientGeneratedId: input.clientGeneratedId },
-        include: { items: true },
+        include: { items: true, returnItems: true },
       });
 
       if (existing) {
@@ -182,21 +254,40 @@ export class SalesService {
       }
     }
 
+    // El `kind` no se elige: se deriva de lo que trajo la visita, con la misma
+    // funcion pura que usa la pantalla del chofer. Un payload que diga otra
+    // cosa no tiene forma de imponerla -- aca abajo se fuerza todo lo que
+    // corresponda.
+    const returnedItems = input.returnedItems ?? [];
+    const swappedItems = input.swappedItems ?? [];
+    const kind = deriveSaleKind(input);
+    const isSale = kind === 'sale';
+
     // `packages/shared` valida la forma del codigo pero no puede saber cuales
     // existen: el catalogo lo define el admin en runtime. La pertenencia se
     // verifica aca, antes de escribir, para que un codigo desconocido salga
     // como un 400 legible y no como un error de FK de Prisma.
-    await this.productsService.assertProductCodesExist(
-      input.items.map((item) => item.productCode),
-    );
+    //
+    // Las TRES listas, no solo la vendida: un vacio o una fallada de un
+    // producto inexistente reventaria igual contra la foreign key.
+    await this.productsService.assertProductCodesExist([
+      ...input.items.map((item) => item.productCode),
+      ...returnedItems.map((item) => item.productCode),
+      ...swappedItems.map((item) => item.productCode),
+    ]);
 
     // Mismo contrato que el producto y la categoria: la forma la valido
     // `packages/shared`, la EXISTENCIA se verifica aca. Y existencia, no
     // vigencia -- un medio dado de baja despues de que el telefono encolara
     // la venta se acepta igual, porque esa plata ya se cobro.
-    await this.paymentMethodsService.assertPaymentMethodCodesExist([
-      input.paymentMethod,
-    ]);
+    //
+    // Solo cuando hubo cobro: una fila que no vendio nada no tiene medio de
+    // pago que verificar, y el que venga en el payload se ignora.
+    if (isSale) {
+      await this.paymentMethodsService.assertPaymentMethodCodesExist([
+        input.paymentMethod,
+      ]);
+    }
 
     // Cuando paso la venta, no cuando llego: una venta sin senal se sincroniza
     // mas tarde, y tiene que tarifarse con los precios de su propio momento.
@@ -209,11 +300,23 @@ export class SalesService {
     // El precio unitario se congela en cada linea, y el total se deriva de
     // esas lineas. Asi total e items no pueden discrepar nunca: `priceSaleItems`
     // devuelve los dos juntos justamente para que no puedan calcularse aparte.
-    const { items: pricedItems, total } = this.priceItemsOrReject(
-      customerType,
-      input.items,
-      priceTable,
-    );
+    //
+    // Se tarifa SOLO lo vendido. Una visita que no vendio nada no toca la
+    // tarifacion en absoluto, asi que un precio faltante no puede bloquear un
+    // cambio ni una devolucion (D4).
+    const { items: soldItems, total: soldTotal } =
+      input.items.length > 0
+        ? this.priceItemsOrReject(customerType, input.items, priceTable)
+        : { items: [] as PricedSaleItem[], total: 0 };
+    const pricedItems: SaleItemRow[] = [
+      ...this.markAsSold(soldItems),
+      ...this.buildReplacementItems(swappedItems),
+    ];
+    const returnRows = this.buildReturnRows(returnedItems, swappedItems);
+    // Forzado server-side, sin importar lo que traiga el payload: si la visita
+    // no vendio nada, no cobro nada. Un swap con `paymentMethod: 'efectivo'`
+    // adentro no graba un cobro, se lo ignora.
+    const total = isSale ? soldTotal : 0;
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
 
@@ -225,17 +328,31 @@ export class SalesService {
         truckCode: resolvedTruckCode,
         customerName,
         customerType,
-        paymentMethod: input.paymentMethod,
+        paymentMethod: isSale ? input.paymentMethod : null,
         note: input.note?.trim() || null,
         total,
+        kind: kind as PrismaSaleKind,
         customerId,
         truckId,
-        paymentProofRef: input.paymentProofRef?.trim() || null,
-        containerReturned: input.containerReturned ?? null,
+        // Sin cobro no hay comprobante de cobro que guardar.
+        paymentProofRef: isSale ? input.paymentProofRef?.trim() || null : null,
+        // El booleano historico se queda y ahora se deriva de lo que
+        // efectivamente volvio (D9). No hay backfill posible para las filas
+        // viejas: dicen que algo volvio y nunca se guardo cuanto.
+        //
+        // Se deriva SOLO de `returnedItems`, no de todo lo que vuelve: el
+        // booleano significa "volvio un envase vacio y no le dimos nada a
+        // cambio". En un cambio por falla tambien vuelve una unidad, pero se
+        // entrego un reemplazo, asi que no es lo mismo y marcarlo mentiria.
+        containerReturned:
+          input.containerReturned ?? (returnedItems.length > 0 ? true : null),
         latitude: input.latitude ?? null,
         longitude: input.longitude ?? null,
         items: {
           create: pricedItems,
+        },
+        returnItems: {
+          create: returnRows,
         },
         audits: {
           create: {
@@ -244,7 +361,7 @@ export class SalesService {
           },
         },
       },
-      include: { items: true },
+      include: { items: true, returnItems: true },
     });
 
     return this.toSaleRecord(sale);
@@ -266,7 +383,7 @@ export class SalesService {
     if (input.clientGeneratedId) {
       const existing = await this.prisma.sale.findUnique({
         where: { clientGeneratedId: input.clientGeneratedId },
-        include: { items: true },
+        include: { items: true, returnItems: true },
       });
 
       if (existing) {
@@ -302,6 +419,12 @@ export class SalesService {
         items: {
           create: [],
         },
+        // El atajo ahora tambien puede decir CUANTOS vacios volvieron y de
+        // que producto. Su ausencia deja la fila como estaba, que es lo que
+        // traen las visitas ya encoladas en los telefonos.
+        returnItems: {
+          create: this.buildReturnRows(input.returnedItems ?? [], []),
+        },
         audits: {
           create: {
             action: PrismaSaleAuditAction.created,
@@ -309,7 +432,7 @@ export class SalesService {
           },
         },
       },
-      include: { items: true },
+      include: { items: true, returnItems: true },
     });
 
     return this.toSaleRecord(sale);
@@ -318,7 +441,7 @@ export class SalesService {
   async updateSale(id: string, input: UpdateSaleInput, actorUsername?: string): Promise<SaleRecord> {
     const existing = await this.prisma.sale.findUnique({
       where: { id },
-      include: { items: true },
+      include: { items: true, returnItems: true },
     });
 
     if (!existing) {
@@ -342,12 +465,50 @@ export class SalesService {
     }
 
     const isChurn = existingKind === 'churn';
+    const isSwap = existingKind === 'swap';
+    // Las dos clases que no cobraron. Se las trata igual en todo lo que tenga
+    // que ver con plata; la diferencia entre ellas es que un swap SI tiene
+    // items -- la unidad de reemplazo que salio del camion -- y por eso puede
+    // editar cantidades, que un churn no.
+    const isMoneyless = isChurn || isSwap;
+
+    /**
+     * Que hacer con lo que VUELVE, decidido por PRESENCIA en el payload.
+     *
+     * La edicion reescribia los `SaleItem` y dejaba los `SaleReturnItem`
+     * intactos: en un cambio por falla eso movia el reemplazo y dejaba la
+     * fallada en su numero viejo, rompiendo por la puerta de atras el 1 a 1
+     * que la pantalla no puede romper (D6b).
+     *
+     * Reescribirlos SIEMPRE no era la salida: un cliente viejo -- y hay
+     * telefonos con ventas encoladas -- no manda estas listas, y borraria en
+     * silencio lo que volvio en cualquier venta que edite. Asi que lo que el
+     * payload no nombra, no se toca.
+     *
+     * Las falladas tienen una fuente de respaldo y no por simetria: en una
+     * fila de cambio los `items` SON los reemplazos, o sea el mismo numero que
+     * las falladas. Derivar los dos lados de una sola lista -- venga como
+     * `swappedItems` o como `items` -- es lo que hace que el 1 a 1 se sostenga
+     * incluso frente a un cliente que no conoce las listas nuevas. No hay
+     * borrado en silencio: se reescribe con el numero que ya define la fila.
+     *
+     * Los vacios no tienen respaldo posible: nada en un payload viejo los
+     * nombra, y por eso sobreviven intactos a cualquier edicion que no los
+     * traiga.
+     */
+    const emptySource = input.returnedItems;
+    const faultySource = input.swappedItems ?? (isSwap ? input.items : undefined);
 
     if (!isChurn) {
-      await this.productsService.assertProductCodesExist(
-        input.items.map((item) => item.productCode),
-      );
-      // Una fila de churn no tiene medio de pago que verificar: no hubo cobro.
+      await this.productsService.assertProductCodesExist([
+        ...input.items.map((item) => item.productCode),
+        ...(emptySource ?? []).map((item) => item.productCode),
+        ...(input.swappedItems ?? []).map((item) => item.productCode),
+      ]);
+    }
+
+    if (!isMoneyless) {
+      // Una fila que no cobro no tiene medio de pago que verificar.
       await this.paymentMethodsService.assertPaymentMethodCodesExist([
         input.paymentMethod,
       ]);
@@ -364,16 +525,41 @@ export class SalesService {
     //
     // Un churn no tiene items, asi que no hay nada que cotizar: la falta de
     // precios nunca puede bloquear su edicion.
+    //
+    // Un swap tampoco se tarifa: sus lineas son reemplazos que no cobran, asi
+    // que entran con `unitPrice: 0` y un precio faltante nunca puede bloquear
+    // la edicion de un cambio, igual que no bloquea su creacion (D4).
     const { items: resolvedItems, total } = isChurn
-      ? { items: [], total: 0 }
-      : this.priceItemsOrReject(customerType, input.items, priceTable);
-    const resolvedPaymentMethod = isChurn ? null : input.paymentMethod;
+      ? { items: [] as SaleItemRow[], total: 0 }
+      : isSwap
+        ? // Los reemplazos salen de la MISMA lista que las falladas, para que
+          // los dos lados no puedan quedar en numeros distintos. En una fila
+          // de cambio TODA linea es un reemplazo, asi que todas quedan
+          // marcadas -- tambien cuando el numero llego por `items`, que es lo
+          // que manda un cliente viejo.
+          { items: this.buildReplacementItems(faultySource ?? []), total: 0 }
+        : // En una venta, `items` es lo VENDIDO y el reemplazo se deriva de
+          // `swappedItems`, igual que en la creacion: una visita mixta vendio
+          // y ademas cambio, y la linea del cambio entra con precio cero sin
+          // sumar al total. Que `items` signifique lo mismo en los dos caminos
+          // es lo que evita que una edicion cobre un reemplazo o lo pierda.
+          (() => {
+            const sold = this.priceItemsOrReject(customerType, input.items, priceTable);
+            return {
+              items: [
+                ...this.markAsSold(sold.items),
+                ...this.buildReplacementItems(input.swappedItems ?? []),
+              ],
+              total: sold.total,
+            };
+          })();
+    const resolvedPaymentMethod = isMoneyless ? null : input.paymentMethod;
     const resolvedDriverName = actorUsername?.trim() || input.driverName.trim();
     const resolvedTruckCode = input.truckCode?.trim() || null;
     // A churn row never has a payment, so it never has a payment proof either
     // (Design decision #6): forced null here too, same as paymentMethod/items,
     // regardless of whatever the edit payload does or doesn't carry.
-    const resolvedPaymentProofRef = isChurn ? null : (input.paymentProofRef?.trim() || null);
+    const resolvedPaymentProofRef = isMoneyless ? null : (input.paymentProofRef?.trim() || null);
     // A churn row always means "container returned" (recordEmptyVisit forces
     // this true at creation) -- an edit never changes that fact, same
     // forcing logic as the fields above. A normal sale keeps whatever the
@@ -408,8 +594,27 @@ export class SalesService {
       })),
     };
 
+    // Solo los motivos que el payload nombra: lo que no menciona, sobrevive.
+    const rewrittenReturnRows = [
+      ...(emptySource ? this.buildReturnRows(emptySource, []) : []),
+      ...(faultySource ? this.buildReturnRows([], faultySource) : []),
+    ];
+    const rewritesReturns = emptySource !== undefined || faultySource !== undefined;
+
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.saleItem.deleteMany({ where: { saleId: id } });
+
+      if (emptySource !== undefined) {
+        await tx.saleReturnItem.deleteMany({
+          where: { saleId: id, reason: PrismaReturnReason.empty },
+        });
+      }
+
+      if (faultySource !== undefined) {
+        await tx.saleReturnItem.deleteMany({
+          where: { saleId: id, reason: PrismaReturnReason.faulty },
+        });
+      }
 
       const sale = await tx.sale.update({
         where: { id },
@@ -430,8 +635,11 @@ export class SalesService {
           items: {
             create: resolvedItems,
           },
+          // Ausente, no vacio, cuando el payload no nombra ningun motivo: un
+          // `create: []` seria indistinguible de "borralo todo".
+          ...(rewritesReturns ? { returnItems: { create: rewrittenReturnRows } } : {}),
         },
-        include: { items: true },
+        include: { items: true, returnItems: true },
       });
 
       await tx.saleAudit.create({
@@ -467,7 +675,7 @@ export class SalesService {
   async cancelSale(id: string, input: CancelSaleInput): Promise<SaleRecord> {
     const existing = await this.prisma.sale.findUnique({
       where: { id },
-      include: { items: true },
+      include: { items: true, returnItems: true },
     });
 
     if (!existing) {
@@ -497,7 +705,7 @@ export class SalesService {
           },
         },
       },
-      include: { items: true },
+      include: { items: true, returnItems: true },
     });
 
     return this.toSaleRecord(sale);
@@ -518,7 +726,9 @@ export class SalesService {
     return audits.map((audit) => this.toAuditRecord(audit));
   }
 
-  private toSaleRecord(sale: Sale & { items: SaleItem[] }): SaleRecord {
+  private toSaleRecord(
+    sale: Sale & { items: SaleItem[]; returnItems: SaleReturnItem[] },
+  ): SaleRecord {
     return {
       id: sale.id,
       createdAt: sale.createdAt.toISOString(),
@@ -536,8 +746,8 @@ export class SalesService {
       // `resolveCustomerAndTruck` lee la ausencia del campo como "desenganchar".
       customerId: sale.customerId ?? undefined,
       // `paymentMethod` is nullable at both the DB and `SaleRecord` type
-      // level: `null` for a churn row (`kind === 'churn'`, written by
-      // `recordEmptyVisit`), a real `PaymentMethod` for every normal sale.
+      // level: `null` for every row that did not charge (`kind === 'churn'`
+      // or `kind === 'swap'`), a real `PaymentMethod` for every normal sale.
       // Direct assignment, no cast needed -- both sides agree on the type.
       paymentMethod: sale.paymentMethod,
       note: sale.note ?? undefined,
@@ -550,6 +760,19 @@ export class SalesService {
         productCode: item.productCode,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
+        // Cual linea salio sin cargo por un cambio por falla. Es lo unico que
+        // le permite a quien lee la fila volver a partir una visita mixta en
+        // lo vendido y lo cambiado, que es justo lo que hace falta para poder
+        // editarla.
+        isReplacement: item.isReplacement,
+      })),
+      // Lo que volvio, por producto y por motivo. Siempre presente en la
+      // respuesta, aunque este vacio: quien la lee no tiene que distinguir
+      // "no volvio nada" de "esta API no lo dice".
+      returnItems: sale.returnItems.map((item) => ({
+        productCode: item.productCode,
+        quantity: item.quantity,
+        reason: item.reason,
       })),
     };
   }

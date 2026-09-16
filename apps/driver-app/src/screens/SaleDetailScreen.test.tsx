@@ -519,3 +519,230 @@ describe('SaleDetailScreen/medios de pago que generan deuda', () => {
     expect(mockedApiPatch).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Un cambio por falla no es una venta de cero: se muestra como lo que fue, sin
+ * selector de cobro, y con las cantidades de los dos lados -- lo que salio del
+ * camion y lo que volvio fallado -- que son el MISMO numero (D6b).
+ */
+describe('SaleDetailScreen/un cambio por falla (container-swap)', () => {
+  const buildSwap = (overrides: Partial<SaleRecord> = {}): SaleRecord =>
+    buildSale({
+      id: 'swap-1',
+      kind: 'swap',
+      paymentMethod: null,
+      total: 0,
+      items: [{ productCode: 'G10', quantity: 2, unitPrice: 0 }],
+      returnItems: [{ productCode: 'G10', quantity: 2, reason: 'faulty' }],
+      ...overrides,
+    });
+
+  it('says it is a swap and never offers a charge to edit', async () => {
+    mockedRouteSale = buildSwap();
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('sale-detail-swap')).toBeTruthy();
+    // No hubo cobro: un selector de medio de pago aca solo puede inventar uno.
+    expect(screen.queryByTestId('sale-detail-payment-row')).toBeNull();
+  });
+
+  it('shows both sides of the swap: what left the truck and what came back', async () => {
+    mockedRouteSale = buildSwap();
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('product-row-G10-quantity')).toHaveTextContent('2');
+    expect(screen.getByTestId('faulty-row-G10-quantity')).toHaveTextContent('2');
+  });
+
+  // El 1 a 1 no se revalida: se vuelve imposible de romper. Los dos lados son
+  // el mismo numero, asi que tocar cualquiera de los dos mueve los dos.
+  it('moves both sides together, whichever one the driver taps', async () => {
+    mockedRouteSale = buildSwap();
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+
+    expect(screen.getByTestId('product-row-G10-quantity')).toHaveTextContent('3');
+    expect(screen.getByTestId('faulty-row-G10-quantity')).toHaveTextContent('3');
+
+    await fireEvent.press(screen.getByTestId('faulty-row-G10-decrement'));
+
+    expect(screen.getByTestId('product-row-G10-quantity')).toHaveTextContent('2');
+    expect(screen.getByTestId('faulty-row-G10-quantity')).toHaveTextContent('2');
+  });
+
+  it('sends the swap as one list, so the API can keep the 1:1 on its side too', async () => {
+    mockedRouteSale = buildSwap();
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.changeText(
+      screen.getByTestId('sale-detail-edit-reason'),
+      'Eran tres falladas, no dos',
+    );
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [, payload] = mockedApiPatch.mock.calls[0];
+    // `kind` viaja para que el servidor pueda rechazar una edicion que le
+    // cambie la clase a la fila; el numero viaja UNA sola vez.
+    expect(payload.kind).toBe('swap');
+    expect(payload.swappedItems).toEqual([{ productCode: 'G10', quantity: 3 }]);
+    expect(payload.items).toEqual([]);
+  });
+
+  it('never lets a swap be emptied into a row that means nothing', async () => {
+    mockedRouteSale = buildSwap({
+      items: [{ productCode: 'G10', quantity: 1, unitPrice: 0 }],
+      returnItems: [{ productCode: 'G10', quantity: 1, reason: 'faulty' }],
+    });
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.press(screen.getByTestId('faulty-row-G10-decrement'));
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Sin motivo real');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    expect(mockedApiPatch).not.toHaveBeenCalled();
+    expect(screen.getByText('El cambio tiene que quedar con al menos una unidad.')).toBeTruthy();
+  });
+
+  // Los envases vacios de la visita se muestran, pero no se editan desde aca:
+  // lo que la pantalla no manda, la API no lo toca, y asi una edicion del
+  // cambio no puede borrarlos sin querer.
+  it('shows the empties that came back without putting them at risk', async () => {
+    mockedRouteSale = buildSwap({
+      returnItems: [
+        { productCode: 'G10', quantity: 2, reason: 'faulty' },
+        { productCode: 'G15', quantity: 1, reason: 'empty' },
+      ],
+    });
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('sale-detail-empties')).toBeTruthy();
+    expect(screen.getByText('G15 · 1')).toBeTruthy();
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Otro motivo');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [, payload] = mockedApiPatch.mock.calls[0];
+    expect(Object.prototype.hasOwnProperty.call(payload, 'returnedItems')).toBe(false);
+  });
+
+  it('leaves a normal sale exactly as it was', async () => {
+    mockedRouteSale = buildSale();
+    await render(<SaleDetailScreen />);
+
+    expect(screen.queryByTestId('sale-detail-swap')).toBeNull();
+    expect(screen.getByTestId('sale-detail-payment-row')).toBeTruthy();
+  });
+});
+
+/**
+ * Una visita MIXTA: se vendio algo Y ademas se cambio una fallada. Es una sola
+ * fila de `kind: 'sale'`, y sus `items` traen las dos cosas mezcladas -- lo
+ * vendido con su precio y el reemplazo con precio cero.
+ *
+ * La bandera `isReplacement` es lo que deja partirlas: sin ella la pantalla no
+ * sabe cual linea mandar como `items` y cual reconstruir desde `swappedItems`,
+ * y una mixta directamente no se puede editar.
+ */
+describe('SaleDetailScreen/una visita mixta (container-swap)', () => {
+  const buildMixed = (overrides: Partial<SaleRecord> = {}): SaleRecord =>
+    buildSale({
+      id: 'mixed-1',
+      kind: 'sale',
+      paymentMethod: 'efectivo',
+      total: 15000,
+      items: [
+        { productCode: 'G10', quantity: 2, unitPrice: 7500, isReplacement: false },
+        { productCode: 'G15', quantity: 1, unitPrice: 0, isReplacement: true },
+      ],
+      returnItems: [{ productCode: 'G15', quantity: 1, reason: 'faulty' }],
+      ...overrides,
+    });
+
+  it('shows the sold line as a product and the swap on its own side', async () => {
+    mockedRouteSale = buildMixed();
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('product-row-G10-quantity')).toHaveTextContent('2');
+    // El reemplazo no es un producto vendido: no se edita desde la lista de
+    // productos, se mueve con la fallada que volvio.
+    expect(screen.queryByTestId('product-row-G15-quantity')).toBeNull();
+    expect(screen.getByTestId('faulty-row-G15-quantity')).toHaveTextContent('1');
+  });
+
+  it('sends what was sold and what was swapped as two separate lists', async () => {
+    mockedRouteSale = buildMixed();
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+    await fireEvent.press(screen.getByTestId('faulty-row-G15-increment'));
+    await fireEvent.changeText(
+      screen.getByTestId('sale-detail-edit-reason'),
+      'Eran tres garrafas y dos falladas',
+    );
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [, payload] = mockedApiPatch.mock.calls[0];
+    expect(payload.items).toEqual([{ productCode: 'G10', quantity: 3 }]);
+    expect(payload.swappedItems).toEqual([{ productCode: 'G15', quantity: 2 }]);
+    // Sigue siendo una venta: el kind no cambia porque vendio algo.
+    expect(payload.paymentMethod).toBe('efectivo');
+  });
+
+  // El 1 a 1 no se revalida en la mixta tampoco: el numero es uno solo y sale
+  // de `swappedItems`. El reemplazo viejo NO viaja en `items`, o la API lo
+  // cobraria como si se hubiera vendido.
+  it('never sends the replacement line as something that was sold', async () => {
+    mockedRouteSale = buildMixed();
+    await render(<SaleDetailScreen />);
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Sin cambios');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [, payload] = mockedApiPatch.mock.calls[0];
+    expect(payload.items).toEqual([{ productCode: 'G10', quantity: 2 }]);
+  });
+
+  it('only charges what was sold, never the free replacement', async () => {
+    mockedRouteSale = buildMixed();
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$15.000');
+
+    await fireEvent.press(screen.getByTestId('faulty-row-G15-increment'));
+
+    // Una fallada mas no suma un peso: el reemplazo sale sin cargo.
+    expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$15.000');
+
+    await fireEvent.press(screen.getByTestId('product-row-G10-increment'));
+
+    expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$22.500');
+  });
+
+  // Una fila vieja no trae la bandera en ninguna linea. Tiene que leerse igual
+  // que siempre: todo vendido, ningun reemplazo, cero cambios en el payload.
+  it('reads a row saved before the flag existed exactly as it did before', async () => {
+    mockedRouteSale = buildSale({
+      items: [{ productCode: 'G10', quantity: 2, unitPrice: 7500 }],
+    });
+    await render(<SaleDetailScreen />);
+
+    expect(screen.getByTestId('product-row-G10-quantity')).toHaveTextContent('2');
+    expect(screen.getByTestId('sale-detail-total')).toHaveTextContent('$15.000');
+
+    await fireEvent.changeText(screen.getByTestId('sale-detail-edit-reason'), 'Correccion');
+    await fireEvent.press(screen.getByTestId('sale-detail-save-button'));
+
+    await waitFor(() => expect(mockedApiPatch).toHaveBeenCalledTimes(1));
+    const [, payload] = mockedApiPatch.mock.calls[0];
+    expect(payload.items).toEqual([{ productCode: 'G10', quantity: 2 }]);
+    // Nada que cambiar: sin falladas, la lista no viaja y la API no toca lo
+    // que volvio.
+    expect(Object.prototype.hasOwnProperty.call(payload, 'swappedItems')).toBe(false);
+  });
+});
